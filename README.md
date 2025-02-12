@@ -1,49 +1,38 @@
-Below is the revised, professional specification document for **HTMLeX – HTML eXtensible Declarative HATEOAS UI**. This document has been updated to incorporate the following enhancements:
-
-- **URL State Updates:** Instead of using a separate history attribute, every URL state update automatically pushes a new history event by default. (We also critique this idea and propose a solution below.)  
-- **Signal‑Based Chaining:** We now use standard publish/subscribe terminology by renaming the “signal” attribute to **publish** and the “listen” attribute to **subscribe**, while retaining **trigger** for event overrides.  
-- **Polling:** A new **repeat** attribute has been added to limit the number of polling cycles.  
-- **Server-Sent Events (SSE) & Emit Header:** A note is included to indicate that API calls can return an “emit” header. The framework will read this header and automatically publish that event, integrating it into the publish/subscribe model.
-
-The following sections detail definitions, behavior, defaults, and code examples.
-
----
-
 # HTMLeX – HTML eXtensible Declarative HATEOAS UI Specification  
-*Version 1.1 • Last Updated: 2025-02-10*
+*Version 1.2.2 • Last Updated: 2025-02-12*
 
 ---
 
 ## Table of Contents
 
-1. [Preamble](#preamble)
-2. [Design Principles and Requirements](#design-principles-and-requirements)
-3. [Attribute Definitions, Behavior, and Defaults](#attribute-definitions-behavior-and-defaults)
-    - [API Calls & Data Collection](#api-calls--data-collection)
-    - [DOM Updates](#dom-updates)
-    - [URL State Updates](#url-state-updates)
-    - [Publish/Subscribe Chaining](#publishsubscribe-chaining)
-    - [Feedback: Loading & Error States](#feedback-loading--error-states)
-    - [Rate Limiting](#rate-limiting)
-    - [Polling](#polling)
-    - [WebSocket Integration](#websocket-integration)
-    - [Retry & Timeout](#retry--timeout)
-    - [Auto‑Fire, Prefetch & Lazy Loading](#auto-fire-prefetch--lazy-loading)
-    - [Caching](#caching)
-    - [Extras (Inline Parameters)](#extras-inline-parameters)
-    - [Timers](#timers)
-    - [Sequential Updates](#sequential-updates)
-    - [Lifecycle Hooks (Optional Extension)](#lifecycle-hooks-optional-extension)
-4. [Example: Todo App](#example-todo-app)
-5. [Summary](#summary)
-6. [Contributing](#contributing)
-7. [License](#license)
+1. [Preamble](#preamble)  
+2. [Design Principles and Requirements](#design-principles-and-requirements)  
+3. [Attribute Definitions, Behavior, and Defaults](#attribute-definitions-behavior-and-defaults)  
+    - [API Calls & Data Collection](#api-calls--data-collection)  
+    - [DOM Updates](#dom-updates)  
+    - [URL State Updates](#url-state-updates)  
+    - [Publish/Subscribe Chaining](#publishsubscribe-chaining)  
+    - [Rate Limiting](#rate-limiting)  
+    - [Polling](#polling)  
+    - [WebSocket Integration & Generic Retry/Timeout](#websocket-integration--generic-retrytimeout)  
+    - [Auto‑Fire, Prefetch & Lazy Loading](#auto‑fire-prefetch--lazy-loading)  
+    - [Caching](#caching)  
+    - [Extras (Inline Parameters)](#extras-inline-parameters)  
+    - [Timers](#timers)  
+    - [Sequential Updates](#sequential-updates)  
+    - [Lifecycle Hooks (Optional Extension)](#lifecycle-hooks-optional-extension)  
+    - [Streaming & Progressive Rendering](#streaming--progressive-rendering)  
+4. [Security Considerations](#security-considerations)  
+5. [Example: Todo App](#example-todo-app)  
+6. [Summary](#summary)  
+7. [Contributing](#contributing)  
+8. [License](#license)
 
 ---
 
 ## 1. Preamble
 
-_HATEOAS (Hypermedia as the Engine of Application State) is an architectural principle where the server provides complete HTML responses that include hypermedia controls—links, forms, and actions—that describe available state transitions. In this approach, no explicit client‑side JSON state is required. **HTMLeX** adheres strictly to SSR and HATEOAS principles by driving the UI solely via server‑rendered HTML and declarative attributes. Complex UIs should be built as Web Components that encapsulate rich client‑side logic while inter-operating with HTMLeX via attributes such as **target**, **publish**, and **subscribe**._
+_HATEOAS (Hypermedia as the Engine of Application State) is an architectural principle in which the server returns complete HTML responses—including hypermedia controls (links, forms, etc.)—that describe available state transitions. In this model, the UI is driven entirely by server‑rendered HTML, and there is no need for explicit client‑side JSON state. **HTMLeX** extends HTML with a rich set of declarative attributes to manage API calls, DOM updates, URL state, and inter‑component event communication via a publish/subscribe model. Complex interactions are implemented via Web Components that encapsulate advanced client‑side logic while interfacing with HTMLeX through these attributes._
 
 ---
 
@@ -53,22 +42,29 @@ _HATEOAS (Hypermedia as the Engine of Application State) is an architectural pri
   All state transitions and UI updates are delivered as complete HTML responses from the server.
 
 - **Declarative Markup:**  
-  Interaction behaviors are defined entirely via HTML attributes; no imperative JavaScript is required in the core framework.
+  Every interactive behavior is defined solely via HTML attributes; no imperative JavaScript is required in the core framework.
 
-- **Hypermedia‑Driven:**  
-  The server returns hypermedia controls that describe available actions, ensuring that state transitions are self‑descriptive.
+- **HATEOAS‑Driven:**  
+  The server supplies hypermedia controls in its HTML responses, driving the UI without explicit client‑side state (e.g., JSON).
 
 - **URL State Management:**  
-  URL updates are integrated into the workflow; by default, every URL state change creates a new history entry.
-
-- **Advanced Features:**  
-  Features such as lazy loading, caching, polling, rate limiting, and timed actions are supported via simple attributes.
+  URL updates (query parameters and path) are automatically recorded in browser history by default.  
+  **History Defaults Improvement:**  
+  - **User‑initiated actions (e.g., clicks):** Default to pushing a new history entry.  
+  - **Non‑user‑initiated actions (e.g., polling, auto‑fire, lazy):** Default to replacing the current history entry to avoid history pollution.
 
 - **Publish/Subscribe Model:**  
-  Signals (events) are handled using a publish/subscribe paradigm to chain updates and coordinate actions.
+  A declarative publish/subscribe system enables event chaining; events are published by elements and subscribed to by others via a simple **Emit** header mechanism.
+
+- **Robustness and Error Handling:**  
+  Instead of separate feedback attributes (like onerror or loading), HTMLeX leverages streamed responses (with the **Emit** header) to communicate progress and errors.  
+  - **Structured Error Markers:** Error fragments include a status attribute (e.g., `<fragment status="500">`) so that clients can distinguish success from failure even though the HTTP response always returns 200.
+
+- **Performance Optimizations:**  
+  The framework employs smart caching, request batching (internally), and a partial DOM update (diffing/morphing) algorithm to minimize reflows and preserve live state.
 
 - **Extensibility:**  
-  Lifecycle hooks and Web Components are supported for advanced client‑side behaviors when needed.
+  Optional lifecycle hooks and Web Component integration allow developers to extend functionality for advanced client‑side behaviors.
 
 ---
 
@@ -77,93 +73,84 @@ _HATEOAS (Hypermedia as the Engine of Application State) is an architectural pri
 ### API Calls & Data Collection
 
 - **HTTP Verb Attributes (GET, POST, PUT, DELETE, etc.)**  
-  - **Purpose:** Specifies the API endpoint for the call.  
-  - **Behavior:** When activated, the element gathers form inputs from its subtree and sends them as multipart FormData.  
-  - **Default:** Must be explicitly set.
+  - **Purpose:** Specifies the API endpoint.  
+  - **Behavior:** When activated (via a user event or auto‑fire), the element gathers form inputs from its subtree and sends them as multipart FormData.  
+  - **Default:** Must be explicitly provided by the developer.
 
 - **source**  
-  - **Purpose:** Collect additional form inputs from elsewhere in the DOM.  
-  - **Value:** Space‑separated list of CSS selectors.  
-  - **Default:** Empty (optional).
+  - **Purpose:** Collects additional form inputs from outside the element’s subtree.  
+  - **Value:** A space‑separated list of CSS selectors.  
+  - **Default:** Empty.  
+  - **Note:** If the element is self‑contained, this attribute is optional.
 
 ### DOM Updates
 
 - **target**  
-  - **Purpose:** Specifies where and how to apply returned HTML.  
-  - **Value:** Space‑separated update instructions in the form:  
+  - **Purpose:** Defines where and how to apply the HTML returned by an API call.  
+  - **Value:** A space‑separated list of update instructions in the format:  
     ```
     CSS_SELECTOR(REPLACEMENT_STRATEGY)
     ```  
   - **Replacement Strategies:**  
-    - **innerHTML** (default): Replaces inner content, using partial updates when possible to preserve live state (e.g., video/audio).  
-    - **outerHTML:** Replaces the entire element.  
+    - **innerHTML** (default): Replaces the inner content using a diffing (morphing) algorithm to update only changed portions while preserving live state (e.g., video/audio).  
+    - **outerHTML:** Replaces the entire target element.  
     - **append:** Appends content to the target.  
     - **prepend:** Prepends content to the target.  
     - **before:** Inserts content immediately before the target element.  
     - **after:** Inserts content immediately after the target element.  
-    - **remove:** Removes the target element from the DOM (e.g., used when a DELETE call returns an empty string).
+    - **remove:** Removes the target element from the DOM.  
   - **Default:** If omitted, updates the triggering element’s innerHTML.
 
 ### URL State Updates
 
-- **push**  
-  - **Purpose:** Adds or updates query parameters in the URL.  
-  - **Value:** Space‑separated key=value pairs (e.g., `page=2 sort=asc`).  
-  - **Default:** Empty.
-  - **Note:** _Every URL state update automatically pushes a new history event (i.e., a new browser history entry is created) so that a separate history attribute is not necessary. This ensures that every state transition is recorded, following the HATEOAS principle. (Developers may override this behavior in future revisions if needed.)_
+- **push**, **pull**, **path**  
+  - **Purpose:** Manage query parameters and path updates.  
+  - **Behavior:** Updates automatically create history events as controlled by the **history** attribute.
 
-- **pull**  
-  - **Purpose:** Removes specified query parameters from the URL.  
-  - **Value:** Space‑separated list of keys.  
-  - **Default:** Empty.
-
-- **path**  
-  - **Purpose:** Sets the URL path.  
-  - **Value:** A literal string (no templating).  
-  - **Default:** Empty.
+- **history**  
+  - **Purpose:** Controls how URL state changes affect browser history.  
+  - **Value:** Accepts `push`, `replace`, or `none`.  
+  - **Behavior:**  
+    - **push:** Adds a new history entry (default for explicit, user‑initiated events such as clicks).  
+    - **replace:** Replaces the current history entry (default for non‑user‑initiated actions such as polling or auto‑fire).  
+    - **none:** Leaves the history unchanged.  
+  - **Default:** Context‑sensitive, as noted above.
 
 ### Publish/Subscribe Chaining
 
 - **publish**  
-  - **Purpose:** Declares the event that the element will publish upon completion of its API call or event action.  
-  - **Value:** A plain signal name prefixed with “@” (e.g., `@todosLoaded`).  
+  - **Purpose:** Declares the event that the element will publish after its API call or event action completes.  
+  - **Value:** A plain signal name (e.g., `todoCreated`).  
   - **Default:** Empty.
 
 - **subscribe**  
-  - **Purpose:** Specifies one or more signals the element subscribes to before triggering its API call.  
-  - **Value:** Space‑separated list of signal names (each with “@”).  
+  - **Purpose:** Specifies one or more events the element listens for before triggering its API call.  
+  - **Value:** A space‑separated list of event names.  
   - **Default:** Empty.  
-  - **Note:** Signal priority is determined by order (leftmost is highest).
+  - **Note:** Event priority is inferred by order (leftmost is highest).
 
 - **trigger**  
-  - **Purpose:** Overrides the default event that causes the element to publish its event.  
+  - **Purpose:** Overrides the default event that triggers an API call or event publication.  
   - **Value:** A DOM event name (e.g., `click`, `mouseover`, `scrollIntoView`).  
-  - **Default:** Depends on element type (commonly `click`).
+  - **Default:** Typically `click` for buttons, `submit` for forms.
 
-- **Emit Header & Server-Sent Events:**  
-  - **Note:** API calls may return an HTTP header (e.g., `Emit`) that specifies a signal to be published by the framework immediately upon response. This allows the server to drive additional client‑side actions.
-
-### Feedback (Loading & Error States)
-
-- **loading**  
-  - **Purpose:** Specifies the UI update to display while an API call is in progress.  
-  - **Value:** Space‑separated update instructions (same syntax as **target**).  
-  - **Default:** Empty.
-
-- **onerror**  
-  - **Purpose:** Specifies the UI update to display if an API call fails.  
-  - **Value:** Space‑separated update instructions (same syntax as **target**).  
-  - **Default:** Empty.
+- **Emit Header**  
+  - **Purpose:** The server includes an HTTP **Emit** header in its response to instruct HTMLeX to automatically publish a specified event.  
+  - **Example:**  
+    ```
+    Emit: todosUpdated; delay=1000
+    ```  
+    This instructs the framework to publish the `todosUpdated` event 1000 milliseconds after processing the response.
 
 ### Rate Limiting
 
 - **debounce**  
-  - **Purpose:** Prevents rapid, successive API calls by delaying execution until events settle.  
+  - **Purpose:** Delays the API call until a specified quiet period has elapsed.  
   - **Value:** Time in milliseconds.  
   - **Default:** `0` (disabled).
 
 - **throttle**  
-  - **Purpose:** Enforces a minimum interval between API calls.  
+  - **Purpose:** Ensures a minimum interval between successive API calls.  
   - **Value:** Time in milliseconds.  
   - **Default:** `0` (disabled).
 
@@ -172,39 +159,40 @@ _HATEOAS (Hypermedia as the Engine of Application State) is an architectural pri
 - **poll**  
   - **Purpose:** Automatically triggers the API call at a fixed interval.  
   - **Value:** Time in milliseconds.  
-  - **Default:** Not enabled if omitted.
+  - **Default:** Disabled if omitted.
 
 - **repeat**  
   - **Purpose:** Limits the number of polling iterations.  
-  - **Value:** An integer representing the maximum number of repeats.  
-  - **Default:** Unlimited (if omitted).
+  - **Value:** An integer (with `0` indicating unlimited).  
+  - **Default:** `0` (unlimited).
 
-### WebSocket Integration
+### WebSocket Integration & Generic Retry/Timeout
 
 - **socket**  
-  - **Purpose:** Connects the element to a WebSocket endpoint for real‑time updates.  
+  - **Purpose:** Connects the element to a WebSocket endpoint for full‑duplex, real‑time updates.  
   - **Value:** A WebSocket URL.  
   - **Default:** None.
 
-### Retry & Timeout
-
 - **retry**  
-  - **Purpose:** Specifies the number of retry attempts if an API call fails.  
+  - **Purpose:** Specifies the number of times to retry a failed API call or WebSocket connection attempt.  
   - **Value:** Integer.  
-  - **Default:** `0` (no retries).
+  - **Default:** `0` (no retries) if not specified.
 
 - **timeout**  
-  - **Purpose:** Sets the maximum wait time for an API call before it is deemed failed.  
+  - **Purpose:** Sets the maximum wait time (in milliseconds) for an API call or WebSocket connection before it is considered failed.  
   - **Value:** Time in milliseconds.  
-  - **Default:** `0` (disabled).
+  - **Default:** `0` (disabled) if not specified.
+
+- **WebSocket Error Handling:**  
+  - **Behavior:** If retries are exhausted for a WebSocket connection attempt, HTMLeX automatically publishes a standard event (e.g., `websocket:error`) so that the UI can display appropriate feedback.
 
 ### Auto‑Fire, Prefetch & Lazy Loading
 
 - **auto**  
-  - **Purpose:** Automatically fires an API call when the element is inserted into the DOM.  
+  - **Purpose:** Automatically fires the API call when the element is inserted into the DOM.  
   - **Value Options:**  
     - `auto` or `auto=true`: Fire immediately upon insertion.  
-    - `auto=prefetch`: Fire immediately and cache the response, but do not update the UI until explicitly triggered for a faster UX.  
+    - `auto=prefetch`: Fire immediately and cache the response but delay the UI update until explicitly triggered for improved perceived performance.  
     - `auto=lazy`: Defer the API call until the element is near the viewport.  
   - **Default:** Not auto‑fired unless specified.
 
@@ -216,36 +204,128 @@ _HATEOAS (Hypermedia as the Engine of Application State) is an architectural pri
 ### Extras (Inline Parameters)
 
 - **extras**  
-  - **Purpose:** Injects additional inline key=value pairs into the API request payload (similar to htmx’s `hx-vals`).  
-  - **Value:** Space‑separated list of key=value pairs (e.g., `locale=en_US theme=dark`).  
+  - **Purpose:** Injects additional inline key=value pairs into the API request payload.  
+  - **Value:** A space‑separated list of key=value pairs (e.g., `locale=en_US theme=dark`).  
   - **Default:** Empty.
 
 ### Timers
 
 - **timer**  
-  - **Purpose:** Triggers the publication of the element’s event after a specified delay, enabling time‑based actions (e.g., auto‑hiding notifications).  
+  - **Purpose:** Triggers the publication of the element’s event after a specified delay, enabling time‑based UI actions such as auto‑hiding notifications.  
   - **Value:** Time in milliseconds.  
   - **Default:** Not used unless specified.
 
 ### Sequential Updates
 
 - **sequential**  
-  - **Purpose:** Ensures that successive API responses are processed in FIFO order by queuing each update and applying it one per animation frame via requestAnimationFrame.  
-  - **Value:** Boolean flag.  
-  - **Default:** Disabled (by default, the last response may overwrite previous updates).
+  - **Purpose:** Ensures that API responses are processed in FIFO order. By default, updates are applied per animation frame (using requestAnimationFrame).  
+  - **Enhancement:**  
+    - **Configurable Delay:** An optional delay (in milliseconds) may be provided (e.g., `sequential="150"`) to accommodate cases where the default animation frame timing is too fast relative to server-side timing.
+  - **Default:** Disabled unless specified.
 
 ### Lifecycle Hooks (Optional Extension)
 
 - **onbefore**, **onafter**, **onbeforeSwap**, **onafterSwap**  
-  - **Purpose:** Allow developers to hook into the lifecycle of an API call (before request, after response, before swap, after swap) for custom behaviors like animations or logging.  
-  - **Value:** Expressions or update instructions.  
-  - **Default:** Not implemented by default.
+  - **Purpose:** Provide hooks into various stages of the API call lifecycle (before request, after response, before DOM swap, after DOM swap) for custom behaviors such as animations or logging.  
+  - **Implementation Clarity:**  
+    - **Example Attribute Syntax:**  
+      ```html
+      <my-component onbefore="console.log('Before API call', event)" onafter="console.log('After API call', event)">
+      </my-component>
+      ```  
+    - These hooks can be applied to any element enhanced by HTMLeX or custom Web Components.
+
+### Streaming & Progressive Rendering
+
+When using streamed responses with HTTP/2 (or HTTP/3), HTMLeX can progressively update the UI by processing multiple chunks of a single HTTP response. This strategy enhances the user experience by providing immediate feedback and seamless content updates. The behavior is as follows:
+
+1. **Single HTTP Response, Multiple Chunks:**  
+   - **Initial HTTP Response:**  
+     The server immediately responds with a status code of 200 and sends HTTP headers. This status remains fixed for the entire response—even if later parts of the content indicate an error.
+   - **Streaming Chunks:**  
+     Instead of waiting to compile the entire response, the server breaks the response body into multiple parts (chunks or frames) that are sent sequentially over the same connection.
+
+2. **Sending a Loading Fragment First:**  
+   - **Early Feedback:**  
+     The very first chunk sent by the server is a “loading” fragment. For example:
+     ```xml
+     <fragments>
+       <fragment>
+         <elem id="status">Loading...</elem>
+       </fragment>
+     </fragments>
+     ```
+     This fragment enables the client to display a loading indication immediately.
+
+3. **Processing and Sending the Final Fragment:**  
+   - **Asynchronous Processing:**  
+     While the loading fragment is rendered, the server continues background processing (e.g., querying a database, calling other APIs, or performing long‑running computations).  
+   - **Final Update:**  
+     Once processing is complete, the server sends another chunk. This final fragment contains either:  
+     - **The Payload:**  
+       ```xml
+       <fragments>
+         <fragment>
+           <elem id="content">Final Payload Loaded</elem>
+         </fragment>
+       </fragments>
+       ```  
+     - **Or an Error Message:**  
+       If an error occurred, the server sends an error fragment with a structured status marker:
+       ```xml
+       <fragments>
+         <fragment status="500">
+           <elem id="error">An error occurred!</elem>
+         </fragment>
+       </fragments>
+       ```
+     The HTMLeX framework uses the **Emit** header (or its equivalent mechanism) to communicate such updates to all subscribing elements.
+
+4. **Closing the Connection:**  
+   - After sending the final fragment, the server closes the stream. The client now has the complete sequence of fragments required to fully update the UI.
+
+5. **Implications of This Behavior:**  
+   - **Progressive Rendering:**  
+     Users receive an immediate loading indication, which improves perceived performance.  
+   - **Fixed HTTP Status:**  
+     The HTTP headers (including the 200 status) are sent immediately; error fragments include a structured status attribute (e.g., `status="500"`) so that clients can distinguish success from failure.  
+   - **Protocol Advantages:**  
+     HTTP/2 and HTTP/3 support multiple data frames over a single persistent connection, making this streaming mechanism efficient.
+
+6. **Integration with HTMLeX:**  
+   - HTMLeX expects responses in a fragment format (`<fragments><fragment><elem>…`), allowing the client to seamlessly transition from the loading state to the final content using the diffing (morphing) algorithm.
 
 ---
 
-## 4. Example: Todo App
+## 4. Security Considerations
 
-Below is an example Todo application that demonstrates HTMLeX in action. This app uses semantic HTML and Tailwind CSS for styling.
+- **CSRF Protection:**  
+  - API calls initiated by HTMLeX should implement standard CSRF protection measures.  
+  - Developers are encouraged to use CSRF tokens (for example, by embedding a token in a meta tag such as `<meta name="csrf-token" content="...">`) or to rely on server‑side protections (such as same‑site cookies) to mitigate CSRF attacks.  
+  - HTMLeX does not automatically add CSRF tokens but may include them in API request payloads if configured.
+
+- **Sanitization of Server Responses:**  
+  - Server responses that update the DOM must be sanitized to prevent injection of malicious code (XSS).  
+  - Since HTMLeX employs a diffing algorithm for partial DOM updates, it is critical that HTML fragments provided by the server are free of unsafe content.  
+  - Developers should sanitize output on the server side using robust sanitization libraries and may optionally employ client‑side sanitization hooks via lifecycle events if needed.
+
+- **Cross‑Origin Request Handling:**  
+  - Cross‑origin requests are not directly managed by HTMLeX.  
+  - Developers must ensure that API endpoints intended for cross‑origin use include appropriate CORS headers (such as `Access-Control-Allow-Origin`) to permit such requests.  
+  - In the absence of proper CORS configuration, the browser’s same‑origin policy will apply.
+
+- **Debugging and Excessive Logging:**  
+  - When the **debug** attribute is set to `true` on an element (e.g., `<div GET="/api/data" debug="true">`), HTMLeX produces extensive logging around that element’s operations.  
+  - This logging includes detailed API call information, DOM update events, and publish/subscribe interactions.  
+  - Excessive logging should be used only in development environments, as it may expose sensitive information if enabled in production.
+
+---
+
+## 5. Example: Todo App
+
+Below is an example Todo application built using semantic HTML and Tailwind CSS. This example demonstrates how HTMLeX attributes are used to construct a fully declarative, server‑driven Todo app.
+
+> **Note:** In this example, the form is self‑contained; therefore, the redundant `source` attribute has been removed.
 
 ```html
 <!DOCTYPE html>
@@ -265,9 +345,8 @@ Below is an example Todo application that demonstrates HTMLeX in action. This ap
   <main class="p-4">
     <!-- New Todo Form -->
     <section class="mb-6">
-      <form POST="/todos/create" source="#newTodoForm" target="#todoList(innerHTML)"
-            loading="#todoList(innerHTML)" onerror="#todoList(innerHTML)"
-            extras="locale=en_US" publish="@todoCreated" auto="auto" cache="30000"
+      <form POST="/todos/create" target="#todoList(innerHTML)"
+            extras="locale=en_US" publish="todoCreated" auto="auto" cache="30000"
             class="bg-white p-4 rounded shadow">
         <div class="mb-4">
           <label for="todo" class="block text-sm font-medium text-gray-700">New Todo</label>
@@ -285,16 +364,16 @@ Below is an example Todo application that demonstrates HTMLeX in action. This ap
     <section id="todoListContainer" class="bg-white p-4 rounded shadow">
       <h2 class="text-2xl font-semibold mb-4">Todo List</h2>
       <div id="todoList" class="space-y-3">
-        <!-- Server-rendered todo items will appear here.
+        <!-- Server‑rendered todo items will appear here.
              A DELETE call may remove an item using target="#todo-123(remove)".
-             A flash message may auto-hide after 5 seconds using timer="5000". -->
+             Streamed responses update this area with a loading fragment followed by the final payload or an error fragment (with a status marker) via the Emit header mechanism. -->
       </div>
     </section>
 
     <!-- Refresh Button with Polling -->
     <section class="mt-6">
       <button GET="/todos/list" target="#todoList(innerHTML)" poll="60000" repeat="0" debounce="500"
-              publish="@todosLoaded"
+              publish="todosLoaded" history="push"
               class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
         Refresh Todos
       </button>
@@ -312,80 +391,77 @@ Below is an example Todo application that demonstrates HTMLeX in action. This ap
 ### Explanation
 
 - **New Todo Form:**  
-  - Uses a POST API call to create a new Todo item.  
-  - **source** collects form inputs from within the form, and **extras** injects additional inline parameters (e.g., locale).  
-  - **target** specifies that the server response should update the Todo List using `innerHTML`.  
-  - **auto="auto"** fires the API call immediately upon insertion, and **cache="30000"** caches the response for 30 seconds.  
-  - Upon completion, the form publishes the event `@todoCreated` (using our publish/subscribe model).
+  - Uses a POST call to create a new todo item.  
+  - **extras** injects additional inline parameters (e.g., locale).  
+  - **target** specifies that the response updates the Todo List using `innerHTML` with a diffing algorithm.  
+  - **auto="auto"** fires the API call immediately upon DOM insertion, and **cache="30000"** caches the response for 30 seconds.  
+  - Upon success, the form publishes the event `todoCreated`.
 
 - **Todo List:**  
-  - Displays server‑rendered Todo items.  
-  - A DELETE API call could remove an item using `target="#todo-123(remove)"`.  
-  - **timer** (not shown here) can auto‑hide flash messages after a specified delay.
+  - Displays the server‑rendered list of todos.  
+  - A DELETE call can remove a todo using `target="#todo-123(remove)"`.  
+  - Streamed responses update this area by first delivering a loading fragment, then the final payload (or an error fragment with a status marker such as `<fragment status="500">`) via the **Emit** header mechanism.
 
 - **Refresh Button:**  
-  - Uses a GET API call with **poll="60000"** to refresh the Todo List every 60 seconds and **debounce="500"** to limit rapid re‑calls.  
-  - **repeat="0"** indicates unlimited polling (if a non‑zero value is set, it limits the polling iterations).  
-  - When the call completes, the button publishes the event `@todosLoaded`.
+  - Uses a GET call with **poll="60000"** to refresh the list every 60 seconds, **debounce="500"** to limit rapid calls, and **repeat="0"** for unlimited polling.  
+  - The **history** attribute is set to `push` for explicit user interactions.  
+  - Publishes the event `todosLoaded` on completion.
 
-- **URL State Updates:**  
-  While not explicitly demonstrated here, every API call that updates the URL via **push**, **pull**, or **path** automatically creates a new history event (i.e., no separate history attribute is required).
+- **Debugging Example:**  
+  - For example, `<div GET="/api/data" debug="true">` will enable extensive logging around that element’s operations in development environments.
 
 ---
 
-## 5. Summary
+## 6. Summary
 
 - **API & Data Collection:**  
-  Use HTTP verb attributes with **source** and **extras** to send FormData.
+  HTTP verb attributes trigger API calls; **extras** gathers inline parameters.
 
 - **DOM Updates:**  
-  **target** defines where and how to apply HTML using replacement strategies (e.g., innerHTML, outerHTML, remove).
+  **target** specifies how to update the DOM using strategies such as innerHTML (with diffing), outerHTML, append, prepend, before, after, and remove.
 
 - **URL State Management:**  
-  **push**, **pull**, and **path** update the URL automatically, creating a new history entry for each state change.
+  **push**, **pull**, and **path** update the URL automatically, with the **history** attribute defaulting to context‑sensitive behavior (push for user actions; replace for non‑user actions).
 
 - **Publish/Subscribe Chaining:**  
-  **publish** (formerly signal) and **subscribe** (formerly listen) enable declarative chaining of actions, with **trigger** to override default events. (Signal priority is inferred by the order in **subscribe**.)
-
-- **Feedback:**  
-  **loading** and **onerror** display visual updates during API calls.
+  **publish** and **subscribe** (with **trigger**) form a declarative event system. The **Emit** header (e.g., `Emit: todosUpdated; delay=1000`) replaces traditional feedback attributes by signaling updates to subscribed elements.
 
 - **Rate Limiting & Polling:**  
-  **debounce**, **throttle**, **poll**, and the new **repeat** attribute manage API call frequency and auto‑refresh behavior.
+  **debounce**, **throttle**, **poll**, and **repeat** control API call frequency and auto‑refresh behavior.
 
 - **Auto‑Fire & Caching:**  
-  **auto** triggers API calls on DOM insertion (with options for immediate, prefetch, or lazy loading), and **cache** stores responses.
+  **auto** triggers API calls on DOM insertion (immediate, prefetch, or lazy), and **cache** stores responses locally.
 
 - **Extras:**  
   **extras** injects inline key=value pairs into API calls.
 
 - **Timers:**  
-  **timer** delays the emission of an event after the primary action, enabling time‑based UI updates.
+  **timer** delays the publication of events for time‑based UI actions.
 
-- **WebSockets:**  
-  **socket** integrates real‑time, server‑pushed updates.
-
-- **Robustness:**  
-  **retry** and **timeout** handle retries and maximum wait times.
+- **WebSocket Integration & Generic Retry/Timeout:**  
+  **socket** enables real‑time updates; the generic **retry** and **timeout** attributes apply to both API and WebSocket connections. On WebSocket failure, a `websocket:error` event is published.
 
 - **Sequential Updates (Optional):**  
-  **sequential** queues API responses for FIFO processing using requestAnimationFrame.
+  **sequential** queues responses for FIFO processing and may be configured with an optional delay (e.g., `sequential="150"`).
 
-- **Server-Sent Events (SSE):**  
-  API responses may include an `Emit` header. When detected, HTMLeX automatically publishes the specified event, integrating server‑sent signals into the publish/subscribe model.
+- **Lifecycle Hooks (Optional):**  
+  Hooks such as **onbefore** and **onafter** allow custom behaviors and logging.  
+  *Example:* `<my-component onbefore="console.log('Before API call', event)">`
+
+- **Streaming & Progressive Rendering (Optional):**  
+  HTMLeX supports streamed responses over HTTP/2 or HTTP/3. The server sends an immediate loading fragment, then delivers the final payload or error fragment (with a structured status attribute, e.g., `<fragment status="500">`) over a single connection. The **Emit** header instructs subscribed elements to update accordingly.
+
+- **Performance Optimizations:**  
+  A built‑in diffing algorithm enables smart, partial DOM updates that minimize reflows while preserving live element state.
 
 ---
 
-## 6. Contributing
+## 7. Contributing
 
 Contributions, feedback, and improvements are welcome. Please refer to [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 
-## 7. License
+## 8. License
 
 This project is licensed under the [MIT License](LICENSE).
-
----
-
-This specification for **HTMLeX – HTML eXtensible Declarative HATEOAS UI** provides a comprehensive framework for building server‑rendered, hypermedia‑driven web applications using only HTML attributes. It extends traditional HTML with a rich set of declarative features for API calls, DOM updates, URL state management, and event chaining, all while remaining mostly HTML5‑compatible and extensible through Web Components. Feedback and contributions are encouraged to further refine HTMLeX.
