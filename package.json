@@ -1,0 +1,27 @@
+{
+  "name": "htmlex",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "*Version 1.0 • Last Updated: 2025-02-10*",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "nodemon server/server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/monstercameron/HTMLeX.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/monstercameron/HTMLeX/issues"
+  },
+  "homepage": "https://github.com/monstercameron/HTMLeX#readme",
+  "dependencies": {
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "nodemon": "^3.1.9",
+    "ws": "^8.18.0"
+  }
+}
