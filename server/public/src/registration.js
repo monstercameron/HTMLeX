@@ -33,14 +33,14 @@ export function registerElement(element) {
       Logger.debug("Ignoring event from child element:", event.target);
       return;
     }
-    Logger.debug(`Triggering ${method ? method : 'signal'} action on element:`, element);
+    Logger.debug(`Triggering ${method ? method : 'publish'} action on element:`, element);
     if (method) {
       if (triggerEvent === 'submit') event.preventDefault();
       await handleAction(element, method, element.getAttribute(method));
-    } else if (element.hasAttribute('signal')) {
-      const signalName = element.getAttribute('signal');
-      Logger.info(`Emitting signal "${signalName}" from signal-only element on event "${triggerEvent}".`);
-      emitSignal(signalName);
+    } else if (element.hasAttribute('publish')) {
+      const publishSignal = element.getAttribute('publish');
+      Logger.info(`Emitting publish signal "${publishSignal}" on event "${triggerEvent}".`);
+      emitSignal(publishSignal);
     }
   };
 
@@ -71,44 +71,66 @@ export function registerElement(element) {
     }
     if (element.hasAttribute('auto')) {
       const autoVal = element.getAttribute('auto');
-      const delay = parseInt(autoVal, 10) || 0;
-      setTimeout(() => {
-        Logger.debug("Auto firing action for element:", element);
-        handler(new Event(triggerEvent));
-      }, delay);
-      Logger.info(`Auto firing set for element with delay ${delay}ms.`);
+      if (autoVal === 'lazy') {
+        // Use IntersectionObserver for lazy loading.
+        const observer = new IntersectionObserver((entries, observer) => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting) {
+              Logger.debug("Lazy auto firing action for element:", element);
+              handler(new Event(triggerEvent));
+              observer.unobserve(entry.target);
+            }
+          });
+        });
+        observer.observe(element);
+        Logger.info("Set up lazy auto firing for element.");
+      } else if (autoVal === 'prefetch') {
+        // Auto prefetch: fire immediately and cache response.
+        handler(new Event(triggerEvent)).then(() => {
+          Logger.info("Prefetch completed for element:", element);
+        });
+      } else {
+        const delay = parseInt(autoVal, 10) || 0;
+        setTimeout(() => {
+          Logger.debug("Auto firing action for element:", element);
+          handler(new Event(triggerEvent));
+        }, delay);
+        Logger.info(`Auto firing set for element with delay ${delay}ms.`);
+      }
     }
-  } else if (element.hasAttribute('signal')) {
+  } else if (element.hasAttribute('publish')) {
     element.addEventListener(triggerEvent, wrappedHandler);
-    Logger.info(`Registered signal-only element for signal "${element.getAttribute('signal')}" with event "${triggerEvent}".`);
+    Logger.info(`Registered publish-only element for signal "${element.getAttribute('publish')}" with event "${triggerEvent}".`);
     if (element.hasAttribute('auto')) {
       const autoVal = element.getAttribute('auto');
       const delay = parseInt(autoVal, 10) || 0;
       setTimeout(() => {
-        const signalName = element.getAttribute('signal');
-        Logger.info(`Auto firing signal "${signalName}" from signal-only element with delay ${delay}ms.`);
-        emitSignal(signalName);
+        const publishSignal = element.getAttribute('publish');
+        Logger.info(`Auto firing publish signal "${publishSignal}" from element with delay ${delay}ms.`);
+        emitSignal(publishSignal);
       }, delay);
     }
   }
-
-  if (element.hasAttribute('socket')) {
-    const socketUrl = element.getAttribute('socket');
-    handleWebSocket(element, socketUrl);
-  }
-  if (element.hasAttribute('listen')) {
-    const signals = element.getAttribute('listen').split(/\s+/);
+  
+  // Handle subscriptions using the spec-defined "subscribe" attribute.
+  if (element.hasAttribute('subscribe')) {
+    const signals = element.getAttribute('subscribe').split(/\s+/);
     signals.forEach(signalName => {
       registerSignalListener(signalName, () => {
         Logger.debug(`Signal "${signalName}" triggered listener on element:`, element);
-        const methodAttr = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].find(m => element.hasAttribute(m));
+        const methodAttr = methodAttributes.find(m => element.hasAttribute(m));
         if (methodAttr) {
           const endpoint = element.getAttribute(methodAttr);
           handleAction(element, methodAttr, endpoint);
         }
       });
-      Logger.debug(`Registered listener for signal "${signalName}" on element:`, element);
+      Logger.debug(`Registered subscriber for signal "${signalName}" on element:`, element);
     });
+  }
+  
+  if (element.hasAttribute('socket')) {
+    const socketUrl = element.getAttribute('socket');
+    handleWebSocket(element, socketUrl);
   }
 }
 
@@ -119,7 +141,7 @@ export function initHTMLeX() {
   Logger.info("Initializing HTMLeX...");
   const selectors = [
     '[GET]', '[POST]', '[PUT]', '[DELETE]', '[PATCH]',
-    '[auto]', '[poll]', '[socket]', '[listen]', '[signal]',
+    '[auto]', '[poll]', '[socket]', '[subscribe]', '[publish]',
     '[debounce]', '[throttle]', '[retry]', '[timeout]', '[cache]', '[timer]', '[sequential]'
   ];
   const elements = document.querySelectorAll(selectors.join(','));
