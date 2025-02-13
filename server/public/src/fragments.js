@@ -75,9 +75,11 @@ function setupTimerForElement(el) {
  * Returns the buffer with all complete fragments removed.
  *
  * @param {string} buffer - The current accumulated buffer from the stream.
+ * @param {Element} [triggeringElement=null] - The element that triggered the API call,
+ *   used when the fragment target is specified as "this(...)" or when no target is found.
  * @returns {string} The buffer with complete fragments removed.
  */
-export function processFragmentBuffer(buffer) {
+export function processFragmentBuffer(buffer, triggeringElement = null) {
   Logger.debug("Processing fragment buffer. Current buffer:", buffer);
   const fragmentRegex = /<fragment\b[^>]*>[\s\S]*?<\/fragment>/gi;
   let match;
@@ -95,35 +97,69 @@ export function processFragmentBuffer(buffer) {
       continue;
     }
     
-    const targetAttr = fragmentElem.getAttribute('target');
-    if (!targetAttr) {
-      Logger.warn("Fragment found without target attribute.");
-      continue;
+    // Get the fragment's target attribute (default to "this(innerHTML)" if missing).
+    let fragTargetAttr = fragmentElem.getAttribute('target');
+    if (!fragTargetAttr) {
+      Logger.warn("Fragment found without target attribute. Defaulting to 'this(innerHTML)'.");
+      fragTargetAttr = "this(innerHTML)";
     }
+    Logger.debug("Fragment target attribute:", fragTargetAttr);
     
     // Extract inner content (exclude the <fragment> wrapper)
     const content = fragmentElem.innerHTML;
     Logger.debug("Extracted fragment content:", content);
     
-    const targets = parseTargets(targetAttr);
-    Logger.debug("Parsed targets from fragment:", targets);
+    // Parse the fragment's target(s)
+    let fragTargets = parseTargets(fragTargetAttr);
+    Logger.debug("Parsed fragment targets:", fragTargets);
     
-    targets.forEach(target => {
-      const targetElements = document.querySelectorAll(target.selector);
-      if (targetElements.length === 0) {
-        Logger.warn(`No elements found for selector: ${target.selector}`);
+    fragTargets.forEach(target => {
+      // --- Override logic for "this" target ---
+      if (target.selector.trim().toLowerCase() === "this") {
+        Logger.debug(`Fragment target selector is "this". Checking triggering element for an overriding target.`);
+        if (triggeringElement && triggeringElement.hasAttribute("target")) {
+          const callerTargets = parseTargets(triggeringElement.getAttribute("target"));
+          if (callerTargets.length > 0) {
+            Logger.debug("Overriding fragment target with caller target(s):", callerTargets);
+            // For simplicity, use the first caller target.
+            target = callerTargets[0];
+          } else {
+            Logger.debug("Triggering element has no valid target attribute. Using triggering element as target.");
+            target.selector = "this";
+          }
+        } else {
+          Logger.debug("No overriding target on triggering element. Using triggering element as target.");
+        }
+      }
+      // --- End override logic ---
+      
+      // Resolve target elements based on updated target.
+      let targetElements = [];
+      if (target.selector.trim().toLowerCase() === "this") {
+        targetElements = triggeringElement ? [triggeringElement] : [];
+      } else {
+        targetElements = document.querySelectorAll(target.selector);
+        if (!targetElements || targetElements.length === 0) {
+          Logger.debug(`No elements found for selector "${target.selector}". Falling back to triggering element.`);
+          targetElements = triggeringElement ? [triggeringElement] : [];
+        }
+      }
+      
+      if (!targetElements || targetElements.length === 0) {
+        Logger.warn(`No elements resolved for fragment target: ${target.selector}`);
         return;
       }
+      
       targetElements.forEach(el => {
         let insertedElement;
         switch (target.strategy) {
           case 'innerHTML':
-            Logger.info(`Updating innerHTML of ${target.selector}`);
+            Logger.info(`Updating innerHTML of element matching target "${target.selector}"`);
             el.innerHTML = content;
             insertedElement = el.querySelector('*');
             break;
           case 'outerHTML': {
-            Logger.info(`Replacing outerHTML of ${target.selector}`);
+            Logger.info(`Replacing outerHTML of element matching target "${target.selector}"`);
             const temp = document.createElement('template');
             temp.innerHTML = content;
             insertedElement = temp.content.firstElementChild;
@@ -131,32 +167,33 @@ export function processFragmentBuffer(buffer) {
             break;
           }
           case 'append':
-            Logger.info(`Appending to ${target.selector}`);
+            Logger.info(`Appending content to element matching target "${target.selector}"`);
+            // Use insertAdjacentHTML with 'beforeend' to append without replacing existing content.
             el.insertAdjacentHTML('beforeend', content);
             insertedElement = el.lastElementChild;
             break;
           case 'prepend':
-            Logger.info(`Prepending to ${target.selector}`);
+            Logger.info(`Prepending content to element matching target "${target.selector}"`);
             el.insertAdjacentHTML('afterbegin', content);
             insertedElement = el.firstElementChild;
             break;
           case 'before':
-            Logger.info(`Inserting before ${target.selector}`);
+            Logger.info(`Inserting content before element matching target "${target.selector}"`);
             el.insertAdjacentHTML('beforebegin', content);
             insertedElement = el.previousElementSibling;
             break;
           case 'after':
-            Logger.info(`Inserting after ${target.selector}`);
+            Logger.info(`Inserting content after element matching target "${target.selector}"`);
             el.insertAdjacentHTML('afterend', content);
             insertedElement = el.nextElementSibling;
             break;
           case 'remove':
-            Logger.info(`Removing element as per target strategy "remove" for ${target.selector}`);
+            Logger.info(`Removing element as per target strategy "remove" for selector "${target.selector}"`);
             el.remove();
             insertedElement = null;
             break;
           default:
-            Logger.info(`Using default innerHTML strategy for ${target.selector}`);
+            Logger.info(`Using default innerHTML strategy for target "${target.selector}"`);
             el.innerHTML = content;
             insertedElement = el.querySelector('*');
         }

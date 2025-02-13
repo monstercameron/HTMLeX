@@ -1,7 +1,7 @@
 // src/actions.js
 /**
  * @module Actions
- * @description Handles API calls, lifecycle hooks, and response processing.
+ * @description Handles API calls, lifecycle hooks, polling, and response processing.
  */
 
 import { Logger } from './logger.js';
@@ -25,6 +25,13 @@ import { emitSignal } from './signals.js';
  */
 export async function processResponse(response, triggeringElement) {
   Logger.debug("Starting to process response stream.");
+  
+  if (triggeringElement.hasAttribute("target")) {
+    Logger.debug("Triggering element target attribute:", triggeringElement.getAttribute("target"));
+  } else {
+    Logger.debug("Triggering element has no target attribute; will default to itself if needed.");
+  }
+  
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -39,7 +46,8 @@ export async function processResponse(response, triggeringElement) {
     Logger.debug("Received chunk:", chunk);
     buffer += chunk;
     Logger.debug("Buffer before fragment processing:", buffer);
-    buffer = processFragmentBuffer(buffer);
+    // Pass the triggering element so that "this(...)" targets can be resolved.
+    buffer = processFragmentBuffer(buffer, triggeringElement);
     Logger.debug("Buffer after fragment processing:", buffer);
   }
   
@@ -47,19 +55,29 @@ export async function processResponse(response, triggeringElement) {
   const finalChunk = decoder.decode();
   Logger.debug("Final chunk after stream complete:", finalChunk);
   buffer += finalChunk;
-  buffer = processFragmentBuffer(buffer);
+  buffer = processFragmentBuffer(buffer, triggeringElement);
   Logger.debug("Final buffer after processing:", buffer);
   
-  // If there's leftover text (non-fragment content) and no fragments processed, do a fallback update.
+  // Fallback update: if no fragments were processed and leftover text exists.
   if (!triggeringElement._htmlexFragmentsProcessed && buffer.trim() !== "") {
     Logger.debug("No fragments processed; performing fallback update with leftover text.");
     if (triggeringElement.hasAttribute("target")) {
       const targets = parseTargets(triggeringElement.getAttribute("target"));
       targets.forEach(target => {
-        Logger.debug("Fallback updating target:", target);
+        let resolvedElement;
+        if (target.selector.trim().toLowerCase() === "this") {
+          resolvedElement = triggeringElement;
+          Logger.debug("Fallback: target selector is 'this'; using triggering element.");
+        } else {
+          resolvedElement = document.querySelector(target.selector);
+          if (!resolvedElement) {
+            Logger.debug(`Fallback: No element found for selector "${target.selector}". Using triggering element.`);
+            resolvedElement = triggeringElement;
+          }
+        }
         scheduleUpdate(() => {
-          Logger.debug("Applying fallback update to target:", target);
-          updateTarget(target, buffer);
+          Logger.debug("Applying fallback update to target:", target, "resolved as:", resolvedElement);
+          updateTarget(target, buffer, resolvedElement);
         }, isSequential(triggeringElement));
       });
     }
@@ -72,7 +90,7 @@ export async function processResponse(response, triggeringElement) {
 
 /**
  * Handles an API action including lifecycle hooks, extras, caching,
- * URL state updates, and publish signal emission.
+ * URL state updates, publish signal emission, and polling.
  * @param {Element} element - The element triggering the action.
  * @param {string} method - The HTTP method (e.g., "GET", "POST").
  * @param {string} endpoint - The API endpoint.
@@ -189,6 +207,7 @@ export async function handleAction(element, method, endpoint) {
         }
       }
       
+      // Pass the triggering element so fragment updates can correctly resolve targets.
       responseText = await processResponse(response, element);
       break;
     } catch (error) {
@@ -212,9 +231,19 @@ export async function handleAction(element, method, endpoint) {
   if (element.hasAttribute('target') && !element._htmlexFragmentsProcessed && responseText) {
     const targets = parseTargets(element.getAttribute('target'));
     targets.forEach(target => {
+      let resolvedElement;
+      if (target.selector.trim().toLowerCase() === "this") {
+        resolvedElement = element;
+      } else {
+        resolvedElement = document.querySelector(target.selector);
+        if (!resolvedElement) {
+          Logger.debug(`No element found for selector "${target.selector}". Falling back to triggering element.`);
+          resolvedElement = element;
+        }
+      }
       scheduleUpdate(() => {
-        Logger.debug("Fallback updating target with responseText:", target);
-        updateTarget(target, responseText);
+        Logger.debug("Fallback updating target:", target, "resolved as:", resolvedElement);
+        updateTarget(target, responseText, resolvedElement);
       }, isSequential(element));
     });
     if (element.hasAttribute('onafterSwap')) {
@@ -228,6 +257,35 @@ export async function handleAction(element, method, endpoint) {
   }
   
   handleURLState(element);
+
+  // --- NEW CODE: Check for Emit header and publish corresponding signal ---
+  if (response && response.headers) {
+    const emitHeader = response.headers.get('Emit');
+    if (emitHeader) {
+      Logger.info(`Received Emit header: ${emitHeader}`);
+      let emitSignalName = '';
+      let emitDelay = 0;
+      const parts = emitHeader.split(';').map(part => part.trim());
+      if (parts.length > 0) {
+        emitSignalName = parts[0];
+      }
+      parts.slice(1).forEach(param => {
+        if (param.startsWith('delay=')) {
+          emitDelay = parseInt(param.split('=')[1], 10);
+        }
+      });
+      if (emitDelay > 0) {
+        setTimeout(() => {
+          Logger.info(`Emitting signal "${emitSignalName}" after ${emitDelay}ms delay (Emit header).`);
+          emitSignal(emitSignalName);
+        }, emitDelay);
+      } else {
+        Logger.info(`Emitting signal "${emitSignalName}" immediately (Emit header).`);
+        emitSignal(emitSignalName);
+      }
+    }
+  }
+  // ---------------------------------------------------------------------------
   
   if (element.hasAttribute('publish')) {
     const publishSignal = element.getAttribute('publish');
@@ -256,4 +314,36 @@ export async function handleAction(element, method, endpoint) {
       Logger.error("Error in onafter hook:", error);
     }
   }
+  
+  // --- NEW CODE: Polling Support ---
+  if (element.hasAttribute('poll')) {
+    const pollInterval = parseInt(element.getAttribute('poll'), 10);
+    const repeatLimit = parseInt(element.getAttribute('repeat') || '0', 10);
+    if (!element._pollCount) {
+      element._pollCount = 0;
+    }
+    if (repeatLimit === 0 || element._pollCount < repeatLimit) {
+      element._pollCount++;
+      Logger.info(`Scheduling poll iteration ${element._pollCount} in ${pollInterval}ms for element:`, element);
+      // Store the timeout ID so we can clear it if needed.
+      element._pollTimeout = setTimeout(() => {
+        // Before triggering, check if the poll attribute still exists.
+        if (!element.hasAttribute('poll')) {
+          Logger.info("Polling attribute removed; aborting scheduled poll action.");
+          return;
+        }
+        Logger.debug("Re-triggering poll action for element.");
+        delete element._pollTimeout;
+        handleAction(element, method, endpoint);
+      }, pollInterval);
+    } else {
+      Logger.info(`Polling complete. Reached repeat limit of ${repeatLimit}. Disabling further polling.`);
+      if (element._pollTimeout) {
+        clearTimeout(element._pollTimeout);
+        delete element._pollTimeout;
+      }
+      element.removeAttribute('poll');
+    }
+  }
+  // ---------------------------------------------------------------------------
 }

@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,22 +9,68 @@
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
   <style>
     /* Custom CSS Animations */
-    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-    @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
-    @keyframes shake {
-      0% { transform: translateX(0); }
-      25% { transform: translateX(-5px); }
-      50% { transform: translateX(5px); }
-      75% { transform: translateX(-5px); }
-      100% { transform: translateX(0); }
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+
+      to {
+        opacity: 1;
+      }
     }
-    .fade-in { animation: fadeIn 0.5s ease-in-out; }
-    .fade-out { animation: fadeOut 0.5s ease-in-out; }
-    .shake:hover { animation: shake 0.5s; }
+
+    @keyframes fadeOut {
+      from {
+        opacity: 1;
+      }
+
+      to {
+        opacity: 0;
+      }
+    }
+
+    @keyframes shake {
+      0% {
+        transform: translateX(0);
+      }
+
+      25% {
+        transform: translateX(-5px);
+      }
+
+      50% {
+        transform: translateX(5px);
+      }
+
+      75% {
+        transform: translateX(-5px);
+      }
+
+      100% {
+        transform: translateX(0);
+      }
+    }
+
+    .fade-in {
+      animation: fadeIn 0.5s ease-in-out;
+    }
+
+    .fade-out {
+      animation: fadeOut 0.5s ease-in-out;
+    }
+
+    .shake:hover {
+      animation: shake 0.5s;
+    }
+
     .btn {
       transition: background-color 0.3s ease, transform 0.2s ease;
     }
-    .btn:hover { transform: scale(1.02); }
+
+    .btn:hover {
+      transform: scale(1.02);
+    }
+
     .spinner {
       border: 4px solid rgba(255, 255, 255, 0.3);
       border-top: 4px solid #ffffff;
@@ -35,11 +82,15 @@
       vertical-align: middle;
       margin-right: 8px;
     }
+
     @keyframes spin {
-      to { transform: rotate(360deg); }
+      to {
+        transform: rotate(360deg);
+      }
     }
   </style>
 </head>
+
 <body class="bg-gray-900 text-gray-100">
   <!-- HEADER -->
   <header class="bg-gradient-to-r from-purple-800 to-blue-600 p-6 shadow-lg fade-in">
@@ -53,27 +104,23 @@
     <!-- 1. Todo App Demo with Lifecycle Hooks & Sequential Updates -->
     <section id="todoApp" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
       <h2 class="text-2xl font-semibold mb-4">Todo App with Lifecycle Hooks</h2>
-      <form POST="/todos/create" target="#todoList(innerHTML)"
-            extras="locale=en_US" auto="auto" cache="30000" sequential="150"
-            onbefore="console.log('Before Todo Create', event)" 
-            onafter="console.log('After Todo Create', event)"
-            onbeforeSwap="console.log('Before DOM Swap', event)"
-            onafterSwap="console.log('After DOM Swap', event)"
-            class="space-y-4">
+      <form POST="/todos/create" target="#todoList(innerHTML)" extras="locale=en_US" auto="auto" cache="30000"
+        sequential="150" onbefore="console.log('Before Todo Create', event)"
+        onafter="console.log('After Todo Create', event)" onbeforeSwap="console.log('Before DOM Swap', event)"
+        onafterSwap="console.log('After DOM Swap', event)" class="space-y-4">
         <div>
           <label for="todoInput" class="block text-sm font-medium text-gray-300">New Todo</label>
           <input type="text" id="todoInput" name="todo" required
-                 class="mt-2 block w-full bg-gray-700 border border-gray-600 rounded-md p-3 text-gray-100 placeholder-gray-400"
-                 placeholder="Enter your task">
+            class="mt-2 block w-full bg-gray-700 border border-gray-600 rounded-md p-3 text-gray-100 placeholder-gray-400"
+            placeholder="Enter your task">
         </div>
         <button type="submit"
-                class="w-full btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-md">
+          class="w-full btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-md">
           Add Todo
         </button>
       </form>
       <!-- Auto-load the todo list on page load -->
-      <div id="todoList" GET="/todos/list" trigger="load" auto
-           class="mt-6 space-y-4 border-t border-gray-700 pt-4">
+      <div id="todoList" GET="/todos/list" trigger="load" auto class="mt-6 space-y-4 border-t border-gray-700 pt-4">
         <!-- HTMLeX will inject todo items here -->
       </div>
     </section>
@@ -81,9 +128,8 @@
     <!-- 2. Infinite Scrolling Demo -->
     <section id="infiniteScroll" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
       <h2 class="text-2xl font-semibold mb-4">Infinite Scrolling List</h2>
-      <div id="infiniteList" class="max-h-64 overflow-y-auto space-y-2 border border-gray-700 p-4"
-           GET="/items/loadMore" trigger="scrollIntoView" auto="lazy"
-           target="#infiniteList(append)">
+      <div id="infiniteList" class="max-h-64 overflow-y-auto space-y-2 border border-gray-700 p-4" GET="/items/loadMore"
+        trigger="scrollIntoView" auto="lazy" target="#infiniteList(append)">
         <!-- More items will be loaded as you scroll down -->
         <p class="text-center text-gray-500">Scroll down to load more items...</p>
       </div>
@@ -93,7 +139,7 @@
     <section id="notifications" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
       <h2 class="text-2xl font-semibold mb-4">Notifications</h2>
       <button GET="/notifications" target="#notificationArea(innerHTML)" timer="5000"
-              class="btn bg-gradient-to-r from-green-500 to-teal-500 hover:from-green-600 hover:to-teal-600 text-white font-bold py-3 px-8 rounded-md shadow-lg">
+        class="btn bg-gradient-to-r from-green-500 to-teal-500 hover:from-green-600 hover:to-teal-600 text-white font-bold py-3 px-8 rounded-md shadow-lg">
         Get Notification
       </button>
       <div id="notificationArea" class="mt-4 p-4 bg-gray-700 rounded-md shadow animate-pulse">
@@ -104,12 +150,12 @@
     <!-- 4. Clicker Counter Demo with Debounce/Throttle -->
     <section id="clickCounter" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
       <h2 class="text-2xl font-semibold mb-4">Clicker Counter</h2>
-      <div id="counterDisplay" target="#counterDisplay(innerHTML)"
-           class="text-4xl font-bold text-center">
+      <div id="counterDisplay" class="text-4xl font-bold text-center">
         0
       </div>
       <div class="mt-4 text-center">
-        <button GET="/counter/increment" trigger="click" target="#counterDisplay(innerHTML)" debounce="300" throttle="0"  class="btn bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-md">
+        <button GET="/counter/increment" trigger="click" target="#counterDisplay(innerHTML)"
+          class="btn bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-md">
           Click Me!
         </button>
       </div>
@@ -119,18 +165,16 @@
     <section id="chatInterface" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
       <h2 class="text-2xl font-semibold mb-4">Chat Interface</h2>
       <div id="chatMessages" socket="wss://localhost:5500/chat" target="#chatMessages(innerHTML)"
-           class="max-h-64 overflow-y-auto p-4 border border-gray-700 rounded mb-4">
+        class="max-h-64 overflow-y-auto p-4 border border-gray-700 rounded mb-4">
         <!-- Real‑time chat messages will be streamed here -->
         <p class="text-center text-gray-500">Waiting for messages...</p>
       </div>
       <form POST="/chat/send" target="#chatMessages(innerHTML)" extras="username=DemoUser"
-            onbefore="console.log('Sending Chat Message', event)"
-            onafter="console.log('Chat Message Sent', event)"
-            class="flex space-x-2">
+        onbefore="console.log('Sending Chat Message', event)" onafter="console.log('Chat Message Sent', event)"
+        class="flex space-x-2">
         <input type="text" name="message" required placeholder="Type your message"
-               class="flex-1 bg-gray-700 border border-gray-600 rounded-md p-3 text-gray-100 placeholder-gray-400">
-        <button type="submit"
-                class="btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-md">
+          class="flex-1 bg-gray-700 border border-gray-600 rounded-md p-3 text-gray-100 placeholder-gray-400">
+        <button type="submit" class="btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-md">
           Send
         </button>
       </form>
@@ -140,7 +184,7 @@
     <section id="multiFragment" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
       <h2 class="text-2xl font-semibold mb-4">Multi‑Fragment Updates</h2>
       <button GET="/multi/fragment" target="#multiUpdate1(innerHTML) #multiUpdate2(append)"
-              class="btn bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-8 rounded-md">
+        class="btn bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-8 rounded-md">
         Load Multi‑Fragment Update
       </button>
       <div class="mt-4 space-y-4">
@@ -157,13 +201,37 @@
     <section id="signalChaining" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
       <h2 class="text-2xl font-semibold mb-4">Signal Chaining</h2>
       <div class="space-y-4">
-        <button publish="processStarted" class="btn bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-3 px-8 rounded-md">
+        <!-- Start Process Button: Publishes the first chain signal -->
+        <button publish="chain1"
+          class="btn bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-3 px-8 rounded-md">
           Start Process
         </button>
-        <!-- This element subscribes to the "processStarted" signal and then fires an API call -->
-        <div subscribe="processStarted" trigger="signal" GET="/process/continue" target="#processOutput(innerHTML)"
-             class="p-4 bg-gray-700 rounded-md">
-          Process output will appear here...
+
+        <!-- Hidden chain elements trigger API calls and publish next signals -->
+        <div class="hidden">
+          <!-- Chain 1: Subscribes to "chain1", calls step1, appends response to chainOutput, and publishes "chain2" -->
+          <div subscribe="chain1" trigger="signal" GET="/process/step1" target="#chainOutput(append)" publish="chain2">
+          </div>
+
+          <!-- Chain 2: Subscribes to "chain2", calls step2, appends response to chainOutput, and publishes "chain3" -->
+          <div subscribe="chain2" trigger="signal" GET="/process/step2" target="#chainOutput(append)" publish="chain3">
+          </div>
+
+          <!-- Chain 3: Subscribes to "chain3", calls step3, appends response to chainOutput, and publishes "chain4" -->
+          <div subscribe="chain3" trigger="signal" GET="/process/step3" target="#chainOutput(append)" publish="chain4">
+          </div>
+
+          <!-- Chain 4: Subscribes to "chain4", calls step4, appends response to chainOutput, and publishes "chain5" -->
+          <div subscribe="chain4" trigger="signal" GET="/process/step4" target="#chainOutput(append)" publish="chain5">
+          </div>
+
+          <!-- Chain 5: Subscribes to "chain5", calls step5, and appends response to chainOutput -->
+          <div subscribe="chain5" trigger="signal" GET="/process/step5" target="#chainOutput(append)"></div>
+        </div>
+
+        <!-- Output area where all chain responses are appended -->
+        <div id="chainOutput" class="p-4 bg-gray-700 rounded-md">
+          <!-- Responses from chain steps will appear here -->
         </div>
       </div>
     </section>
@@ -171,9 +239,12 @@
     <!-- 8. SSE Subscribers Demo -->
     <section id="sseDemo" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
       <h2 class="text-2xl font-semibold mb-4">SSE Subscriber (Simulated)</h2>
+      <button GET="/sse/subscribe" class="btn bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-md">
+        Get SSE Signal
+      </button>
       <!-- Although HTMLeX doesn't have explicit SSE handling, we can simulate it with subscribe -->
-      <div subscribe="sseUpdate" GET="/sse/subscribe" target="#sseOutput(innerHTML)"
-           class="p-4 bg-gray-700 rounded-md">
+      <div subscribe="sseUpdate" GET="/sse/subscribe/message" target="this(innerHTML)"
+        class="p-4 bg-gray-700 rounded-md p-4 mt-4">
         SSE updates will appear here...
       </div>
     </section>
@@ -182,7 +253,7 @@
     <section id="websocketUpdates" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
       <h2 class="text-2xl font-semibold mb-4">Live WebSocket Feed</h2>
       <div id="liveFeed" socket="wss://localhost:5500/updates" target="#liveFeed(innerHTML)"
-           class="max-h-48 overflow-y-auto p-4 bg-gray-700 rounded-md">
+        class="max-h-48 overflow-y-auto p-4 bg-gray-700 rounded-md">
         <!-- Real‑time updates via WebSocket will stream here -->
         <p class="text-center text-gray-500">Connecting to live feed...</p>
       </div>
@@ -191,8 +262,8 @@
     <!-- 10. Sequential API Calls Demo -->
     <section id="sequentialDemo" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
       <h2 class="text-2xl font-semibold mb-4">Sequential API Calls</h2>
-      <button GET="/sequential/process" target="#sequentialOutput(innerHTML)" sequential="200"
-              class="btn bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-md">
+      <button GET="/sequential/process" target="#sequentialOutput(append)" sequential="200"
+        class="btn bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-md">
         Run Sequential Process
       </button>
       <div id="sequentialOutput" class="mt-4 p-4 bg-gray-700 rounded-md">
@@ -204,14 +275,26 @@
     <section id="loadingDemo" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
       <h2 class="text-2xl font-semibold mb-4">Loading State Demo</h2>
       <button GET="/demo/loading" target="#loadingDemoOutput(innerHTML)" sequential="500"
-              class="btn bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-8 rounded-md">
+        class="btn bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-8 rounded-md">
         Load Payload
       </button>
       <div id="loadingDemoOutput" class="mt-4 p-4 bg-gray-700 rounded-md">
         <!-- On click, this area will first show a loading fragment with a spinner then payload after 5 seconds -->
       </div>
     </section>
+
+    <!-- 12. Polling Demo -->
+    <section id="pollingDemo" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
+      <h2 class="text-2xl font-semibold mb-4">Polling every 5 seconds</h2>
+      <div GET="/sequential/poll" poll="1000" repeat="10" sequential="100" target="this(append)" class="mt-4 p-4 bg-gray-700 rounded-md">
+        <!-- On click, this area will first show a loading fragment with a spinner then payload after 5 seconds -->
+        ...Waiting for polling results
+      </div>
+      
   </main>
+
+
+  </section>
 
   <!-- FOOTER -->
   <footer class="bg-gray-800 text-center p-4 mt-8 fade-in">
@@ -228,4 +311,5 @@
     });
   </script>
 </body>
+
 </html>

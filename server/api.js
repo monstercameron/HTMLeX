@@ -303,21 +303,58 @@ app.get('/multi/fragment', (req, res) => {
   res.send(fragments.join(''));
 });
 
-// Sequential API Calls
+// Sequential API Calls (simplified demo)
+let pollVal = 0
+app.get('/sequential/poll', (req, res) => {
+  setTimeout(() => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderFragment('this(innerHTML)', render(`${pollVal++}, \n`)));
+  }, 1000);
+});
+
+// Sequential API Calls (simplified demo)
 app.get('/sequential/process', (req, res) => {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  const steps = ["Step 1 completed", "Step 2 completed", "Step 3 completed"];
-  let index = 0;
-  res.write(renderFragment('#sequentialOutput(innerHTML)', renderLoadingMessage("Starting process...")));
-  const interval = setInterval(() => {
-    if (index < steps.length) {
-      res.write(renderFragment('#sequentialOutput(innerHTML)', renderSequentialStep(steps[index])));
-      index++;
-    } else {
-      clearInterval(interval);
-      res.end();
-    }
-  }, 1500);
+  setTimeout(() => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderFragment('this(innerHTML)', render(`this just came in \n`)));
+  }, 1000);
+});
+
+// Endpoints for process chaining (steps 1 - 5)
+app.get('/process/step1', (req, res) => {
+  setTimeout(() => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    const message = `Step 1: Data received at ${new Date().toLocaleTimeString()}<br>`;
+    res.send(renderFragment('this(append)', render(message)));
+  }, 100);
+});
+app.get('/process/step2', (req, res) => {
+  setTimeout(() => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    const message = `Step 2: Data received at ${new Date().toLocaleTimeString()}<br>`;
+    res.send(renderFragment('this(append)', render(message)));
+  }, 100);
+});
+app.get('/process/step3', (req, res) => {
+  setTimeout(() => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    const message = `Step 3: Data received at ${new Date().toLocaleTimeString()}<br>`;
+    res.send(renderFragment('this(append)', render(message)));
+  }, 100);
+});
+app.get('/process/step4', (req, res) => {
+  setTimeout(() => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    const message = `Step 4: Data received at ${new Date().toLocaleTimeString()}<br>`;
+    res.send(renderFragment('this(append)', render(message)));
+  }, 100);
+});
+app.get('/process/step5', (req, res) => {
+  setTimeout(() => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    const message = `Step 5: Data received at ${new Date().toLocaleTimeString()}<br>`;
+    res.send(renderFragment('this(append)', render(message)));
+  }, 100);
 });
 
 // New Demo Endpoint: Loading State Demo with Spinner
@@ -337,15 +374,19 @@ app.get('/sse/subscribe', (req, res) => {
   res.setHeader('Emit', 'sseUpdate');
   res.send('');
 });
+app.get('/sse/subscribe/message', (req, res) => {
+  res.send(renderFragment('this(innerHTML)', render(`SSe action performed`)));
+});
 
 // ------------------------------
 // Server Setup with TLS (HTTP/2)
 // ------------------------------
 
-// Updated SPDY options to use TLS. Ensure you have both server.key and server.crt in the 'cert' folder.
+// UPDATED SPDY options with allowHTTP1: true added so WebSocket upgrades work (HTTP/1.1 fallback).
 const spdyOptions = {
   key: fs.readFileSync(path.join(__dirname, 'cert', 'server.key')),
   cert: fs.readFileSync(path.join(__dirname, 'cert', 'server.crt')),
+  allowHTTP1: true, // <-- Added for WebSocket upgrades
   protocols: ['h2', 'spdy/3.1', 'spdy/3', 'spdy/2'],
   'x-forwarded-for': true,
   connection: {
@@ -368,11 +409,13 @@ const counterWss = new WebSocketServer({
   perMessageDeflate: false
 });
 counterWss.on('connection', (ws) => {
+  console.log("New WebSocket connection on /counter");
   let count = 0;
   const interval = setInterval(() => {
     count++;
     ws.send(renderCounter(count));
   }, 1000);
+  ws.on('error', (err) => console.error("Counter WebSocket error:", err));
   ws.on('close', () => clearInterval(interval));
 });
 
@@ -383,7 +426,9 @@ const chatWss = new WebSocketServer({
   perMessageDeflate: false
 });
 chatWss.on('connection', (ws) => {
+  console.log("New WebSocket connection on /chat");
   ws.send(JSON.stringify({ history: chatMessages }));
+  ws.on('error', (err) => console.error("Chat WebSocket error:", err));
   ws.on('message', (message) => {
     chatWss.clients.forEach(client => {
       if (client.readyState === client.OPEN) {
@@ -400,10 +445,12 @@ const updatesWss = new WebSocketServer({
   perMessageDeflate: false
 });
 updatesWss.on('connection', (ws) => {
+  console.log("New WebSocket connection on /updates");
   const interval = setInterval(() => {
     const updateMsg = render(`<div class="p-2 bg-gray-700 rounded-md text-gray-100">Live update at ${new Date().toLocaleTimeString()}</div>`);
     ws.send(updateMsg);
   }, 3000);
+  ws.on('error', (err) => console.error("Updates WebSocket error:", err));
   ws.on('close', () => clearInterval(interval));
 });
 
