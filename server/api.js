@@ -1,10 +1,11 @@
 import express from 'express';
+import createHttp2Express from 'http2-express-bridge';
 import path from 'path';
 import fs from 'fs';
+import http2 from 'http2';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
-import spdy from 'spdy';
-import { WebSocketServer, WebSocket } from 'ws';
+import { Server as SocketIOServer } from 'socket.io';
 import {
   renderTodoItem,
   renderTodoList,
@@ -24,12 +25,12 @@ process.on('uncaughtException', (err) => {
   console.error('UNCAUGHT EXCEPTION:', err);
   process.exit(1);
 });
-
 process.on('unhandledRejection', (reason, promise) => {
   console.error('UNHANDLED REJECTION at:', promise, 'reason:', reason);
 });
 
-const app = express();
+// Create an Express app using the HTTP/2 bridge.
+const app = createHttp2Express(express);
 const PORT = process.env.PORT || 5500;
 
 // Get __dirname in ES modules.
@@ -249,7 +250,7 @@ app.delete('/todos/:id', async (req, res) => {
 });
 
 // ------------------------------
-// Streaming Endpoints (HTTP/2 via spdy)
+// Streaming Endpoints (HTTP/2)
 // ------------------------------
 
 app.get('/items/loadMore', async (req, res) => {
@@ -316,15 +317,8 @@ app.post('/chat/send', upload.none(), async (req, res) => {
       text: message
     };
     chatMessages.push(newMessage);
-    chatWss.clients.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
-        try {
-          client.send(JSON.stringify(newMessage));
-        } catch (error) {
-          console.error("Failed to send chat message to client", error);
-        }
-      }
-    });
+    // Broadcast the new message via Socket.IO (namespace /chat)
+    io.of('/chat').emit('chatMessage', newMessage);
     return res.status(204).end();
   } catch (err) {
     console.error('Error in /chat/send endpoint:', err);
@@ -458,101 +452,59 @@ app.get('/sse/subscribe/message', async (req, res) => {
 });
 
 // ------------------------------
-// Server Setup with TLS (HTTP/2)
+// Server Setup with TLS (HTTP/2 with HTTP/1 fallback)
 // ------------------------------
-const spdyOptions = {
+const http2Options = {
   key: fs.readFileSync(path.join(__dirname, 'cert', 'localhost+2-key.pem')),
   cert: fs.readFileSync(path.join(__dirname, 'cert', 'localhost+2.pem')),
-  allowHTTP1: true, // Allows WebSocket upgrades
-  protocols: ['h2', 'spdy/3.1', 'spdy/3', 'http/1.1', 'websocket'],
-  'x-forwarded-for': true,
-  connection: {
-    windowSize: 1024 * 1024,
-    autoSpdy31: false
-  }
+  allowHTTP1: true // Enables fallback to HTTP/1.1 (and thus our Express bridge)
 };
 
-const server = spdy.createServer(spdyOptions, app);
+const server = http2.createSecureServer(http2Options, app);
 
 // ------------------------------
-// WebSocket Setup
+// Socket.IO Setup
 // ------------------------------
-
-// Counter WebSocket
-const counterWss = new WebSocketServer({
-  server,
-  path: '/counter',
-  perMessageDeflate: false
+const io = new SocketIOServer(server, {
+  // Optional Socket.IO options
 });
-counterWss.on('connection', (ws) => {
-  console.log("New WebSocket connection on /counter");
+
+// /counter namespace: emits an incrementing counter every second.
+const counterNamespace = io.of('/counter');
+counterNamespace.on('connection', (socket) => {
+  console.log("New Socket.IO connection on /counter");
   let count = 0;
   const interval = setInterval(() => {
     count++;
-    try {
-      ws.send(String(count));
-    } catch (error) {
-      console.error("Failed to send counter data", error);
-      clearInterval(interval);
-    }
+    socket.emit('counter', count);
   }, 1000);
-  ws.on('error', (err) => console.error("Counter WebSocket error:", err));
-  ws.on('close', () => clearInterval(interval));
+  socket.on('disconnect', () => clearInterval(interval));
 });
 
-// Chat WebSocket
-const chatWss = new WebSocketServer({
-  server,
-  path: '/chat',
-  perMessageDeflate: false
-});
-chatWss.on('connection', (ws) => {
-  console.log("New WebSocket connection on /chat");
-  try {
-    ws.send(JSON.stringify({ history: chatMessages }));
-  } catch (error) {
-    console.error("Failed to send initial chat history.", error);
-  }
-
-  ws.on('error', (err) => console.error("Chat WebSocket error:", err));
-
-  ws.on('message', (message) => {
-    try {
-      const messageText = message.toString();
-      chatWss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-          try {
-            client.send(messageText);
-          } catch (sendError) {
-            console.error("Failed to send chat message to client", sendError);
-          }
-        }
-      });
-    } catch (error) {
-      console.error('Error handling chat message:', error);
-    }
+// /chat namespace: sends chat history on connection and relays messages.
+const chatNamespace = io.of('/chat');
+chatNamespace.on('connection', (socket) => {
+  console.log("New Socket.IO connection on /chat");
+  // Send existing chat history to the client.
+  socket.emit('chatHistory', { history: chatMessages });
+  // Listen for new chat messages from clients.
+  socket.on('chatMessage', (msg) => {
+    // Expect msg to be an object with username and text.
+    chatMessages.push(msg);
+    // Broadcast the new message to all connected clients.
+    chatNamespace.emit('chatMessage', msg);
   });
 });
 
-// Updates WebSocket
-const updatesWss = new WebSocketServer({
-  server,
-  path: '/updates',
-  perMessageDeflate: false
-});
-updatesWss.on('connection', (ws) => {
-  console.log("New WebSocket connection on /updates");
+// /updates namespace: sends live updates every 3 seconds.
+const updatesNamespace = io.of('/updates');
+updatesNamespace.on('connection', (socket) => {
+  console.log("New Socket.IO connection on /updates");
   const interval = setInterval(() => {
-    try {
-      const updateMsg = render(`<div class="p-2 bg-gray-700 rounded-md text-gray-100">Live update at ${new Date().toLocaleTimeString()}</div>`);
-      ws.send(updateMsg);
-    } catch (error) {
-      console.error("Failed to send update", error);
-      clearInterval(interval);
-    }
+    const updateMsg = render(`<div class="p-2 bg-gray-700 rounded-md text-gray-100">Live update at ${new Date().toLocaleTimeString()}</div>`);
+    socket.emit('update', updateMsg);
   }, 3000);
-  ws.on('error', (err) => console.error("Updates WebSocket error:", err));
-  ws.on('close', () => clearInterval(interval));
+  socket.on('disconnect', () => clearInterval(interval));
 });
 
 // ------------------------------
@@ -561,8 +513,6 @@ updatesWss.on('connection', (ws) => {
 server.on('error', (err) => {
   console.error('Server error:', err);
 });
-
-// Improved clientError handler. Checks if the socket is writable before ending.
 server.on('clientError', (err, socket) => {
   console.error('Client connection error:', err);
   if (socket && socket.writable && !socket.destroyed) {
@@ -586,8 +536,8 @@ export function startServer(port = PORT) {
       }
       console.log(`Express HTTP/2 server (local dev) listening on https://localhost:${port}`);
       console.log('Server Features:');
-      console.log('- HTTP/2 Enabled');
-      console.log('- WebSocket Endpoints: /counter, /chat, /updates');
+      console.log('- HTTP/2 Enabled with HTTP/1 fallback (via http2-express-bridge)');
+      console.log('- Socket.IO Namespaces: /counter, /chat, /updates');
       console.log('- Todo API Endpoints');
       console.log('- Streaming Support');
       resolve(server);
@@ -605,7 +555,6 @@ process.on('SIGTERM', () => {
     process.exit(0);
   });
 });
-
 process.on('SIGINT', () => {
   console.log('SIGINT signal received: closing HTTP server');
   server.close(() => {
