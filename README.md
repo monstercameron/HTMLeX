@@ -30,6 +30,12 @@
 
 ---
 
+<video width="640" height="360" controls>
+  <source src="./media/v1.2.2-demo.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+
+
 ## 1. Preamble
 
 _HATEOAS (Hypermedia as the Engine of Application State) is an architectural principle in which the server returns complete HTML responses—including hypermedia controls (links, forms, etc.)—that describe available state transitions. In this model, the UI is driven entirely by server‑rendered HTML, and there is no need for explicit client‑side JSON state. **HTMLeX** extends HTML with a rich set of declarative attributes to manage API calls, DOM updates, URL state, and inter‑component event communication via a publish/subscribe model. Complex interactions are implemented via Web Components that encapsulate advanced client‑side logic while interfacing with HTMLeX through these attributes._
