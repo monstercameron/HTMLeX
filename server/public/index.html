@@ -300,6 +300,24 @@
       </div>
     </section>
 
+    <!-- 13. Hover Trigger Demo -->
+    <section id="hoverTriggerDemo" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
+      <h2 class="text-2xl font-semibold mb-4 text-white">Hover Trigger Demo</h2>
+      <div id="hoverDemo" class="mt-4 p-4 bg-gray-700 rounded-md text-gray-100">
+        <!-- When hovered, this area will first show a loading fragment with a spinner,
+         then the payload after 5 seconds -->
+        ...Hover actions:
+      </div>
+      <button get="/sequential/poll" trigger="mouseout" target="#hoverDemo(innerHTML)" debounce="1000"
+        class="btn bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-8 rounded-md">
+        Just hover, don't click, high debounce
+      </button>
+      <button get="/sequential/poll" trigger="mouseout" target="#hoverDemo(innerHTML)" debounce="10"
+        class="btn bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-8 rounded-md">
+        Just hover, don't click, low debounce
+      </button>
+    </section>
+
   </main>
 
 

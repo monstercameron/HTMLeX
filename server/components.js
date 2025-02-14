@@ -110,7 +110,7 @@ export function renderEditForm(todo) {
         'button',
         {
           get: '/todos/item/' + todo.id,
-          target: '#todo-' + todo.id + '(innerHTML)',
+          target: '#editform-' + todo.id + '(innerHTML)',
           trigger: 'click',
           type: 'button', // Prevent form submission.
           class: 'cancel-btn btn bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-md'
