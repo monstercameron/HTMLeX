@@ -34,9 +34,8 @@
   <source src="./media/v1.2.2-demo.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
-[Watch the video](https://github.com/monstercameron/HTMLeX/raw/refs/heads/main/media/v1.2.2-demo.mp4)
 
-
+![Animated Demo](https://github.com/monstercameron/HTMLeX/raw/refs/heads/main/media/v1.2.2-demo.gif)
 
 
 
