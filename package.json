@@ -5,8 +5,8 @@
   "description": "*Version 1.0 • Last Updated: 2025-02-10*",
   "main": "index.js",
   "scripts": {
-    "start": "node server/server.js",
-    "dev": "nodemon server/server.js"
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js"
   },
   "repository": {
     "type": "git",
