@@ -176,7 +176,7 @@ app.get('/todos/edit/:id', (req, res) => {
   }
 });
 
-// UPDATE: Update a todo (refresh the entire list)
+// UPDATE: Update a todo (update a single todo item)
 app.put('/todos/:id', upload.none(), (req, res) => {
   try {
     const todos = loadTodos();
@@ -191,17 +191,22 @@ app.put('/todos/:id', upload.none(), (req, res) => {
       console.error('Missing updated todo text');
       return res.status(400).send('Missing updated todo text');
     }
+    // Update the todo item.
     todos[index].text = newText;
     writeTodos(todos);
-    const updatedList = renderTodoList(todos);
+
+    // Re-render the updated todo item using renderTodoItem.
+    const updatedTodoItem = renderTodoItem(todos[index]);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    // Refresh the entire todo list after update
-    res.send(renderFragment('#todoList(innerHTML)', updatedList));
+    
+    // Return a fragment that instructs the client to update the specific todo element.
+    res.send(renderFragment(`#todo-${id}(innerHTML)`, updatedTodoItem));
   } catch (err) {
-    console.error('Error in /todos/update endpoint:', err);
+    console.error('Error in /todos/:id endpoint:', err);
     res.status(500).send('Internal server error');
   }
 });
+
 
 // DELETE: Remove a todo (refresh the entire list)
 app.delete('/todos/:id', (req, res) => {

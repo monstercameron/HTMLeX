@@ -103,8 +103,10 @@
   <main class="container mx-auto p-6 space-y-12">
     <!-- 1. Todo App Demo with Lifecycle Hooks & Sequential Updates -->
     <section id="todoApp" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
-      <h2 class="text-2xl font-semibold mb-4">Todo App with Lifecycle Hooks</h2>
-      <form POST="/todos/create" target="#todoList(innerHTML)" extras="locale=en_US" auto="auto" cache="30000"
+      <h2 class="text-2xl font-semibold mb-4 text-white">Todo App with Lifecycle Hooks</h2>
+
+      <!-- Form to create a new todo -->
+      <form POST="/todos/create" target="#todoList(innerHTML)" extras="locale=en_US" publish="todoCreated"
         sequential="150" onbefore="console.log('Before Todo Create', event)"
         onafter="console.log('After Todo Create', event)" onbeforeSwap="console.log('Before DOM Swap', event)"
         onafterSwap="console.log('After DOM Swap', event)" class="space-y-4">
@@ -119,11 +121,13 @@
           Add Todo
         </button>
       </form>
-      <!-- Auto-load the todo list on page load -->
-      <div id="todoList" GET="/todos/list" trigger="load" auto class="mt-6 space-y-4 border-t border-gray-700 pt-4">
+
+      <!-- Todo list auto-loaded on page load -->
+      <div id="todoList" GET="/todos/list" auto class="mt-6 space-y-4 border-t border-gray-700 pt-4">
         <!-- HTMLeX will inject todo items here -->
       </div>
     </section>
+
 
     <!-- 2. Infinite Scrolling Demo -->
     <section id="infiniteScroll" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
@@ -285,12 +289,17 @@
 
     <!-- 12. Polling Demo -->
     <section id="pollingDemo" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
-      <h2 class="text-2xl font-semibold mb-4">Polling every 5 seconds</h2>
-      <div GET="/sequential/poll" poll="1000" repeat="10" sequential="100" target="this(append)" class="mt-4 p-4 bg-gray-700 rounded-md">
+      <h2 class="text-2xl font-semibold mb-4">Polling demo</h2>
+      <div GET="/sequential/poll" poll="5000" repeat="10" target="this(append)" class="mt-4 p-4 bg-gray-700 rounded-md">
         <!-- On click, this area will first show a loading fragment with a spinner then payload after 5 seconds -->
-        ...Waiting for polling results
+        ...Waiting for polling count every 5000ms limit 10:
       </div>
-      
+      <div GET="/sequential/poll" poll="10000" target="this(append)" class="mt-4 p-4 bg-gray-700 rounded-md">
+        <!-- On click, this area will first show a loading fragment with a spinner then payload after 5 seconds -->
+        ...Waiting for polling count every 10000ms no limits:
+      </div>
+    </section>
+
   </main>
 
 

@@ -29,16 +29,32 @@ export function renderFragment(target, content, options = {}) {
 export function renderTodoItem(todo) {
   return render(
     div(
-      { class: 'todo-item p-4 bg-gray-800 rounded-lg shadow-md fade-in', id: 'todo-' + todo.id },
+      {
+        class: 'todo-item p-4 bg-gray-800 rounded-lg shadow-md fade-in',
+        id: 'todo-' + todo.id
+      },
+      // Display the todo text.
       span({ class: 'todo-text text-lg text-gray-100' }, todo.text),
       " ",
+      // Delete button triggers a DELETE API call to remove the todo.
       button(
-        { DELETE: '/todos/' + todo.id, target: '#todo-' + todo.id + '(remove)', trigger: 'click', class: 'delete-btn btn bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md shake' },
+        {
+          delete: '/todos/' + todo.id,
+          target: '#todo-' + todo.id + '(remove)',
+          trigger: 'click',
+          class: 'delete-btn btn bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md shake'
+        },
         "Delete"
       ),
       " ",
+      // Edit button triggers a GET API call to load an edit form or update the todo.
       button(
-        { GET: '/todos/edit/' + todo.id, target: '#todo-' + todo.id + '(innerHTML)', trigger: 'click', class: 'edit-btn btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md shake' },
+        {
+          get: '/todos/edit/' + todo.id,
+          target: '#todo-' + todo.id + '(innerHTML)',
+          trigger: 'click',
+          class: 'edit-btn btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md shake'
+        },
         "Edit"
       )
     )
@@ -67,21 +83,43 @@ export function renderEditForm(todo) {
     value: todo.text,
     class: 'fancy-input mt-2 block w-full bg-gray-700 border border-gray-600 rounded-md p-3 text-gray-100 placeholder-gray-400'
   });
-  const editForm = div(
-    { id: 'editForm-' + todo.id, class: 'edit-form space-y-2 fade-in' },
+
+  // Use a <form> element so that the input value is included in the request payload.
+  const editForm = tag(
+    'form',
+    {
+      id: 'editForm-' + todo.id,
+      put: '/todos/' + todo.id, // Lowercase "put" to match registration detection.
+      target: '#todo-' + todo.id + '(innerHTML)',
+      sequential: '150',
+      class: 'edit-form space-y-2 fade-in'
+    },
     inputField,
-    div(
+    tag(
+      'div',
       { class: 'flex space-x-2' },
-      button(
-        { PUT: '/todos/' + todo.id, source: '#editForm-' + todo.id + " input[name='todo']", target: '#todo-' + todo.id + '(innerHTML)', trigger: 'click', class: 'save-btn btn bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md' },
+      tag(
+        'button',
+        {
+          type: 'submit',
+          class: 'save-btn btn bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md'
+        },
         "Save"
       ),
-      button(
-        { GET: '/todos/item/' + todo.id, target: '#todo-' + todo.id + '(innerHTML)', trigger: 'click', class: 'cancel-btn btn bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-md' },
+      tag(
+        'button',
+        {
+          get: '/todos/item/' + todo.id,
+          target: '#todo-' + todo.id + '(innerHTML)',
+          trigger: 'click',
+          type: 'button', // Prevent form submission.
+          class: 'cancel-btn btn bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-md'
+        },
         "Cancel"
       )
     )
   );
+
   return render(editForm);
 }
 

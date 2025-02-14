@@ -1,7 +1,7 @@
 // src/actions.js
 /**
  * @module Actions
- * @description Handles API calls, lifecycle hooks, polling, and response processing.
+ * @description Handles API calls, lifecycle hooks, polling (via a Web Worker), and response processing.
  */
 
 import { Logger } from './logger.js';
@@ -25,17 +25,17 @@ import { emitSignal } from './signals.js';
  */
 export async function processResponse(response, triggeringElement) {
   Logger.debug("Starting to process response stream.");
-  
+
   if (triggeringElement.hasAttribute("target")) {
     Logger.debug("Triggering element target attribute:", triggeringElement.getAttribute("target"));
   } else {
     Logger.debug("Triggering element has no target attribute; will default to itself if needed.");
   }
-  
+
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  
+
   while (true) {
     const { done, value } = await reader.read();
     if (done) {
@@ -50,14 +50,14 @@ export async function processResponse(response, triggeringElement) {
     buffer = processFragmentBuffer(buffer, triggeringElement);
     Logger.debug("Buffer after fragment processing:", buffer);
   }
-  
+
   // Final flush: process any remaining complete fragments.
   const finalChunk = decoder.decode();
   Logger.debug("Final chunk after stream complete:", finalChunk);
   buffer += finalChunk;
   buffer = processFragmentBuffer(buffer, triggeringElement);
   Logger.debug("Final buffer after processing:", buffer);
-  
+
   // Fallback update: if no fragments were processed and leftover text exists.
   if (!triggeringElement._htmlexFragmentsProcessed && buffer.trim() !== "") {
     Logger.debug("No fragments processed; performing fallback update with leftover text.");
@@ -82,7 +82,7 @@ export async function processResponse(response, triggeringElement) {
       });
     }
   }
-  
+
   triggeringElement._htmlexFragmentsProcessed = true;
   Logger.debug("Completed processing response stream. Final leftover buffer:", buffer);
   return buffer;
@@ -96,8 +96,14 @@ export async function processResponse(response, triggeringElement) {
  * @param {string} endpoint - The API endpoint.
  */
 export async function handleAction(element, method, endpoint) {
+  // Early guard: if polling is disabled, abort further API calls.
+  if (element._pollDisabled) {
+    Logger.info("Polling has been disabled for this element; aborting API call.");
+    return;
+  }
+
   Logger.debug("handleAction called for element:", element);
-  
+
   // Lifecycle hook: onbefore (before API call starts)
   if (element.hasAttribute('onbefore')) {
     try {
@@ -109,7 +115,7 @@ export async function handleAction(element, method, endpoint) {
   }
 
   Logger.info(`Handling ${method} action for endpoint: ${endpoint}`);
-  
+
   const formData = new FormData();
   if (element.tagName.toLowerCase() === 'form') {
     new FormData(element).forEach((value, key) => {
@@ -124,7 +130,7 @@ export async function handleAction(element, method, endpoint) {
       }
     });
   }
-  
+
   if (element.hasAttribute('source')) {
     const selectors = element.getAttribute('source').split(/\s+/);
     selectors.forEach(selector => {
@@ -137,7 +143,7 @@ export async function handleAction(element, method, endpoint) {
       });
     });
   }
-  
+
   // Process extras (inline parameters)
   if (element.hasAttribute('extras')) {
     const extras = element.getAttribute('extras').split(/\s+/);
@@ -149,7 +155,7 @@ export async function handleAction(element, method, endpoint) {
       }
     });
   }
-  
+
   // If a loading state is desired, update the loading target immediately.
   if (element.hasAttribute('loading')) {
     const loadingTargets = parseTargets(element.getAttribute('loading'));
@@ -158,7 +164,7 @@ export async function handleAction(element, method, endpoint) {
       scheduleUpdate(() => updateTarget(target, '<div class="loading">Loading...</div>'), isSequential(element));
     });
   }
-  
+
   const options = { method };
   let url = endpoint;
   if (method === 'GET') {
@@ -169,7 +175,7 @@ export async function handleAction(element, method, endpoint) {
     options.body = formData;
     Logger.debug("Non-GET request, using FormData body.");
   }
-  
+
   if (element.hasAttribute('cache')) {
     const cached = getCache(url);
     if (cached !== null) {
@@ -186,17 +192,17 @@ export async function handleAction(element, method, endpoint) {
       return;
     }
   }
-  
+
   const timeoutMs = parseInt(element.getAttribute('timeout') || '0', 10);
   const retryCount = parseInt(element.getAttribute('retry') || '0', 10);
   let responseText = null;
   let response = null;
-  
+
   for (let attempt = 0; attempt <= retryCount; attempt++) {
     try {
       Logger.debug(`Attempt ${attempt + 1}: Fetching URL ${url}`);
       response = await fetchWithTimeout(url, options, timeoutMs);
-      
+
       // Lifecycle hook: onbeforeSwap (before DOM update)
       if (element.hasAttribute('onbeforeSwap')) {
         try {
@@ -206,8 +212,8 @@ export async function handleAction(element, method, endpoint) {
           Logger.error("Error in onbeforeSwap hook:", error);
         }
       }
-      
-      // Pass the triggering element so fragment updates can correctly resolve targets.
+
+      // Process the response.
       responseText = await processResponse(response, element);
       break;
     } catch (error) {
@@ -226,7 +232,7 @@ export async function handleAction(element, method, endpoint) {
       }
     }
   }
-  
+
   // Fallback update if streaming wasn't used.
   if (element.hasAttribute('target') && !element._htmlexFragmentsProcessed && responseText) {
     const targets = parseTargets(element.getAttribute('target'));
@@ -255,7 +261,7 @@ export async function handleAction(element, method, endpoint) {
       }
     }
   }
-  
+
   handleURLState(element);
 
   // --- NEW CODE: Check for Emit header and publish corresponding signal ---
@@ -286,7 +292,7 @@ export async function handleAction(element, method, endpoint) {
     }
   }
   // ---------------------------------------------------------------------------
-  
+
   if (element.hasAttribute('publish')) {
     const publishSignal = element.getAttribute('publish');
     Logger.info(`Emitting signal "${publishSignal}" after successful API call.`);
@@ -299,13 +305,13 @@ export async function handleAction(element, method, endpoint) {
       }, delay);
     }
   }
-  
+
   if (element.hasAttribute('cache')) {
     const cacheTTL = parseInt(element.getAttribute('cache'), 10);
     setCache(url, responseText, cacheTTL);
     Logger.debug("Response cached with TTL:", cacheTTL);
   }
-  
+
   if (element.hasAttribute('onafter')) {
     try {
       Logger.debug("Executing onafter hook for element.");
@@ -314,36 +320,60 @@ export async function handleAction(element, method, endpoint) {
       Logger.error("Error in onafter hook:", error);
     }
   }
-  
-  // --- NEW CODE: Polling Support ---
-  if (element.hasAttribute('poll')) {
+
+  // --- NEW CODE: Polling Support via a Web Worker ---
+  // Create a worker if polling is enabled and not already started.
+  // In handleAction function, update the polling section:
+  if (element.hasAttribute('poll') && !element._pollWorker) {
     const pollInterval = parseInt(element.getAttribute('poll'), 10);
+    if (pollInterval < 100) {
+      Logger.warn('Poll interval too small, minimum is 100ms');
+      return;
+    }
+
     const repeatLimit = parseInt(element.getAttribute('repeat') || '0', 10);
-    if (!element._pollCount) {
-      element._pollCount = 0;
-    }
-    if (repeatLimit === 0 || element._pollCount < repeatLimit) {
-      element._pollCount++;
-      Logger.info(`Scheduling poll iteration ${element._pollCount} in ${pollInterval}ms for element:`, element);
-      // Store the timeout ID so we can clear it if needed.
-      element._pollTimeout = setTimeout(() => {
-        // Before triggering, check if the poll attribute still exists.
-        if (!element.hasAttribute('poll')) {
-          Logger.info("Polling attribute removed; aborting scheduled poll action.");
-          return;
-        }
-        Logger.debug("Re-triggering poll action for element.");
-        delete element._pollTimeout;
-        handleAction(element, method, endpoint);
-      }, pollInterval);
-    } else {
-      Logger.info(`Polling complete. Reached repeat limit of ${repeatLimit}. Disabling further polling.`);
-      if (element._pollTimeout) {
-        clearTimeout(element._pollTimeout);
-        delete element._pollTimeout;
+
+    // Create and configure the polling worker
+    element._pollWorker = new Worker('pollWorker.js');
+
+    element._pollWorker.onmessage = async function (e) {
+      const { type, pollCount, message } = e.data;
+
+      switch (type) {
+        case 'poll':
+          if (!element._pollInProgress) {
+            element._pollInProgress = true;
+            try {
+              await handleAction(element, method, endpoint);
+            } finally {
+              element._pollInProgress = false;
+            }
+          }
+          break;
+
+        case 'done':
+          Logger.info(`Polling complete after ${pollCount} iterations`);
+          element._pollWorker.terminate();
+          element._pollWorker = null;
+          element._pollDisabled = true;
+          break;
+
+        case 'error':
+          Logger.error(`Polling error: ${message}`);
+          element._pollWorker.terminate();
+          element._pollWorker = null;
+          break;
       }
-      element.removeAttribute('poll');
-    }
+    };
+
+    // Start the worker with configuration
+    element._pollWorker.postMessage({
+      type: 'start',
+      interval: pollInterval,
+      limit: repeatLimit
+    });
+
+    Logger.debug(`Started polling worker: interval=${pollInterval}ms, limit=${repeatLimit}`);
   }
   // ---------------------------------------------------------------------------
 }
