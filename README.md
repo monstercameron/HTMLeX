@@ -35,7 +35,7 @@
   Your browser does not support the video tag.
 </video>
 
-![Animated Demo](https://github.com/monstercameron/HTMLeX/raw/refs/heads/main/media/v1.2.2-demo.gif)
+![Animated Demo](https://raw.githubusercontent.com/monstercameron/HTMLeX/refs/heads/main/media/v1.2.2-demo.gif)
 
 
 
