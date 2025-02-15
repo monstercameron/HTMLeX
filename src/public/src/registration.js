@@ -1,14 +1,51 @@
 // src/registration.js
 /**
  * @module Registration
- * @description Scans the DOM for HTMLeX-enabled elements and registers them.
+ * @description Scans the DOM for HTMLeX‑enabled elements and registers them.
+ *
+ * NOTE: Because module namespace objects are immutable, we cannot override
+ * the updateTarget property on the imported dom module. Instead, we define a
+ * patchedUpdateTarget function here and export it for use by other parts of the
+ * framework (e.g. actions.js, fragments.js) to use when updating the DOM.
  */
 
 import { Logger } from './logger.js';
 import { registerSignalListener, emitSignal } from './signals.js';
 import { handleAction } from './actions.js';
 import { debounce, throttle } from './rateLimit.js';
+// Import the original updateTarget function from dom.js
+import { parseTargets, updateTarget as originalUpdateTarget } from './dom.js';
 import { handleWebSocket } from './websocket.js';
+
+/**
+ * patchedUpdateTarget
+ *
+ * When the target selector is empty or defaults to "this", this function ensures
+ * that if multiple fragments are returned, the first fragment replaces the content
+ * and subsequent fragments are appended.
+ *
+ * @param {Object} target - The target object (with a .selector property).
+ * @param {string} content - The HTML fragment content.
+ * @param {Element} resolvedElement - The element to update.
+ */
+export function patchedUpdateTarget(target, content, resolvedElement) {
+  // Check if the target is “empty” or defaults to "this"
+  const selector = target.selector.trim().toLowerCase();
+  if (selector === "" || selector === "this") {
+    // Use a property on the element to record if the first update was done
+    if (!resolvedElement._htmlexDefaultUpdated) {
+      resolvedElement._htmlexDefaultUpdated = true;
+      Logger.debug("[DEBUG] patchedUpdateTarget: first fragment – replacing content");
+      return originalUpdateTarget(target, content, resolvedElement);
+    } else {
+      Logger.debug("[DEBUG] patchedUpdateTarget: subsequent fragment – appending content");
+      resolvedElement.innerHTML += content;
+      return;
+    }
+  }
+  // For non‑default targets, delegate to the original logic.
+  return originalUpdateTarget(target, content, resolvedElement);
+}
 
 /** @type {WeakSet<Element>} */
 const registeredElements = new WeakSet();
@@ -112,7 +149,7 @@ export function registerElement(element) {
     }
   }
 
-  // Auto-firing based on the "auto" attribute.
+  // Auto‑firing based on the "auto" attribute.
   if (element.hasAttribute('auto')) {
     const autoVal = element.getAttribute('auto');
     if (autoVal === 'lazy') {
@@ -141,10 +178,10 @@ export function registerElement(element) {
     }
   }
 
-  // Publish-only element registration.
+  // Publish‑only element registration.
   if (!method && element.hasAttribute('publish')) {
     element.addEventListener(triggerEvent, wrappedHandler);
-    Logger.info(`[HTMLeX INFO] Registered publish-only element for signal "${element.getAttribute('publish')}" with event "${triggerEvent}".`);
+    Logger.info(`[HTMLeX INFO] Registered publish‑only element for signal "${element.getAttribute('publish')}" with event "${triggerEvent}".`);
     if (element.hasAttribute('auto')) {
       const autoVal = element.getAttribute('auto');
       const delay = parseInt(autoVal, 10) || 0;
@@ -182,9 +219,9 @@ export function registerElement(element) {
 }
 
 /**
- * Scans the DOM for HTMLeX-enabled elements and registers them.
- * Also sets up a MutationObserver to auto-register new elements before (or as soon as)
- * they are inserted into the document, ensuring progressive rendering (PR) elements get initialized.
+ * Scans the DOM for HTMLeX‑enabled elements and registers them.
+ * Also sets up a MutationObserver to auto‑register new elements as they are inserted,
+ * ensuring progressive rendering (PR) elements get initialized.
  */
 export function initHTMLeX() {
   Logger.info("[HTMLeX INFO] Initializing HTMLeX...");

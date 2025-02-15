@@ -1,343 +1,99 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HTMLeX Demo Showcase – Dark Mode & Animations</title>
-  <!-- Tailwind CSS (Dark Mode Enabled) -->
-  <script src="https://cdn.socket.io/4.5.1/socket.io.min.js"></script>
-  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-  <style>
-    /* Custom CSS Animations */
-    @keyframes fadeIn {
-      from {
-        opacity: 0;
-      }
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HTMleX playgrounds</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Enable dark mode via class strategy -->
+    <script>
+        document.documentElement.classList.add('dark');
+    </script>
+    <style>
+        /* Hide scrollbar for Chrome, Safari and Opera */
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
 
-      to {
-        opacity: 1;
-      }
-    }
+        /* Hide scrollbar for IE, Edge and Firefox */
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            /* IE and Edge */
+            scrollbar-width: none;
+            /* Firefox */
+        }
+    </style>
 
-    @keyframes fadeOut {
-      from {
-        opacity: 1;
-      }
-
-      to {
-        opacity: 0;
-      }
-    }
-
-    @keyframes shake {
-      0% {
-        transform: translateX(0);
-      }
-
-      25% {
-        transform: translateX(-5px);
-      }
-
-      50% {
-        transform: translateX(5px);
-      }
-
-      75% {
-        transform: translateX(-5px);
-      }
-
-      100% {
-        transform: translateX(0);
-      }
-    }
-
-    .fade-in {
-      animation: fadeIn 0.5s ease-in-out;
-    }
-
-    .fade-out {
-      animation: fadeOut 0.5s ease-in-out;
-    }
-
-    .shake:hover {
-      animation: shake 0.5s;
-    }
-
-    .btn {
-      transition: background-color 0.3s ease, transform 0.2s ease;
-    }
-
-    .btn:hover {
-      transform: scale(1.02);
-    }
-
-    .spinner {
-      border: 4px solid rgba(255, 255, 255, 0.3);
-      border-top: 4px solid #ffffff;
-      border-radius: 50%;
-      width: 24px;
-      height: 24px;
-      animation: spin 1s linear infinite;
-      display: inline-block;
-      vertical-align: middle;
-      margin-right: 8px;
-    }
-
-    @keyframes spin {
-      to {
-        transform: rotate(360deg);
-      }
-    }
-  </style>
 </head>
 
-<body class="bg-gray-900 text-gray-100">
-  <!-- HEADER -->
-  <header class="bg-gradient-to-r from-purple-800 to-blue-600 p-6 shadow-lg fade-in">
-    <div class="container mx-auto">
-      <h1 class="text-4xl font-bold">HTMLeX Demo Showcase</h1>
-      <p class="text-lg">A modern, dark‑mode demo of all HTMLeX features with animations</p>
-    </div>
-  </header>
-
-  <main class="container mx-auto p-6 space-y-12">
-    <!-- 1. Todo App Demo with Lifecycle Hooks & Sequential Updates -->
-    <section id="todoApp" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
-      <h2 class="text-2xl font-semibold mb-4 text-white">Todo App with Lifecycle Hooks</h2>
-
-      <!-- Form to create a new todo -->
-      <form POST="/todos/create" target="#todoList(innerHTML)" extras="locale=en_US" publish="todoCreated"
-        sequential="150" onbefore="console.log('Before Todo Create', event)"
-        onafter="console.log('After Todo Create', event)" onbeforeSwap="console.log('Before DOM Swap', event)"
-        onafterSwap="console.log('After DOM Swap', event)" class="space-y-4">
-        <div>
-          <label for="todoInput" class="block text-sm font-medium text-gray-300">New Todo</label>
-          <input type="text" id="todoInput" name="todo" required
-            class="mt-2 block w-full bg-gray-700 border border-gray-600 rounded-md p-3 text-gray-100 placeholder-gray-400"
-            placeholder="Enter your task">
+<body
+    class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 font-sans antialiased min-h-screen flex flex-col">
+    <!-- ===== HEADER ===== -->
+    <header class="bg-blue-600 dark:bg-blue-800 shadow-md">
+        <div class="container mx-auto px-4 py-4">
+            <h1 class="text-3xl font-bold text-white animate-fadeIn">HTMleX playgrounds</h1>
         </div>
-        <button type="submit"
-          class="w-full btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-md">
-          Add Todo
-        </button>
-      </form>
+    </header>
 
-      <!-- Todo list auto-loaded on page load -->
-      <div id="todoList" GET="/todos/list" auto class="mt-6 space-y-4 border-t border-gray-700 pt-4">
-        <!-- HTMLeX will inject todo items here -->
-      </div>
-    </section>
+    <!-- ===== MAIN CONTENT ===== -->
+    <main class="container mx-auto px-4 py-6 flex-1 flex flex-col lg:flex-row gap-6">
 
+        <!-- Left Column: Scrollable List (30%) -->
+        <aside class="lg:w-1/3 bg-white dark:bg-gray-800 rounded-lg shadow-md h-[70vh] overflow-y-auto">
+            <!-- List Header -->
+            <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+                <h2 class="text-xl font-semibold">Demos</h2>
+            </div>
+            <!-- Demo Items List -->
+            <ul GET="/demos" auto="true" trigger="load" class="space-y-6 p-4"></ul>
+        </aside>
 
-    <!-- 2. Infinite Scrolling Demo -->
-    <section id="infiniteScroll" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
-      <h2 class="text-2xl font-semibold mb-4">Infinite Scrolling List</h2>
-      <div id="infiniteList" class="max-h-64 overflow-y-auto space-y-2 border border-gray-700 p-4" GET="/items/loadMore"
-        trigger="scrollIntoView" auto="lazy" target="#infiniteList(append)">
-        <!-- More items will be loaded as you scroll down -->
-        <p class="text-center text-gray-500">Scroll down to load more items...</p>
-      </div>
-    </section>
+        <!-- Right Column: Blank Canvas (70%) -->
+        <section class="lg:w-2/3 bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 h-[70vh] flex flex-col">
+            <!-- Canvas Header -->
+            <h2 class="text-2xl font-semibold mb-4 flex-shrink-0">Canvas</h2>
+            <!-- Canvas content area -->
+            <div id="demoCanvas" class="flex-grow flex items-center justify-center">
+                <!-- Clicker Demo -->
+                <div id="" class="flex flex-col items-center justify-center">
+                    <span>Demo goes here</span>
+                </div>
+            </div>
+        </section>
 
-    <!-- 3. Notifications Demo with Timer Removal -->
-    <section id="notifications" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
-      <h2 class="text-2xl font-semibold mb-4">Notifications</h2>
-      <button GET="/notifications" target="#notificationArea(innerHTML)" timer="5000"
-        class="btn bg-gradient-to-r from-green-500 to-teal-500 hover:from-green-600 hover:to-teal-600 text-white font-bold py-3 px-8 rounded-md shadow-lg">
-        Get Notification
-      </button>
-      <div id="notificationArea" class="mt-4 p-4 bg-gray-700 rounded-md shadow animate-pulse">
-        <!-- Notification messages appear here -->
-      </div>
-    </section>
+    </main>
 
-    <!-- 4. Clicker Counter Demo with Debounce/Throttle -->
-    <section id="clickCounter" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
-      <h2 class="text-2xl font-semibold mb-4">Clicker Counter</h2>
-      <div id="counterDisplay" class="text-4xl font-bold text-center">
-        0
-      </div>
-      <div class="mt-4 text-center">
-        <button GET="/counter/increment" trigger="click" target="#counterDisplay(innerHTML)"
-          class="btn bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-md">
-          Click Me!
-        </button>
-      </div>
-    </section>
-
-    <!-- 5. Chat Interface Demo (WebSocket & Lifecycle Hooks) -->
-    <section id="chatInterface" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
-      <h2 class="text-2xl font-semibold mb-4">Chat Interface</h2>
-      <div id="chatMessages" socket="wss://localhost:5500/chat" target="#chatMessages(innerHTML)"
-        class="max-h-64 overflow-y-auto p-4 border border-gray-700 rounded mb-4">
-        <!-- Real‑time chat messages will be streamed here -->
-        <p class="text-center text-gray-500">Waiting for messages...</p>
-      </div>
-      <form POST="/chat/send" target="#chatMessages(innerHTML)" extras="username=DemoUser"
-        onbefore="console.log('Sending Chat Message', event)" onafter="console.log('Chat Message Sent', event)"
-        class="flex space-x-2">
-        <input type="text" name="message" required placeholder="Type your message"
-          class="flex-1 bg-gray-700 border border-gray-600 rounded-md p-3 text-gray-100 placeholder-gray-400">
-        <button type="submit" class="btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-md">
-          Send
-        </button>
-      </form>
-    </section>
-
-    <!-- 6. Multi-Fragment Updates Demo -->
-    <section id="multiFragment" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
-      <h2 class="text-2xl font-semibold mb-4">Multi‑Fragment Updates</h2>
-      <button GET="/multi/fragment" target="#multiUpdate1(innerHTML) #multiUpdate2(append)"
-        class="btn bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-8 rounded-md">
-        Load Multi‑Fragment Update
-      </button>
-      <div class="mt-4 space-y-4">
-        <div id="multiUpdate1" class="p-4 bg-gray-700 rounded-md">
-          <!-- Primary update appears here -->
+    <!-- ===== FOOTER (Sticky Bottom) ===== -->
+    <footer class="bg-gray-200 dark:bg-gray-800 border-t border-gray-300 dark:border-gray-700">
+        <div class="container mx-auto px-4 py-4 flex flex-col lg:flex-row justify-between items-center">
+            <p class="text-sm">&copy; 2025 HTMleX playgrounds</p>
+            <!-- Project Links Placeholders with Emojis -->
+            <div class="flex space-x-4 mt-2 lg:mt-0">
+                <a href="#" class="flex items-center text-blue-600 dark:text-blue-400 hover:underline">
+                    <span class="mr-1">🔗</span> Project Link 1
+                </a>
+                <a href="#" class="flex items-center text-blue-600 dark:text-blue-400 hover:underline">
+                    <span class="mr-1">📎</span> Project Link 2
+                </a>
+                <a href="#" class="flex items-center text-blue-600 dark:text-blue-400 hover:underline">
+                    <span class="mr-1">💻</span> Project Link 3
+                </a>
+            </div>
         </div>
-        <div id="multiUpdate2" class="p-4 bg-gray-700 rounded-md">
-          <!-- Additional appended updates appear here -->
-        </div>
-      </div>
-    </section>
+    </footer>
 
-    <!-- 7. Signal Chaining Demo -->
-    <section id="signalChaining" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
-      <h2 class="text-2xl font-semibold mb-4">Signal Chaining</h2>
-      <div class="space-y-4">
-        <!-- Start Process Button: Publishes the first chain signal -->
-        <button publish="chain1"
-          class="btn bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-3 px-8 rounded-md">
-          Start Process
-        </button>
-
-        <!-- Hidden chain elements trigger API calls and publish next signals -->
-        <div class="hidden">
-          <!-- Chain 1: Subscribes to "chain1", calls step1, appends response to chainOutput, and publishes "chain2" -->
-          <div subscribe="chain1" trigger="signal" GET="/process/step1" target="#chainOutput(append)" publish="chain2">
-          </div>
-
-          <!-- Chain 2: Subscribes to "chain2", calls step2, appends response to chainOutput, and publishes "chain3" -->
-          <div subscribe="chain2" trigger="signal" GET="/process/step2" target="#chainOutput(append)" publish="chain3">
-          </div>
-
-          <!-- Chain 3: Subscribes to "chain3", calls step3, appends response to chainOutput, and publishes "chain4" -->
-          <div subscribe="chain3" trigger="signal" GET="/process/step3" target="#chainOutput(append)" publish="chain4">
-          </div>
-
-          <!-- Chain 4: Subscribes to "chain4", calls step4, appends response to chainOutput, and publishes "chain5" -->
-          <div subscribe="chain4" trigger="signal" GET="/process/step4" target="#chainOutput(append)" publish="chain5">
-          </div>
-
-          <!-- Chain 5: Subscribes to "chain5", calls step5, and appends response to chainOutput -->
-          <div subscribe="chain5" trigger="signal" GET="/process/step5" target="#chainOutput(append)"></div>
-        </div>
-
-        <!-- Output area where all chain responses are appended -->
-        <div id="chainOutput" class="p-4 bg-gray-700 rounded-md">
-          <!-- Responses from chain steps will appear here -->
-        </div>
-      </div>
-    </section>
-
-    <!-- 8. SSE Subscribers Demo -->
-    <section id="sseDemo" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
-      <h2 class="text-2xl font-semibold mb-4">SSE Subscriber (Simulated)</h2>
-      <button GET="/sse/subscribe" class="btn bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-md">
-        Get SSE Signal
-      </button>
-      <!-- Although HTMLeX doesn't have explicit SSE handling, we can simulate it with subscribe -->
-      <div subscribe="sseUpdate" GET="/sse/subscribe/message" target="this(innerHTML)"
-        class="p-4 bg-gray-700 rounded-md p-4 mt-4">
-        SSE updates will appear here...
-      </div>
-    </section>
-
-    <!-- 9. WebSocket Updates Demo -->
-    <section id="websocketUpdates" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
-      <h2 class="text-2xl font-semibold mb-4">Live WebSocket Feed</h2>
-      <div id="liveFeed" socket="wss://localhost:5500/updates" target="#liveFeed(innerHTML)"
-        class="max-h-48 overflow-y-auto p-4 bg-gray-700 rounded-md">
-        <!-- Real‑time updates via WebSocket will stream here -->
-        <p class="text-center text-gray-500">Connecting to live feed...</p>
-      </div>
-    </section>
-
-    <!-- 10. Sequential API Calls Demo -->
-    <section id="sequentialDemo" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
-      <h2 class="text-2xl font-semibold mb-4">Sequential API Calls</h2>
-      <button GET="/sequential/process" target="#sequentialOutput(append)" sequential="200"
-        class="btn bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-md">
-        Run Sequential Process
-      </button>
-      <div id="sequentialOutput" class="mt-4 p-4 bg-gray-700 rounded-md">
-        <!-- Sequential responses will be queued and rendered here -->
-      </div>
-    </section>
-
-    <!-- 11. Loading State Demo with Spinner -->
-    <section id="loadingDemo" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
-      <h2 class="text-2xl font-semibold mb-4">Loading State Demo</h2>
-      <button GET="/demo/loading" target="#loadingDemoOutput(innerHTML)" sequential="500"
-        class="btn bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-8 rounded-md">
-        Load Payload
-      </button>
-      <div id="loadingDemoOutput" class="mt-4 p-4 bg-gray-700 rounded-md">
-        <!-- On click, this area will first show a loading fragment with a spinner then payload after 5 seconds -->
-      </div>
-    </section>
-
-    <!-- 12. Polling Demo -->
-    <section id="pollingDemo" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
-      <h2 class="text-2xl font-semibold mb-4">Polling demo</h2>
-      <div GET="/sequential/poll" poll="5000" repeat="10" target="this(append)" class="mt-4 p-4 bg-gray-700 rounded-md">
-        <!-- On click, this area will first show a loading fragment with a spinner then payload after 5 seconds -->
-        ...Waiting for polling count every 5000ms limit 10:
-      </div>
-      <div GET="/sequential/poll" poll="10000" target="this(append)" class="mt-4 p-4 bg-gray-700 rounded-md">
-        <!-- On click, this area will first show a loading fragment with a spinner then payload after 5 seconds -->
-        ...Waiting for polling count every 10000ms no limits:
-      </div>
-    </section>
-
-    <!-- 13. Hover Trigger Demo -->
-    <section id="hoverTriggerDemo" class="bg-gray-800 p-6 rounded-lg shadow-lg fade-in">
-      <h2 class="text-2xl font-semibold mb-4 text-white">Hover Trigger Demo</h2>
-      <div id="hoverDemo" class="mt-4 p-4 bg-gray-700 rounded-md text-gray-100">
-        <!-- When hovered, this area will first show a loading fragment with a spinner,
-         then the payload after 5 seconds -->
-        ...Hover actions:
-      </div>
-      <button get="/sequential/poll" trigger="mouseout" target="#hoverDemo(innerHTML)" debounce="1000"
-        class="btn bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-8 rounded-md">
-        Just hover, don't click, high debounce
-      </button>
-      <button get="/sequential/poll" trigger="mouseout" target="#hoverDemo(innerHTML)" debounce="10"
-        class="btn bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-8 rounded-md">
-        Just hover, don't click, low debounce
-      </button>
-    </section>
-
-  </main>
-
-
-  </section>
-
-  <!-- FOOTER -->
-  <footer class="bg-gray-800 text-center p-4 mt-8 fade-in">
-    <p class="text-sm text-gray-500">&copy; 2025 HTMLeX Demo Showcase. All rights reserved.</p>
-  </footer>
-
-  <!-- HTMLeX Client-Side Initialization -->
-  <script type="module">
-    // Import your HTMLeX initialization module (ensure the path is correct)
-    import { initHTMLeX } from './src/htmlex.js';
-    document.addEventListener('DOMContentLoaded', () => {
-      initHTMLeX();
-      console.log('HTMLeX initialized.');
-    });
-  </script>
+    <!-- ===== SCRIPTS (if any reactive behavior is needed) ===== -->
+    <!-- HTMLeX Client-Side Initialization -->
+    <script type="module">
+        // Import your HTMLeX initialization module (ensure the path is correct)
+        import { initHTMLeX } from './src/htmlex.js';
+        document.addEventListener('DOMContentLoaded', () => {
+            initHTMLeX();
+            console.log('HTMLeX initialized.');
+        });
+    </script>
 </body>
 
 </html>
