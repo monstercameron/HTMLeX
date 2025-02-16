@@ -11,7 +11,7 @@ import { render } from '../components/HTMLeX.js';
 import {
   renderLoadingMessage,
   renderNotificationMessage,
-  renderCounter, NotificationsDemo, renderFragment
+  renderCounter, NotificationsDemo, renderFragment, ClickCounterWidget
 } from '../components/Components.js';
 
 /**
@@ -85,7 +85,6 @@ export async function notificationsDemoInit(req, res) {
   }
 }
 
-
 /**
  * Handles the '/notifications' endpoint.
  * Sends an initial loading fragment and, after a delay, writes a notification fragment before closing the response.
@@ -137,6 +136,22 @@ export async function fetchNotification(req, res) {
   }
 }
 
+/**
+ * Increments the counter for the clicker demo and sends the updated counter as an HTML fragment.
+ * @async
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>}
+ */
+export async function incrementCounterDemoInit(req, res) {
+  try {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderFragment('#demoCanvas(innerHTML)', ClickCounterWidget()));
+  } catch (err) {
+    console.error('Error in incrementCounter:', err);
+    if (!res.headersSent) res.status(500).send('Internal server error');
+  }
+}
 
 /**
  * Increments the counter for the clicker demo and sends the updated counter as an HTML fragment.

@@ -76,6 +76,7 @@
         "Throttle",
         "Real-time counter"
       ],
+      "initDemoHref":"/counter/init",
       "launchButtonText": "Click Me!",
       "learnMoreText": "Learn More",
       "learnMoreHref": "/clickCounter/details",

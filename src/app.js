@@ -40,7 +40,10 @@ const ITEMS_LOAD_MORE_ROUTE = '/items/loadMore';
 // SSE Notifications
 const NOTIFICATIONS_DEMO_INIT = "/notifications/init"
 const NOTIFICATIONS_ROUTE = '/notifications';
+// click counter
+const COUNTER_DEMO_INIT = '/counter/init';
 const COUNTER_INCREMENT_ROUTE = '/counter/increment';
+// 
 const MULTI_FRAGMENT_ROUTE = '/multi/fragment';
 const SEQUENTIAL_POLL_ROUTE = '/sequential/poll';
 const PROCESS_STEP1_ROUTE = '/process/step1';
@@ -134,15 +137,12 @@ app.delete(TODO_DELETE_ROUTE, async (req, res) => {
 app.get(ITEMS_LOAD_MORE_ROUTE, async (req, res) => {
   await streaming.loadMoreItems(req, res);
 });
-app.get(NOTIFICATIONS_DEMO_INIT, async (req, res) => {
-  await streaming.notificationsDemoInit(req, res);
-});
-app.get(NOTIFICATIONS_ROUTE, async (req, res) => {
-  await streaming.fetchNotification(req, res);
-});
-app.get(COUNTER_INCREMENT_ROUTE, async (req, res) => {
-  await streaming.incrementCounter(req, res);
-});
+// SS notifications
+app.get(NOTIFICATIONS_DEMO_INIT, streaming.notificationsDemoInit);
+app.get(NOTIFICATIONS_ROUTE, streaming.fetchNotification);
+// Click Counter Demo
+app.get(COUNTER_DEMO_INIT, streaming.incrementCounterDemoInit);
+app.get(COUNTER_INCREMENT_ROUTE, streaming.incrementCounter);
 app.get(MULTI_FRAGMENT_ROUTE, async (req, res) => {
   await streaming.multiFragment(req, res);
 });

@@ -716,3 +716,44 @@ export function NotificationsDemo(message = "Waitiing...") {
     )
   );
 }
+
+
+/**
+ * Renders the Clicker Counter widget using the HTMLeX API.
+ *
+ * This function returns the rendered HTML string for a click counter demo,
+ * featuring a counter display and a button that triggers an API call to increment the counter.
+ *
+ * @returns {string} The HTML string representing the Clicker Counter widget.
+ *
+ * @example
+ * const htmlString = ClickCounterWidget();
+ * // Use the rendered HTML string in your response.
+ */
+export function ClickCounterWidget() {
+  return render(
+    section(
+      { id: 'clickCounter', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
+      h2(
+        { class: 'text-2xl font-semibold mb-4' },
+        'Clicker Counter'
+      ),
+      div(
+        { id: 'counterDisplay', class: 'text-4xl font-bold text-center' },
+        '0'
+      ),
+      div(
+        { class: 'mt-4 text-center' },
+        button(
+          {
+            GET: '/counter/increment',
+            trigger: 'click',
+            target: '#counterDisplay(innerHTML)',
+            class: 'btn bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-md'
+          },
+          'Click Me!'
+        )
+      )
+    )
+  );
+}
