@@ -181,7 +181,7 @@ export async function getTodoItem(req, res) {
     }
     const htmlSnippet = renderTodoItem(todo);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment(`#editForm-${id}(innerHTML)`, htmlSnippet));
+    res.send(renderFragment(`#editForm-${id}(outerHTML)`, htmlSnippet));
   } catch (err) {
     console.error('Error in getTodoItem:', err);
     if (!res.headersSent) res.status(500).send('Internal server error');

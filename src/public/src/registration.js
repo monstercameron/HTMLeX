@@ -71,6 +71,28 @@ function normalizeEvent(eventName) {
  * @param {Element} element - The element to register.
  */
 export function registerElement(element) {
+  // Warn if a <button> inside a form does not explicitly specify the type.
+  if (
+    element.tagName.toLowerCase() === 'button' &&
+    !element.hasAttribute('type') &&
+    element.closest('form')
+  ) {
+    // Determine an identity string for the button.
+    const identity =
+      element.id
+        ? `#${element.id}`
+        : element.getAttribute('name')
+        ? `[name="${element.getAttribute('name')}"]`
+        : element.outerHTML.slice(0, 60) + '...';
+    
+    Logger.warn(
+      `[HTMLeX Warning] A <button> element (${identity}) inside a form does not specify a type attribute. ` +
+      `It defaults to 'submit', which may trigger the form's API/signal in addition to its own. ` +
+      `Consider explicitly setting type="button" (or type="submit" if intended).`
+    );
+  }
+  
+
   if (registeredElements.has(element)) {
     Logger.debug("[DEBUG] Element already registered:", element);
     return;
@@ -217,6 +239,7 @@ export function registerElement(element) {
     handleWebSocket(element, socketUrl);
   }
 }
+
 
 /**
  * Scans the DOM for HTMLeX‑enabled elements and registers them.
