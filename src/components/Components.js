@@ -836,3 +836,49 @@ export function multiFragmentDemo() {
     )
   );
 }
+
+/**
+ * Creates a virtual node tree representing the Signal Chaining Demo widget.
+ *
+ * This demo shows a "Start Process" button that publishes the first chain signal,
+ * followed by a set of hidden chain elements that subscribe to a signal, call API endpoints,
+ * append responses to the output container, and publish the next signal.
+ *
+ * @returns {Object} A virtual node representing the Signal Chaining Demo.
+ *
+ * @example
+ * const demoNode = SignalChainingDemo();
+ * // Pass demoNode to your HTMLeX renderer.
+ */
+export function SignalChainingDemo() {
+  return section(
+    { id: 'signalChaining', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
+    h2({ class: 'text-2xl font-semibold mb-4' }, 'Signal Chaining'),
+    div(
+      { class: 'space-y-4' },
+      // Start Process Button: Publishes the first chain signal.
+      button(
+        { publish: 'chain1', class: 'btn bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-3 px-8 rounded-md' },
+        'Start Process'
+      ),
+      // Hidden chain elements trigger API calls and publish next signals.
+      div(
+        { class: 'hidden' },
+        // Chain 1: Subscribes to "chain1", calls step1, appends response to chainOutput, and publishes "chain2"
+        div({ subscribe: 'chain1', trigger: 'signal', GET: '/process/step1', target: '#chainOutput(append)', publish: 'chain2' }),
+        // Chain 2: Subscribes to "chain2", calls step2, appends response to chainOutput, and publishes "chain3"
+        div({ subscribe: 'chain2', trigger: 'signal', GET: '/process/step2', target: '#chainOutput(append)', publish: 'chain3' }),
+        // Chain 3: Subscribes to "chain3", calls step3, appends response to chainOutput, and publishes "chain4"
+        div({ subscribe: 'chain3', trigger: 'signal', GET: '/process/step3', target: '#chainOutput(append)', publish: 'chain4' }),
+        // Chain 4: Subscribes to "chain4", calls step4, appends response to chainOutput, and publishes "chain5"
+        div({ subscribe: 'chain4', trigger: 'signal', GET: '/process/step4', target: '#chainOutput(append)', publish: 'chain5' }),
+        // Chain 5: Subscribes to "chain5", calls step5, and appends response to chainOutput.
+        div({ subscribe: 'chain5', trigger: 'signal', GET: '/process/step5', target: '#chainOutput(append)' })
+      ),
+      // Output area where all chain responses are appended.
+      div(
+        { id: 'chainOutput', class: 'p-4 bg-gray-700 rounded-md' }
+      )
+    )
+  );
+}

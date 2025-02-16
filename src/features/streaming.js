@@ -11,8 +11,9 @@ import { render } from '../components/HTMLeX.js';
 import {
   renderLoadingMessage,
   renderNotificationMessage,
-  renderCounter, NotificationsDemo, renderFragment, ClickCounterWidget, multiFragmentDemo
+  renderCounter, NotificationsDemo, renderFragment, ClickCounterWidget, multiFragmentDemo, SignalChainingDemo
 } from '../components/Components.js';
+import { write } from 'fs';
 
 /**
  * Module-level counter for the clicker demo.
@@ -244,9 +245,14 @@ export async function sequentialPoll(req, res) {
 
 /**
  * Internal helper for process step endpoints.
- * Sends a message indicating the step and the current time.
- * @param {number} step - The process step number.
- * @param {import('express').Response} res - Express response object.
+ * Simulates work by delaying the response, then sends an HTML fragment indicating the process step
+ * and the time at which the data was "received". This fragment is appended to the current content.
+ *
+ * This function is part of a chain of signals where an API response is delayed to simulate work,
+ * then a publish signal is triggered to invoke a subsequent API call.
+ *
+ * @param {number} step - The current process step number.
+ * @param {import('express').Response} res - The Express response object.
  */
 function processStep(step, res) {
   setTimeout(() => {
@@ -256,9 +262,39 @@ function processStep(step, res) {
       res.send(renderFragment('this(append)', render(message)));
     } catch (err) {
       console.error(`Error in processStep${step}:`, err);
-      if (!res.headersSent) res.status(500).send('Internal server error');
+      if (!res.headersSent) {
+        res.status(500).send('Internal server error');
+      }
     }
-  }, 100);
+  }, 1000);
+}
+
+/**
+ * Handles the '/process/step1' endpoint.
+ * Sends an HTML fragment that triggers the signal chaining demo, updating the UI.
+ *
+ * This endpoint renders an HTML fragment via `SignalChainingDemo()` and targets the "#demoCanvas"
+ * element to update its innerHTML. Once the fragment is sent, the response is properly terminated.
+ *
+ * @function processInit
+ * @param {import('express').Request} req - The Express request object.
+ * @param {import('express').Response} res - The Express response object.
+ */
+export function processInit(req, res) {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  try {
+    // Write the HTML fragment to update the "#demoCanvas" element.
+    res.write(renderFragment("#demoCanvas(innerHTML)", SignalChainingDemo()));
+    // End the response to finalize the transmission.
+    res.end();
+  } catch (err) {
+    console.error('Error in processInit:', err);
+    if (!res.headersSent) {
+      res.status(500).send('Internal server error');
+    } else {
+      res.end();
+    }
+  }
 }
 
 /**

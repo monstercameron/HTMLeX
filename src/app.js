@@ -49,6 +49,7 @@ const MULTI_FRAGMENT_ROUTE = '/multi/fragment';
 // Polling
 const SEQUENTIAL_POLL_ROUTE = '/sequential/poll';
 // Sequential FIFO with pacing
+const PROCESS_DEMO_INIT = '/process/init';
 const PROCESS_STEP1_ROUTE = '/process/step1';
 const PROCESS_STEP2_ROUTE = '/process/step2';
 const PROCESS_STEP3_ROUTE = '/process/step3';
@@ -141,6 +142,7 @@ app.get(MULTI_FRAGMENT_ROUTE, streaming.multiFragment);
 app.get(SEQUENTIAL_POLL_ROUTE, streaming.sequentialPoll);
 
 // Signal Chaining
+app.get(PROCESS_DEMO_INIT, streaming.processInit);
 app.get(PROCESS_STEP1_ROUTE, streaming.processStep1);
 app.get(PROCESS_STEP2_ROUTE, streaming.processStep2);
 app.get(PROCESS_STEP3_ROUTE, streaming.processStep3);

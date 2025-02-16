@@ -142,6 +142,7 @@
         "Chain signals",
         "API calls"
       ],
+      "initDemoHref":"/process/init",
       "launchButtonText": "Start Process",
       "learnMoreText": "Learn More",
       "learnMoreHref": "/signalChaining/details",
