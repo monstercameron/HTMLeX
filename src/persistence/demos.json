@@ -53,6 +53,7 @@
         "Real-time notifications",
         "Timer based removal"
       ],
+      "initDemoHref":"/notifications/init",
       "launchButtonText": "Get Notification",
       "learnMoreText": "Learn More",
       "learnMoreHref": "/notifications/details",

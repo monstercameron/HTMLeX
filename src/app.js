@@ -35,7 +35,10 @@ const TODO_UPDATE_ROUTE = '/todos/:id';
 const TODO_DELETE_ROUTE = '/todos/:id';
 
 // Streaming routes
+// Infinite scrolling
 const ITEMS_LOAD_MORE_ROUTE = '/items/loadMore';
+// SSE Notifications
+const NOTIFICATIONS_DEMO_INIT = "/notifications/init"
 const NOTIFICATIONS_ROUTE = '/notifications';
 const COUNTER_INCREMENT_ROUTE = '/counter/increment';
 const MULTI_FRAGMENT_ROUTE = '/multi/fragment';
@@ -130,6 +133,9 @@ app.delete(TODO_DELETE_ROUTE, async (req, res) => {
 // ------------------------------
 app.get(ITEMS_LOAD_MORE_ROUTE, async (req, res) => {
   await streaming.loadMoreItems(req, res);
+});
+app.get(NOTIFICATIONS_DEMO_INIT, async (req, res) => {
+  await streaming.notificationsDemoInit(req, res);
 });
 app.get(NOTIFICATIONS_ROUTE, async (req, res) => {
   await streaming.fetchNotification(req, res);

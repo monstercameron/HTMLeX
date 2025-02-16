@@ -11,7 +11,7 @@ import { render } from '../components/HTMLeX.js';
 import {
   renderLoadingMessage,
   renderNotificationMessage,
-  renderCounter
+  renderCounter, NotificationsDemo, renderFragment
 } from '../components/Components.js';
 
 /**
@@ -25,18 +25,6 @@ let clickerCounter = 0;
  * @type {number}
  */
 let pollVal = 0;
-
-/**
- * Utility function to wrap HTML snippets in a fragment.
- * @param {string} selectorAction - The target selector and action (e.g., "#id(innerHTML)").
- * @param {string} html - The HTML content.
- * @param {object} [options] - Optional parameters.
- * @returns {string} The wrapped HTML fragment.
- */
-function renderFragment(selectorAction, html, options = {}) {
-  // This is a simplified version.
-  return html;
-}
 
 /**
  * Handles the '/items/loadMore' endpoint.
@@ -69,30 +57,86 @@ export async function loadMoreItems(req, res) {
 }
 
 /**
- * Handles the '/notifications' endpoint.
- * Sends a loading message and, after a delay, sends a notification message.
+ * Handles the '/notifications/init' endpoint.
+ * Immediately sends the final notification content fragment.
+ *
+ * This function writes a fragment to update the target element (using the
+ * "#demoCanvas(innerHTML)" directive) and then finalizes the response with `res.end()`.
+ *
  * @async
+ * @function notificationsDemoInit
  * @param {import('express').Request} req - Express request object.
  * @param {import('express').Response} res - Express response object.
- * @returns {Promise<void>}
+ * @returns {Promise<void>} Resolves when the response has been fully sent.
+ */
+export async function notificationsDemoInit(req, res) {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  try {
+    // Write the final notification fragment immediately.
+    res.write(renderFragment('#demoCanvas(innerHTML)', NotificationsDemo()));
+    res.end();
+  } catch (err) {
+    console.error('Error in notificationsDemoInit:', err);
+    if (!res.headersSent) {
+      res.status(500).end();
+    } else {
+      res.end();
+    }
+  }
+}
+
+
+/**
+ * Handles the '/notifications' endpoint.
+ * Sends an initial loading fragment and, after a delay, writes a notification fragment before closing the response.
+ *
+ * The response stream first sends a loading message for the target element
+ * ("#notificationArea(innerHTML)") and then, after a 2500ms delay, writes the final
+ * notification message (with a timer option). The connection is then properly closed with `res.end()`.
+ *
+ * @async
+ * @function fetchNotification
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>} Resolves when the entire response has been sent.
  */
 export async function fetchNotification(req, res) {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   try {
-    res.write(renderFragment('#notificationArea(innerHTML)', renderLoadingMessage("Fetching notification...")));
+    // Write a loading message fragment immediately.
+    res.write(
+      renderFragment(
+        '#notificationArea(innerHTML)',
+        renderLoadingMessage("Fetching notification in 2500ms...")
+      )
+    );
+    // After 2500ms, write the final notification fragment and then close the response.
     setTimeout(() => {
       try {
-        res.write(renderFragment('#notificationArea(innerHTML)', renderNotificationMessage("You have a new notification!"), { timer: "5000" }));
+        res.write(
+          renderFragment(
+            '#notificationArea(innerHTML)',
+            renderNotificationMessage("You have a new notification! It will disappear in 5000ms"),
+            { timer: "5000" }
+          )
+        );
       } catch (innerErr) {
         console.error('Error while writing notification in fetchNotification:', innerErr);
+      } finally {
+        // Ensure the response is closed regardless of errors.
+        res.end();
       }
-      if (!res.headersSent) res.end();
-    }, 1500);
+    }, 2500);
   } catch (err) {
     console.error('Error in fetchNotification:', err);
-    if (!res.headersSent) res.status(500).end();
+    if (!res.headersSent) {
+      res.status(500).end();
+    } else {
+      res.end();
+    }
   }
 }
+
 
 /**
  * Increments the counter for the clicker demo and sends the updated counter as an HTML fragment.

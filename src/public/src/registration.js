@@ -92,7 +92,6 @@ export function registerElement(element) {
     );
   }
   
-
   if (registeredElements.has(element)) {
     Logger.debug("[DEBUG] Element already registered:", element);
     return;
@@ -238,8 +237,45 @@ export function registerElement(element) {
     Logger.debug("[DEBUG] Setting up WebSocket connection for element:", element, "URL:", socketUrl);
     handleWebSocket(element, socketUrl);
   }
-}
 
+  // --- NEW: Timer Handling for Removal/Update ---
+  // If the element has a timer attribute, set up a timer that triggers a DOM update
+  // using the target attribute. This supports arbitrary target selectors.
+  if (element.hasAttribute('timer')) {
+    const timerDelay = parseInt(element.getAttribute('timer'), 10);
+    setTimeout(() => {
+      const targetAttr = element.getAttribute('target');
+      if (targetAttr) {
+        const targets = parseTargets(targetAttr);
+        targets.forEach(target => {
+          let resolvedElement = null;
+          if (target.selector.trim().toLowerCase() === "this") {
+            resolvedElement = element;
+          } else {
+            resolvedElement = document.querySelector(target.selector);
+          }
+          if (!resolvedElement) {
+            Logger.warn(`[HTMLeX WARN] Timer triggered: target element "${target.selector}" not found.`);
+            return;
+          }
+          // If the replacement strategy is 'remove', remove the element.
+          if (target.replacementStrategy && target.replacementStrategy === 'remove') {
+            Logger.info(`[HTMLeX INFO] Timer triggered: removing element matching target "${target.selector}"`);
+            resolvedElement.remove();
+          } else {
+            Logger.info(`[HTMLeX INFO] Timer triggered: updating element matching target "${target.selector}" with empty content`);
+            // For other strategies, update the target with an empty string.
+            patchedUpdateTarget(target, "", resolvedElement);
+          }
+        });
+      } else {
+        Logger.info("Timer triggered: No target attribute specified; no action taken.");
+      }
+    }, timerDelay);
+    Logger.info(`[HTMLeX INFO] Timer set for element with delay ${timerDelay}ms.`);
+  }
+  // --- END NEW: Timer Handling ---
+}
 
 /**
  * Scans the DOM for HTMLeX‑enabled elements and registers them.

@@ -147,14 +147,14 @@ export function DemoHighlights(highlights) {
  * @returns {Object} A virtual node for the actions.
  */
 export function DemoActions(
-  { launchButtonText, learnMoreText, learnMoreHref },
+  { launchButtonText, learnMoreText, learnMoreHref, initDemoHref },
   { buttonGradient, linkColor }
 ) {
   return div(
     { class: 'flex items-center justify-between' },
     button(
       {
-        class: `px-6 py-2 ${buttonGradient} text-white font-semibold rounded-full shadow-md hover:transition transform hover:scale-105`, "GET": "/todos/init"
+        class: `px-6 py-2 ${buttonGradient} text-white font-semibold rounded-full shadow-md hover:transition transform hover:scale-105`, "GET": initDemoHref
       },
       launchButtonText
     ),
@@ -198,6 +198,7 @@ export function DemoItem(demo) {
           launchButtonText: demo.launchButtonText,
           learnMoreText: demo.learnMoreText,
           learnMoreHref: demo.learnMoreHref,
+          initDemoHref: demo.initDemoHref,
         },
         {
           buttonGradient: demo.gradients.buttonGradient,
@@ -663,7 +664,7 @@ export function renderLoadingMessage(message) {
  */
 export function renderNotificationMessage(message) {
   return render(
-    div({ class: 'notification-message' }, message)
+    div({ class: 'notification-message', timer:"5000", target:"#notifications(remove)"}, message)
   );
 }
 
@@ -689,4 +690,29 @@ export function renderDefaultIndexPage() {
   );
 }
 
-
+/**
+ * Returns a virtual node representing the Notifications Demo widget.
+ * This node uses custom HTMLeX attributes for API calls and timer removal.
+ *
+ * @returns {Object} A virtual node for the notifications demo.
+ *
+ * @example
+ * const notificationsNode = NotificationsDemo();
+ */
+export function NotificationsDemo(message = "Waitiing...") {
+  return section(
+    { id: 'notifications', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
+    h2({ class: 'text-2xl font-semibold mb-4' }, 'Notifications'),
+    button(
+      {
+        GET: '/notifications',
+        target: '#notificationArea(innerHTML)',
+        class: 'btn bg-gradient-to-r from-green-500 to-teal-500 hover:from-green-600 hover:to-teal-600 text-white font-bold py-3 px-8 rounded-md shadow-lg'
+      }, "Get Notification"
+    ),
+    div(
+      { id: 'notificationArea', class: 'mt-4 p-4 bg-gray-700 rounded-md shadow animate-pulse' },
+      message
+    )
+  );
+}
