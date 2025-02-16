@@ -12,16 +12,17 @@ import { fileURLToPath } from 'url';
 import {
   renderTodoItem,
   renderTodoList,
-  renderEditForm
+  renderEditForm,
+  TodoWidget,
+  renderFragment
 } from '../components/Components.js';
-import { render } from '../components/HTMLeX.js';
 
 // Determine the directory name of this module.
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Path to the data file storing todos.
-const dataPath = path.join(__dirname, '..', 'data.json');
+const dataPath = path.join(__dirname, '..', 'persistence/data.json');
 
 /**
  * Ensures that the data file exists.
@@ -52,6 +53,38 @@ export async function loadTodos() {
   } catch (err) {
     console.error('Error loading todos:', err);
     return [];
+  }
+}
+
+/**
+ * Handles the request to get the ToDo widget.
+ *
+ * Loads todos, validates the data, renders the widget as HTML, and sends it in the response.
+ *
+ * @param {import('express').Request} req - The Express request object.
+ * @param {import('express').Response} res - The Express response object.
+ * @returns {Promise<void>}
+ */
+export async function getToDoWidget(req, res) {
+  try {
+    const todos = await loadTodos();
+
+    if (!Array.isArray(todos)) {
+      console.error('Loaded todos is not an array:', todos);
+      if (!res.headersSent) {
+        return res.status(500).send('Internal server error: Invalid todo data');
+      }
+      return;
+    }
+
+    const htmlSnippet = TodoWidget(todos);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderFragment('#demoCanvas(innerHTML)', htmlSnippet));
+  } catch (err) {
+    console.error('Error in getToDoWidget:', err);
+    if (!res.headersSent) {
+      res.status(500).send('Internal server error');
+    }
   }
 }
 
@@ -209,7 +242,7 @@ export async function updateTodo(req, res) {
     await writeTodos(todos);
     const updatedTodoItem = renderTodoItem(todos[index]);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment(`#todo-${id}(innerHTML)`, updatedTodoItem));
+    res.send(renderFragment(`#todo-${id}(outerHTML)`, updatedTodoItem));
   } catch (err) {
     console.error('Error in updateTodo:', err);
     if (!res.headersSent) res.status(500).send('Internal server error');
@@ -245,16 +278,3 @@ export async function deleteTodo(req, res) {
   }
 }
 
-/**
- * Utility function to wrap HTML snippets in a fragment.
- * This replicates the behavior of the original renderFragment function.
- * @param {string} selectorAction - The target selector and action (e.g., "#todoList(innerHTML)").
- * @param {string} html - The HTML content to insert.
- * @param {object} [options] - Optional parameters such as timers.
- * @returns {string} The wrapped HTML fragment.
- */
-function renderFragment(selectorAction, html, options = {}) {
-  // In a real implementation, this might wrap HTML in a specific protocol.
-  // For now, it returns the HTML directly.
-  return html;
-}

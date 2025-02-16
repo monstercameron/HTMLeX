@@ -55,11 +55,13 @@
             <!-- Canvas Header -->
             <h2 class="text-2xl font-semibold mb-4 flex-shrink-0">Canvas</h2>
             <!-- Canvas content area -->
-            <div id="demoCanvas" class="flex-grow flex items-center justify-center">
+            <div id="demoCanvas" class="flex-grow flex  justify-center pt-10" style="max-height: 100vh; overflow-y: scroll;">
                 <!-- Clicker Demo -->
-                <div id="" class="flex flex-col items-center justify-center">
-                    <span>Demo goes here</span>
+                <div class="flex flex-col items-center justify-center max-h-full overflow-y-auto" style="max-height: 100%; overflow-y: auto; overflow-x: hidden;">
+                  <span>Demo goes here</span>
+                  <!-- Additional content that might overflow vertically -->
                 </div>
+              </div>
             </div>
         </section>
 

@@ -26,6 +26,7 @@ const PUBLIC_DIR = 'public';
 const INDEX_FILE = 'index.html';
 
 // Todo routes
+const TODO_INIT_DEMO = '/todos/init';
 const TODO_CREATE_ROUTE = '/todos/create';
 const TODO_LIST_ROUTE = '/todos/list';
 const TODO_ITEM_ROUTE = '/todos/item/:id';
@@ -102,6 +103,9 @@ app.get('/demos', loadAndRenderDemos)
 // ------------------------------
 // Todo API Endpoints (Async)
 // ------------------------------
+app.get(TODO_INIT_DEMO, async (req, res) => {
+  await todos.getToDoWidget(req, res);
+});
 app.post(TODO_CREATE_ROUTE, upload.none(), async (req, res) => {
   await todos.createTodo(req, res);
 });

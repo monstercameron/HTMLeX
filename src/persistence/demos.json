@@ -10,6 +10,7 @@
         "Lifecycle events",
         "DOM updates"
       ],
+      "initDemoHref":"/todos/init",
       "launchButtonText": "Todo Demo",
       "learnMoreText": "Learn More",
       "learnMoreHref": "/todos/details",

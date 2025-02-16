@@ -6,7 +6,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon --ignore src/persistence/* src/server.js"
   },
   "repository": {
     "type": "git",

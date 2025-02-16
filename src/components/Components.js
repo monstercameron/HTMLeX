@@ -26,6 +26,10 @@ const {
   a,
   section,
   footer,
+  input,
+  label,
+  form,
+  br
 } = tags;
 
 /* ===========================
@@ -123,7 +127,7 @@ export function DemoHighlights(highlights) {
     { class: 'p-3 bg-white dark:bg-gray-800 rounded-xl shadow-md' },
     p(
       { class: 'text-sm text-gray-600 dark:text-gray-400' },
-      span({}, 'Highlights:'),"<br />",
+      span({}, 'Highlights:'), "<br />",
       ' ',
       highlights.join("<br />")
     )
@@ -150,7 +154,7 @@ export function DemoActions(
     { class: 'flex items-center justify-between' },
     button(
       {
-        class: `px-6 py-2 ${buttonGradient} text-white font-semibold rounded-full shadow-md hover:transition transform hover:scale-105`,
+        class: `px-6 py-2 ${buttonGradient} text-white font-semibold rounded-full shadow-md hover:transition transform hover:scale-105`, "GET": "/todos/init"
       },
       launchButtonText
     ),
@@ -350,60 +354,98 @@ export function FullHTML({ headerProps, demos, canvasProps, footerProps }) {
   );
 }
 
+
 /**
- * Renders an individual todo item.
+ * Creates a virtual DOM node representing an individual todo item using HTMLeX virtual nodes.
+ * The node includes action buttons for editing and deleting, styled for dark mode.
  *
  * @param {Object} todo - A todo object.
  * @param {number} todo.id - The unique identifier of the todo.
- * @param {string} todo.text - The text content of the todo.
- * @returns {string} HTML string representing the todo item.
+ * @param {string} todo.text - The text description of the todo.
+ * @returns {VNode} A virtual DOM node representing the todo item.
  *
  * @example
- * const todoHtml = renderTodoItem({ id: 123, text: 'Buy milk' });
+ * const todoNode = renderTodoItem({ id: 123, text: 'Buy milk' });
  */
 export function renderTodoItem(todo) {
+  // Create an edit button that performs a GET request to the edit endpoint.
   const editButton = button(
-    { onclick: `editTodo(${todo.id})`, class: 'edit-button' },
+    {
+      GET: `/todos/edit/${todo.id}`,
+      class: 'edit-button bg-blue-600 hover:bg-blue-500 text-gray-100 py-1 px-3 rounded'
+    },
     'Edit'
   );
+
+  // Create a delete button that performs a DELETE request to the todo endpoint.
   const deleteButton = button(
-    { onclick: `deleteTodo(${todo.id})`, class: 'delete-button' },
+    {
+      DELETE: `/todos/${todo.id}`,
+      class: 'delete-button bg-red-600 hover:bg-red-500 text-gray-100 py-1 px-3 rounded'
+    },
     'Delete'
   );
+
+  // Wrap the buttons in a container with spacing.
   const actionsDiv = div(
-    { class: 'todo-actions' },
+    { class: 'todo-actions flex space-x-2 mt-2' },
     editButton,
     deleteButton
   );
-  const todoText = span({ class: 'todo-text' }, todo.text);
-  const todoDiv = div(
-    { id: `todo-${todo.id}`, class: 'todo-item p-2 border rounded my-2' },
+
+  // Create a span for the todo text with dark mode–friendly styling.
+  const todoText = span(
+    { class: 'todo-text text-lg font-medium text-gray-200' },
+    todo.text
+  );
+
+  // Return the virtual DOM node for the todo item.
+  return div(
+    {
+      id: `todo-${todo.id}`,
+      class: 'todo-item p-4 border rounded-lg shadow my-2 bg-gray-800 border-gray-700'
+    },
     todoText,
     actionsDiv
   );
-  return render(todoDiv);
 }
 
 /**
- * Renders a list of todo items.
+ * Creates a virtual DOM structure representing a list of todo items with dark mode styling.
+ * Instead of rendering to HTML immediately, it returns a virtual DOM node with the individual
+ * todo nodes spread as children.
  *
  * @param {Array<Object>} todos - An array of todo objects.
- * @returns {string} HTML string representing the list of todos.
+ * @returns {VNode} A virtual DOM node representing the todo list.
  *
  * @example
- * const listHtml = renderTodoList([{ id: 123, text: 'Buy milk' }]);
+ * const todoListNode = renderTodoList([{ id: 123, text: 'Buy milk' }]);
+ * // Later, todoListNode can be rendered to HTML.
  */
 export function renderTodoList(todos) {
   if (!todos.length) {
-    return render(div({ class: 'no-todos' }, 'No todos available.'));
+    return div(
+      { class: 'no-todos text-gray-400 p-4 bg-gray-800 rounded-lg' },
+      'No todos available.'
+    );
   }
-  const todoItems = todos.map(todo => tag('raw', {}, renderTodoItem(todo)));
-  const listDiv = div({ id: 'todoList', class: 'todo-list' }, ...todoItems);
-  return render(listDiv);
+
+  // Create an array of virtual DOM nodes for each todo.
+  const todoNodes = todos.map(todo => renderTodoItem(todo));
+
+  // Return the container virtual DOM node with the todo nodes spread as children.
+  return div(
+    { id: 'todoList', class: 'todo-list space-y-4 bg-gray-900 p-4 rounded-lg shadow' },
+    ...todoNodes
+  );
 }
 
 /**
- * Renders an edit form for a given todo item.
+ * Renders an edit form for a given todo item using custom HTMLeX attributes.
+ *
+ * The form submits a PUT request to update the todo at the endpoint `/todos/{id}`
+ * and targets the DOM element with id `todo-{id}` to update its inner HTML.
+ * The cancel button uses a GET request to reload the original todo item.
  *
  * @param {Object} todo - A todo object.
  * @param {number} todo.id - The unique identifier of the todo.
@@ -414,29 +456,139 @@ export function renderTodoList(todos) {
  * const formHtml = renderEditForm({ id: 123, text: 'Buy milk' });
  */
 export function renderEditForm(todo) {
+  // Input field for editing the todo text.
   const inputField = input({
     type: 'text',
     name: 'todo',
     value: todo.text,
     required: 'true',
-    class: 'edit-input'
+    class: 'edit-input bg-gray-700 text-gray-200 border border-gray-600 rounded px-3 py-2'
   });
-  const saveButton = button({ type: 'submit', class: 'save-button' }, 'Save');
+
+  // Save button: form submission will trigger the PUT request.
+  const saveButton = button(
+    { type: 'submit', class: 'mr-2 save-button bg-green-600 hover:bg-green-500 text-gray-100 py-1 px-3 rounded' },
+    'Save'
+  );
+
+  // Cancel button: triggers a GET request to reload the original todo item.
   const cancelButton = button(
-    { type: 'button', onclick: `cancelEdit(${todo.id})`, class: 'cancel-button' },
+    { GET: `/todos/item/${todo.id}`, class: 'cancel-button bg-red-600 hover:bg-red-500 text-gray-100 py-1 px-3 rounded', target: `#editForm-${todo.id}(outerHTML)`, type: "button" },
     'Cancel'
   );
+
+  // The edit form:
+  // - PUT attribute sends the update to `/todos/{id}`
+  // - target attribute specifies where the updated HTML should be injected.
   const editForm = form(
     {
       id: `editForm-${todo.id}`,
-      class: 'edit-form',
-      onsubmit: `submitEdit(event, ${todo.id})`
+      class: 'edit-form bg-gray-800 p-4 rounded-lg shadow border border-gray-700',
+      PUT: `/todos/${todo.id}`,
+      target: `#todo-${todo.id}(innerHTML)`
     },
     inputField,
+    br(),
     saveButton,
     cancelButton
   );
+
   return render(editForm);
+}
+
+/**
+ * Renders a complete Todo Widget.
+ *
+ * This function component takes an array of todo objects and returns a virtual node
+ * representing the entire todo widget, including a header and a list of todos.
+ *
+ * Each todo object should have the following properties:
+ * @typedef {Object} Todo
+ * @property {number|string} id - A unique identifier for the todo.
+ * @property {string} text - The todo text.
+ * @property {boolean} completed - Flag indicating whether the todo is completed.
+ *
+ * @param {Object} params - The parameters for the TodoWidget.
+ * @param {Todo[]} params.todos - Array of todo objects.
+ * @returns {Object} A virtual node representing the todo widget.
+ *
+ * @example
+ * const todos = [
+ *   { id: 1, text: 'Buy milk', completed: false },
+ *   { id: 2, text: 'Walk the dog', completed: true }
+ * ];
+ * const todoWidget = TodoWidget({ todos });
+ * // Use render(todoWidget) to produce an HTML string.
+ */
+/**
+ * Renders the complete Todo App widget using the HTMLeX API.
+ *
+ * This function returns the rendered HTML string for a Todo App, which includes
+ * a form for adding new todos and a container for displaying the todo list.
+ *
+ * @param {Object} params
+ * @param {Object[]} [params.todos=[]] - Array of todo objects.
+ *        Each todo object should have:
+ *          - {number|string} id - Unique identifier.
+ *          - {string} text - The todo text.
+ *          - {boolean} completed - Completion status.
+ * @returns {string} The HTML string representing the Todo App widget.
+ *
+ * @example
+ * const todos = [
+ *   { id: 1, text: 'Buy milk', completed: false },
+ *   { id: 2, text: 'Walk the dog', completed: true }
+ * ];
+ * const htmlString = TodoWidget({ todos });
+ */
+export function TodoWidget(todos) {
+  return render(
+    section(
+      { id: 'todoApp', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
+      h2(
+        { class: 'text-2xl font-semibold mb-4 text-white' },
+        'Todo App with Lifecycle Hooks'
+      ),
+      form(
+        {
+          POST: '/todos/create',
+          target: '#todoList(innerHTML)',
+          extras: 'locale=en_US',
+          publish: 'todoCreated',
+          sequential: '150',
+          onbefore: "console.log('Before Todo Create', event)",
+          onafter: "console.log('After Todo Create', event)",
+          onbeforeSwap: "console.log('Before DOM Swap', event)",
+          onafterSwap: "console.log('After DOM Swap', event)",
+          class: 'space-y-4',
+        },
+        div(
+          {},
+          label(
+            { for: 'todoInput', class: 'block text-sm font-medium text-gray-300' },
+            'New Todo'
+          ),
+          input({
+            type: 'text',
+            id: 'todoInput',
+            name: 'todo',
+            required: 'true',
+            class:
+              'mt-2 block w-full bg-gray-700 border border-gray-600 rounded-md p-3 text-gray-100 placeholder-gray-400',
+            placeholder: 'Enter your task',
+          })
+        ),
+        button(
+          {
+            type: 'submit',
+            class:
+              'w-full btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-md',
+          },
+          'Add Todo'
+        )
+      ), renderTodoList(todos)
+    )
+  );
 }
 
 /**
