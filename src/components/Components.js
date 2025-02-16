@@ -664,7 +664,7 @@ export function renderLoadingMessage(message) {
  */
 export function renderNotificationMessage(message) {
   return render(
-    div({ class: 'notification-message', timer:"5000", target:"#notifications(remove)"}, message)
+    div({ class: 'notification-message', timer:"5000", target:"this(remove)"}, message)
   );
 }
 
