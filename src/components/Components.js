@@ -717,7 +717,6 @@ export function NotificationsDemo(message = "Waitiing...") {
   );
 }
 
-
 /**
  * Renders the Clicker Counter widget using the HTMLeX API.
  *
@@ -754,6 +753,86 @@ export function ClickCounterWidget() {
           'Click Me!'
         )
       )
+    )
+  );
+}
+
+/**
+ * Creates the virtual node structure for the Chat Interface Demo.
+ *
+ * @returns {Object} A virtual node representing the chat interface demo.
+ *
+ * @example
+ * const chatInterfaceNode = ChatInterfaceDemo();
+ */
+export function ChatInterfaceDemo() {
+  return section(
+    { id: 'chatInterface', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
+    h2({ class: 'text-2xl font-semibold mb-4' }, 'Chat Interface'),
+    div(
+      {
+        id: 'chatMessages',
+        socket: 'wss://localhost:5500/chat',
+        target: '#chatMessages(innerHTML)',
+        class: 'max-h-64 overflow-y-auto p-4 border border-gray-700 rounded mb-4'
+      },
+      p({ class: 'text-center text-gray-500' }, 'Waiting for messages...')
+    ),
+    form(
+      {
+        POST: '/chat/send',
+        target: '#chatMessages(innerHTML)',
+        extras: 'username=DemoUser',
+        onbefore: "console.log('Sending Chat Message', event)",
+        onafter: "console.log('Chat Message Sent', event)",
+        class: 'flex space-x-2'
+      },
+      input({
+        type: 'text',
+        name: 'message',
+        required: 'true',
+        placeholder: 'Type your message',
+        class: 'flex-1 bg-gray-700 border border-gray-600 rounded-md p-3 text-gray-100 placeholder-gray-400'
+      }),
+      button(
+        { type: 'submit', class: 'btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-md' },
+        'Send'
+      )
+    )
+  );
+}
+
+/**
+ * Creates virtual nodes for the Multi‑Fragment Updates Demo.
+ *
+ * Returns a virtual node tree for:
+ * - A section with id "multiFragment" and dark mode styling.
+ * - A header (h2) for the demo title.
+ * - A button with custom HTMLeX attributes (GET and target) for loading updates.
+ * - Two divs (multiUpdate1 and multiUpdate2) where the updates will appear.
+ *
+ * @returns {Object} A virtual node representing the multi‑fragment demo.
+ *
+ * @example
+ * const multiFragmentDemoNode = multiFragmentDemo();
+ * // This node can then be rendered or used as needed.
+ */
+export function multiFragmentDemo() {
+  return section(
+    { id: 'multiFragment', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
+    h2({ class: 'text-2xl font-semibold mb-4' }, 'Multi‑Fragment Updates'),
+    button(
+      { 
+        GET: '/multi/fragment', 
+        target: '#multiUpdate1(innerHTML) #multiUpdate2(append)',
+        class: 'btn bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-8 rounded-md'
+      },
+      'Load Multi‑Fragment Update'
+    ),
+    div(
+      { class: 'mt-4 space-y-4' },
+      div({ id: 'multiUpdate1', class: 'p-4 bg-gray-700 rounded-md' }),
+      div({ id: 'multiUpdate2', class: 'p-4 bg-gray-700 rounded-md' })
     )
   );
 }

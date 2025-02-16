@@ -43,15 +43,20 @@ const NOTIFICATIONS_ROUTE = '/notifications';
 // click counter
 const COUNTER_DEMO_INIT = '/counter/init';
 const COUNTER_INCREMENT_ROUTE = '/counter/increment';
-// 
+// Single request, multiple targets
+const MULTI_DEMO_INIT = "/multi/init"
 const MULTI_FRAGMENT_ROUTE = '/multi/fragment';
+// Polling
 const SEQUENTIAL_POLL_ROUTE = '/sequential/poll';
+// Sequential FIFO with pacing
 const PROCESS_STEP1_ROUTE = '/process/step1';
 const PROCESS_STEP2_ROUTE = '/process/step2';
 const PROCESS_STEP3_ROUTE = '/process/step3';
 const PROCESS_STEP4_ROUTE = '/process/step4';
 const PROCESS_STEP5_ROUTE = '/process/step5';
+// Demo route handling
 const DEMO_LOADING_ROUTE = '/demo/loading';
+// Server Sent Events
 const SSE_SUBSCRIBE_ROUTE = '/sse/subscribe';
 const SSE_SUBSCRIBE_MESSAGE_ROUTE = '/sse/subscribe/message';
 
@@ -101,68 +106,51 @@ app.get('/', async (req, res) => {
 // Configure multer for form data processing.
 const upload = multer();
 
-
-// Demo management code
+// Demo management code load demo menu
 app.get('/demos', loadAndRenderDemos)
-
 
 // ------------------------------
 // Todo API Endpoints (Async)
 // ------------------------------
-app.get(TODO_INIT_DEMO, async (req, res) => {
-  await todos.getToDoWidget(req, res);
-});
-app.post(TODO_CREATE_ROUTE, upload.none(), async (req, res) => {
-  await todos.createTodo(req, res);
-});
-app.get(TODO_LIST_ROUTE, async (req, res) => {
-  await todos.listTodos(req, res);
-});
-app.get(TODO_ITEM_ROUTE, async (req, res) => {
-  await todos.getTodoItem(req, res);
-});
-app.get(TODO_EDIT_ROUTE, async (req, res) => {
-  await todos.getEditTodoForm(req, res);
-});
-app.put(TODO_UPDATE_ROUTE, upload.none(), async (req, res) => {
-  await todos.updateTodo(req, res);
-});
-app.delete(TODO_DELETE_ROUTE, async (req, res) => {
-  await todos.deleteTodo(req, res);
-});
+app.get(TODO_INIT_DEMO, todos.getToDoWidget);
+app.post(TODO_CREATE_ROUTE, upload.none(), todos.createTodo);
+app.get(TODO_LIST_ROUTE, todos.listTodos);
+app.get(TODO_ITEM_ROUTE, todos.getTodoItem);
+app.get(TODO_EDIT_ROUTE, todos.getEditTodoForm);
+app.put(TODO_UPDATE_ROUTE, upload.none(), todos.updateTodo);
+app.delete(TODO_DELETE_ROUTE, todos.deleteTodo);
 
 // ------------------------------
 // Streaming Endpoints (HTTP/2)
 // ------------------------------
-app.get(ITEMS_LOAD_MORE_ROUTE, async (req, res) => {
-  await streaming.loadMoreItems(req, res);
-});
+app.get(ITEMS_LOAD_MORE_ROUTE, streaming.loadMoreItems);
+
 // SS notifications
 app.get(NOTIFICATIONS_DEMO_INIT, streaming.notificationsDemoInit);
 app.get(NOTIFICATIONS_ROUTE, streaming.fetchNotification);
+
 // Click Counter Demo
 app.get(COUNTER_DEMO_INIT, streaming.incrementCounterDemoInit);
 app.get(COUNTER_INCREMENT_ROUTE, streaming.incrementCounter);
-app.get(MULTI_FRAGMENT_ROUTE, async (req, res) => {
-  await streaming.multiFragment(req, res);
-});
-app.get(SEQUENTIAL_POLL_ROUTE, async (req, res) => {
-  await streaming.sequentialPoll(req, res);
-});
+
+// Multiple targets
+app.get(MULTI_DEMO_INIT, streaming.multiFragmentDemoInit);
+app.get(MULTI_FRAGMENT_ROUTE, streaming.multiFragment);
+
+// FIFO and intra request wait demo
+app.get(SEQUENTIAL_POLL_ROUTE, streaming.sequentialPoll);
+
+// Signal Chaining
 app.get(PROCESS_STEP1_ROUTE, streaming.processStep1);
 app.get(PROCESS_STEP2_ROUTE, streaming.processStep2);
 app.get(PROCESS_STEP3_ROUTE, streaming.processStep3);
 app.get(PROCESS_STEP4_ROUTE, streaming.processStep4);
 app.get(PROCESS_STEP5_ROUTE, streaming.processStep5);
-app.get(DEMO_LOADING_ROUTE, async (req, res) => {
-  await streaming.demoLoading(req, res);
-});
-app.get(SSE_SUBSCRIBE_ROUTE, async (req, res) => {
-  await streaming.sseSubscribe(req, res);
-});
-app.get(SSE_SUBSCRIBE_MESSAGE_ROUTE, async (req, res) => {
-  await streaming.sseSubscribeMessage(req, res);
-});
+app.get(DEMO_LOADING_ROUTE, streaming.demoLoading);
+
+// Server Sent events
+app.get(SSE_SUBSCRIBE_ROUTE, streaming.sseSubscribe);
+app.get(SSE_SUBSCRIBE_MESSAGE_ROUTE, streaming.sseSubscribeMessage);
 
 // ------------------------------
 // Chat Endpoint

@@ -120,6 +120,7 @@
         "Multiple fragments",
         "Simultaneous updates"
       ],
+      "initDemoHref":"/multi/init",
       "launchButtonText": "Multi‑Fragment",
       "learnMoreText": "Learn More",
       "learnMoreHref": "/multiFragment/details",

@@ -11,7 +11,7 @@ import { render } from '../components/HTMLeX.js';
 import {
   renderLoadingMessage,
   renderNotificationMessage,
-  renderCounter, NotificationsDemo, renderFragment, ClickCounterWidget
+  renderCounter, NotificationsDemo, renderFragment, ClickCounterWidget, multiFragmentDemo
 } from '../components/Components.js';
 
 /**
@@ -168,6 +168,37 @@ export async function incrementCounter(req, res) {
   } catch (err) {
     console.error('Error in incrementCounter:', err);
     if (!res.headersSent) res.status(500).send('Internal server error');
+  }
+}
+
+/**
+ * Handles the '/multi/init' endpoint.
+ * Sends multiple HTML fragments in a single response to update the UI.
+ *
+ * This endpoint generates an HTML fragment by invoking `multiFragmentDemo()`
+ * and targets the "#demoCanvas" element (updating its innerHTML) with the rendered content.
+ * After sending the fragment, the response is properly terminated.
+ *
+ * @async
+ * @function multiFragmentDemoInit
+ * @param {import('express').Request} req - The Express request object.
+ * @param {import('express').Response} res - The Express response object.
+ * @returns {Promise<void>} A promise that resolves when the response has been completely sent.
+ */
+export async function multiFragmentDemoInit(req, res) {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  try {
+    // Write the HTML fragment to update the target element.
+    res.write(renderFragment("#demoCanvas(innerHTML)", multiFragmentDemo()));
+    // End the response to finalize the transmission.
+    res.end();
+  } catch (err) {
+    console.error('Error in multiFragmentDemoInit:', err);
+    if (!res.headersSent) {
+      res.status(500).send('Internal server error');
+    } else {
+      res.end();
+    }
   }
 }
 
