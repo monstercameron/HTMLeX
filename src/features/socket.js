@@ -1,3 +1,6 @@
+import { tags, tag, render } from '../components/HTMLeX.js';
+
+
 /**
  * @fileoverview Domain logic for Socket.IO namespaces.
  * This module sets up various Socket.IO namespaces for counter, chat, and updates.

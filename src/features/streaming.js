@@ -11,8 +11,13 @@ import { render } from '../components/HTMLeX.js';
 import {
   renderLoadingMessage,
   renderNotificationMessage,
-  renderCounter, NotificationsDemo, renderFragment, ClickCounterWidget, multiFragmentDemo, SignalChainingDemo
+  renderCounter, NotificationsDemo,
+  ClickCounterWidget, multiFragmentDemo,
+  SSESubscribersDemo, SignalChainingDemo,
+  WebSocketUpdatesDemo
 } from '../components/Components.js';
+import { renderFragment } from "../components/HTMLeX.js"
+
 import { write } from 'fs';
 
 /**
@@ -370,6 +375,31 @@ export async function demoLoading(req, res) {
 
 /**
  * Handles the '/sse/subscribe' endpoint.
+ * Initializes the SSE subscribers by sending an HTML fragment to update the target element.
+ *
+ * This endpoint writes a fragment that updates the "#demoCanvas" element's innerHTML with
+ * the output of `SSESubscribersDemo()`. After writing the fragment, it ends the response.
+ *
+ * @async
+ * @function sseDemoInit
+ * @param {import('express').Request} req - The Express request object.
+ * @param {import('express').Response} res - The Express response object.
+ * @returns {Promise<void>} A promise that resolves when the response has been fully sent.
+ */
+export async function sseDemoInit(req, res) {
+  try {
+    res.write(renderFragment("#demoCanvas(innerHTML)", SSESubscribersDemo()));
+    res.end();
+  } catch (err) {
+    console.error('Error in sseDemoInit:', err);
+    if (!res.headersSent) {
+      res.status(500).send('');
+    }
+  }
+}
+
+/**
+ * Handles the '/sse/subscribe' endpoint.
  * Sets an 'Emit' header for SSE and sends an empty response.
  * @async
  * @param {import('express').Request} req - Express request object.
@@ -388,17 +418,52 @@ export async function sseSubscribe(req, res) {
 
 /**
  * Handles the '/sse/subscribe/message' endpoint.
- * Sends an HTML fragment indicating an SSE action.
+ * Sends an HTML fragment that indicates an SSE (Server-Sent Events) action was performed.
+ *
+ * This endpoint renders a fragment to update the target element's innerHTML with a message,
+ * and sends the response immediately.
+ *
  * @async
- * @param {import('express').Request} req - Express request object.
- * @param {import('express').Response} res - Express response object.
- * @returns {Promise<void>}
+ * @function sseSubscribeMessage
+ * @param {import('express').Request} req - The Express request object.
+ * @param {import('express').Response} res - The Express response object.
+ * @returns {Promise<void>} A promise that resolves when the response is sent.
  */
 export async function sseSubscribeMessage(req, res) {
   try {
-    res.send(renderFragment('this(innerHTML)', render(`SSe action performed`)));
+    const message = render(`SSE action performed`);
+    const fragment = renderFragment('this(innerHTML)', message);
+    res.send(fragment);
   } catch (err) {
     console.error('Error in sseSubscribeMessage:', err);
-    if (!res.headersSent) res.status(500).send('Internal server error');
+    if (!res.headersSent) {
+      res.status(500).send('Internal server error');
+    }
   }
 }
+
+/**
+ * Handles the '/sse/subscribe/message' endpoint.
+ * Sends an HTML fragment indicating an SSE action by updating the target element.
+ *
+ * This endpoint writes a fragment that updates the "#demoCanvas" element's innerHTML
+ * with the output of `WebSocketUpdatesDemo()`. After writing the fragment, the response is terminated.
+ *
+ * @async
+ * @function chatDemoInit
+ * @param {import('express').Request} req - The Express request object.
+ * @param {import('express').Response} res - The Express response object.
+ * @returns {Promise<void>} A promise that resolves when the response has been fully sent.
+ */
+export async function chatDemoInit(req, res) {
+  try {
+    res.write(renderFragment('#demoCanvas(innerHTML)', WebSocketUpdatesDemo()));
+    res.end();
+  } catch (err) {
+    console.error('Error in chatDemoInit:', err);
+    if (!res.headersSent) {
+      res.status(500).send('Internal server error');
+    }
+  }
+}
+

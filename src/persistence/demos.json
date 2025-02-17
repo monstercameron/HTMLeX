@@ -1,284 +1,285 @@
 [
-    {
-      "id": "todoApp",
-      "icon": "📝",
-      "title": "Todo App with Lifecycle Hooks",
-      "subtitle": "Sequential Updates",
-      "description": "Create and manage todos using lifecycle hooks and sequential updates.",
-      "highlights": [
-        "Form submission",
-        "Lifecycle events",
-        "DOM updates"
-      ],
-      "initDemoHref":"/todos/init",
-      "launchButtonText": "Todo Demo",
-      "learnMoreText": "Learn More",
-      "learnMoreHref": "/todos/details",
-      "gradients": {
-        "container": "bg-gradient-to-r from-gray-800 to-gray-600",
-        "bgShape1": "bg-blue-500",
-        "bgShape2": "bg-indigo-500",
-        "buttonGradient": "bg-blue-600",
-        "linkColor": "text-blue-300"
-      }
-    },
-    {
-      "id": "infiniteScroll",
-      "icon": "🔄",
-      "title": "Infinite Scrolling List",
-      "subtitle": "Auto Load on Scroll",
-      "description": "Automatically load more items as you scroll down the list.",
-      "highlights": [
-        "Lazy loading",
-        "Scroll trigger"
-      ],
-      "launchButtonText": "Load More",
-      "learnMoreText": "Learn More",
-      "learnMoreHref": "/infiniteScroll/details",
-      "gradients": {
-        "container": "bg-gradient-to-r from-gray-800 to-gray-700",
-        "bgShape1": "bg-green-500",
-        "bgShape2": "bg-green-700",
-        "buttonGradient": "bg-indigo-600",
-        "linkColor": "text-green-300"
-      }
-    },
-    {
-      "id": "notifications",
-      "icon": "🔔",
-      "title": "Notifications",
-      "subtitle": "Timer Removal",
-      "description": "Receive notifications that automatically disappear after a set time.",
-      "highlights": [
-        "Real-time notifications",
-        "Timer based removal"
-      ],
-      "initDemoHref":"/notifications/init",
-      "launchButtonText": "Get Notification",
-      "learnMoreText": "Learn More",
-      "learnMoreHref": "/notifications/details",
-      "gradients": {
-        "container": "bg-gradient-to-r from-green-500 to-teal-500",
-        "bgShape1": "bg-yellow-500",
-        "bgShape2": "bg-orange-500",
-        "buttonGradient": "bg-green-500",
-        "linkColor": "text-teal-300"
-      }
-    },
-    {
-      "id": "clickCounter",
-      "icon": "🖱️",
-      "title": "Clicker Counter",
-      "subtitle": "Debounce/Throttle",
-      "description": "Increase the counter with every click, optimized with debounce/throttle mechanisms.",
-      "highlights": [
-        "Debounce",
-        "Throttle",
-        "Real-time counter"
-      ],
-      "initDemoHref":"/counter/init",
-      "launchButtonText": "Click Me!",
-      "learnMoreText": "Learn More",
-      "learnMoreHref": "/clickCounter/details",
-      "gradients": {
-        "container": "bg-gradient-to-r from-indigo-600 to-indigo-400",
-        "bgShape1": "bg-purple-500",
-        "bgShape2": "bg-pink-500",
-        "buttonGradient": "bg-indigo-600",
-        "linkColor": "text-indigo-300"
-      }
-    },
-    {
-      "id": "chatInterface",
-      "icon": "💬",
-      "title": "Chat Interface",
-      "subtitle": "WebSocket & Lifecycle Hooks",
-      "description": "Engage in real‑time chat with lifecycle hooks and a WebSocket connection.",
-      "highlights": [
-        "WebSocket",
-        "Real‑time chat",
-        "Lifecycle events"
-      ],
-      "launchButtonText": "Send",
-      "learnMoreText": "Learn More",
-      "learnMoreHref": "/chatInterface/details",
-      "gradients": {
-        "container": "bg-gradient-to-r from-blue-500 to-purple-500",
-        "bgShape1": "bg-pink-500",
-        "bgShape2": "bg-red-500",
-        "buttonGradient": "bg-blue-600",
-        "linkColor": "text-purple-300"
-      }
-    },
-    {
-      "id": "multiFragment",
-      "icon": "🧩",
-      "title": "Multi‑Fragment Updates",
-      "subtitle": "Multiple DOM updates",
-      "description": "Load multiple fragments at once and update different parts of the page simultaneously.",
-      "highlights": [
-        "Multiple fragments",
-        "Simultaneous updates"
-      ],
-      "initDemoHref":"/multi/init",
-      "launchButtonText": "Multi‑Fragment",
-      "learnMoreText": "Learn More",
-      "learnMoreHref": "/multiFragment/details",
-      "gradients": {
-        "container": "bg-gradient-to-r from-purple-600 to-purple-400",
-        "bgShape1": "bg-indigo-500",
-        "bgShape2": "bg-blue-500",
-        "buttonGradient": "bg-purple-600",
-        "linkColor": "text-purple-300"
-      }
-    },
-    {
-      "id": "signalChaining",
-      "icon": "🔗",
-      "title": "Signal Chaining",
-      "subtitle": "Chained API calls",
-      "description": "Trigger a chain of API calls where each step publishes the next signal.",
-      "highlights": [
-        "Chain signals",
-        "API calls"
-      ],
-      "initDemoHref":"/process/init",
-      "launchButtonText": "Start Process",
-      "learnMoreText": "Learn More",
-      "learnMoreHref": "/signalChaining/details",
-      "gradients": {
-        "container": "bg-gradient-to-r from-yellow-600 to-yellow-400",
-        "bgShape1": "bg-orange-500",
-        "bgShape2": "bg-red-500",
-        "buttonGradient": "bg-yellow-600",
-        "linkColor": "text-yellow-300"
-      }
-    },
-    {
-      "id": "sseDemo",
-      "icon": "📡",
-      "title": "SSE Subscriber (Simulated)",
-      "subtitle": "Server‑Sent Events",
-      "description": "Simulate Server‑Sent Events (SSE) to receive real‑time updates.",
-      "highlights": [
-        "SSE",
-        "Real‑time updates"
-      ],
-      "launchButtonText": "Get SSE Signal",
-      "learnMoreText": "Learn More",
-      "learnMoreHref": "/sseDemo/details",
-      "gradients": {
-        "container": "bg-gradient-to-r from-red-600 to-red-400",
-        "bgShape1": "bg-pink-500",
-        "bgShape2": "bg-purple-500",
-        "buttonGradient": "bg-red-600",
-        "linkColor": "text-red-300"
-      }
-    },
-    {
-      "id": "websocketUpdates",
-      "icon": "🌐",
-      "title": "Live WebSocket Feed",
-      "subtitle": "Real‑time Updates",
-      "description": "Stream live updates directly to your page using a WebSocket connection.",
-      "highlights": [
-        "WebSocket",
-        "Live feed"
-      ],
-      "launchButtonText": "Connect",
-      "learnMoreText": "Learn More",
-      "learnMoreHref": "/websocketUpdates/details",
-      "gradients": {
-        "container": "bg-gradient-to-r from-teal-600 to-teal-400",
-        "bgShape1": "bg-green-500",
-        "bgShape2": "bg-blue-500",
-        "buttonGradient": "bg-teal-600",
-        "linkColor": "text-teal-300"
-      }
-    },
-    {
-      "id": "sequentialDemo",
-      "icon": "🔢",
-      "title": "Sequential API Calls",
-      "subtitle": "Ordered Processing",
-      "description": "Execute API calls sequentially and render queued responses.",
-      "highlights": [
-        "Sequential calls",
-        "Queued responses"
-      ],
-      "launchButtonText": "Run Sequential",
-      "learnMoreText": "Learn More",
-      "learnMoreHref": "/sequentialDemo/details",
-      "gradients": {
-        "container": "bg-gradient-to-r from-red-600 to-red-400",
-        "bgShape1": "bg-orange-500",
-        "bgShape2": "bg-yellow-500",
-        "buttonGradient": "bg-red-600",
-        "linkColor": "text-red-300"
-      }
-    },
-    {
-      "id": "loadingDemo",
-      "icon": "⏳",
-      "title": "Loading State Demo",
-      "subtitle": "Spinner Loading",
-      "description": "Show a loading spinner before the payload is rendered.",
-      "highlights": [
-        "Loading state",
-        "Spinner"
-      ],
-      "launchButtonText": "Load Payload",
-      "learnMoreText": "Learn More",
-      "learnMoreHref": "/loadingDemo/details",
-      "gradients": {
-        "container": "bg-gradient-to-r from-teal-600 to-teal-400",
-        "bgShape1": "bg-blue-500",
-        "bgShape2": "bg-indigo-500",
-        "buttonGradient": "bg-teal-600",
-        "linkColor": "text-teal-300"
-      }
-    },
-    {
-      "id": "pollingDemo",
-      "icon": "⏲️",
-      "title": "Polling Demo",
-      "subtitle": "Scheduled Updates",
-      "description": "Poll the server at regular intervals to receive updates.",
-      "highlights": [
-        "Polling",
-        "Scheduled updates"
-      ],
-      "launchButtonText": "Start Polling",
-      "learnMoreText": "Learn More",
-      "learnMoreHref": "/pollingDemo/details",
-      "gradients": {
-        "container": "bg-gradient-to-r from-blue-600 to-blue-400",
-        "bgShape1": "bg-purple-500",
-        "bgShape2": "bg-pink-500",
-        "buttonGradient": "bg-blue-600",
-        "linkColor": "text-blue-300"
-      }
-    },
-    {
-      "id": "hoverTriggerDemo",
-      "icon": "👆",
-      "title": "Hover Trigger Demo",
-      "subtitle": "Debounced Hover Actions",
-      "description": "Trigger actions on hover with configurable debounce settings.",
-      "highlights": [
-        "Hover actions",
-        "Debounce"
-      ],
-      "launchButtonText": "Hover Action",
-      "learnMoreText": "Learn More",
-      "learnMoreHref": "/hoverTriggerDemo/details",
-      "gradients": {
-        "container": "bg-gradient-to-r from-teal-600 to-teal-400",
-        "bgShape1": "bg-green-500",
-        "bgShape2": "bg-blue-500",
-        "buttonGradient": "bg-teal-600",
-        "linkColor": "text-teal-300"
-      }
+  {
+    "id": "todoApp",
+    "icon": "📝",
+    "title": "Todo App with Lifecycle Hooks",
+    "subtitle": "Sequential Updates",
+    "description": "Create and manage todos using lifecycle hooks and sequential updates.",
+    "highlights": [
+      "Form submission",
+      "Lifecycle events",
+      "DOM updates"
+    ],
+    "initDemoHref": "/todos/init",
+    "launchButtonText": "Todo Demo",
+    "learnMoreText": "Learn More",
+    "learnMoreHref": "/todos/details",
+    "gradients": {
+      "container": "bg-gradient-to-r from-gray-800 to-gray-600",
+      "bgShape1": "bg-blue-500",
+      "bgShape2": "bg-indigo-500",
+      "buttonGradient": "bg-blue-600",
+      "linkColor": "text-blue-300"
     }
-  ]
-  
+  },
+  {
+    "id": "infiniteScroll",
+    "icon": "🔄",
+    "title": "Infinite Scrolling List",
+    "subtitle": "Auto Load on Scroll",
+    "description": "Automatically load more items as you scroll down the list.",
+    "highlights": [
+      "Lazy loading",
+      "Scroll trigger"
+    ],
+    "launchButtonText": "Load More",
+    "learnMoreText": "Learn More",
+    "learnMoreHref": "/infiniteScroll/details",
+    "gradients": {
+      "container": "bg-gradient-to-r from-gray-800 to-gray-700",
+      "bgShape1": "bg-green-500",
+      "bgShape2": "bg-green-700",
+      "buttonGradient": "bg-indigo-600",
+      "linkColor": "text-green-300"
+    }
+  },
+  {
+    "id": "notifications",
+    "icon": "🔔",
+    "title": "Notifications",
+    "subtitle": "Timer Removal",
+    "description": "Receive notifications that automatically disappear after a set time.",
+    "highlights": [
+      "Real-time notifications",
+      "Timer based removal"
+    ],
+    "initDemoHref": "/notifications/init",
+    "launchButtonText": "Get Notification",
+    "learnMoreText": "Learn More",
+    "learnMoreHref": "/notifications/details",
+    "gradients": {
+      "container": "bg-gradient-to-r from-green-500 to-teal-500",
+      "bgShape1": "bg-yellow-500",
+      "bgShape2": "bg-orange-500",
+      "buttonGradient": "bg-green-500",
+      "linkColor": "text-teal-300"
+    }
+  },
+  {
+    "id": "clickCounter",
+    "icon": "🖱️",
+    "title": "Clicker Counter",
+    "subtitle": "Debounce/Throttle",
+    "description": "Increase the counter with every click, optimized with debounce/throttle mechanisms.",
+    "highlights": [
+      "Debounce",
+      "Throttle",
+      "Real-time counter"
+    ],
+    "initDemoHref": "/counter/init",
+    "launchButtonText": "Click Me!",
+    "learnMoreText": "Learn More",
+    "learnMoreHref": "/clickCounter/details",
+    "gradients": {
+      "container": "bg-gradient-to-r from-indigo-600 to-indigo-400",
+      "bgShape1": "bg-purple-500",
+      "bgShape2": "bg-pink-500",
+      "buttonGradient": "bg-indigo-600",
+      "linkColor": "text-indigo-300"
+    }
+  },
+  {
+    "id": "chatInterface",
+    "icon": "💬",
+    "title": "Chat Interface",
+    "subtitle": "WebSocket & Lifecycle Hooks",
+    "description": "Engage in real‑time chat with lifecycle hooks and a WebSocket connection.",
+    "highlights": [
+      "WebSocket",
+      "Real‑time chat",
+      "Lifecycle events"
+    ],
+    "launchButtonText": "Send",
+    "learnMoreText": "Learn More",
+    "learnMoreHref": "/chatInterface/details",
+    "gradients": {
+      "container": "bg-gradient-to-r from-blue-500 to-purple-500",
+      "bgShape1": "bg-pink-500",
+      "bgShape2": "bg-red-500",
+      "buttonGradient": "bg-blue-600",
+      "linkColor": "text-purple-300"
+    }
+  },
+  {
+    "id": "multiFragment",
+    "icon": "🧩",
+    "title": "Multi‑Fragment Updates",
+    "subtitle": "Multiple DOM updates",
+    "description": "Load multiple fragments at once and update different parts of the page simultaneously.",
+    "highlights": [
+      "Multiple fragments",
+      "Simultaneous updates"
+    ],
+    "initDemoHref": "/multi/init",
+    "launchButtonText": "Multi‑Fragment",
+    "learnMoreText": "Learn More",
+    "learnMoreHref": "/multiFragment/details",
+    "gradients": {
+      "container": "bg-gradient-to-r from-purple-600 to-purple-400",
+      "bgShape1": "bg-indigo-500",
+      "bgShape2": "bg-blue-500",
+      "buttonGradient": "bg-purple-600",
+      "linkColor": "text-purple-300"
+    }
+  },
+  {
+    "id": "signalChaining",
+    "icon": "🔗",
+    "title": "Signal Chaining",
+    "subtitle": "Chained API calls",
+    "description": "Trigger a chain of API calls where each step publishes the next signal.",
+    "highlights": [
+      "Chain signals",
+      "API calls"
+    ],
+    "initDemoHref": "/process/init",
+    "launchButtonText": "Start Process",
+    "learnMoreText": "Learn More",
+    "learnMoreHref": "/signalChaining/details",
+    "gradients": {
+      "container": "bg-gradient-to-r from-yellow-600 to-yellow-400",
+      "bgShape1": "bg-orange-500",
+      "bgShape2": "bg-red-500",
+      "buttonGradient": "bg-yellow-600",
+      "linkColor": "text-yellow-300"
+    }
+  },
+  {
+    "id": "sseDemo",
+    "icon": "📡",
+    "title": "SSE Subscriber (Simulated)",
+    "subtitle": "Server‑Sent Events",
+    "description": "Simulate Server‑Sent Events (SSE) to receive real‑time updates.",
+    "highlights": [
+      "SSE",
+      "Real‑time updates"
+    ],
+    "initDemoHref": "/sse/init",
+    "launchButtonText": "Get SSE Signal",
+    "learnMoreText": "Learn More",
+    "learnMoreHref": "/sseDemo/details",
+    "gradients": {
+      "container": "bg-gradient-to-r from-red-600 to-red-400",
+      "bgShape1": "bg-pink-500",
+      "bgShape2": "bg-purple-500",
+      "buttonGradient": "bg-red-600",
+      "linkColor": "text-red-300"
+    }
+  },
+  {
+    "id": "websocketUpdates",
+    "icon": "🌐",
+    "title": "Live WebSocket Feed",
+    "subtitle": "Real‑time Updates",
+    "description": "Stream live updates directly to your page using a WebSocket connection.",
+    "highlights": [
+      "WebSocket",
+      "Live feed"
+    ],
+    "initDemoHref": "/chat/init",
+    "launchButtonText": "Connect",
+    "learnMoreText": "Learn More",
+    "learnMoreHref": "/websocketUpdates/details",
+    "gradients": {
+      "container": "bg-gradient-to-r from-teal-600 to-teal-400",
+      "bgShape1": "bg-green-500",
+      "bgShape2": "bg-blue-500",
+      "buttonGradient": "bg-teal-600",
+      "linkColor": "text-teal-300"
+    }
+  },
+  {
+    "id": "sequentialDemo",
+    "icon": "🔢",
+    "title": "Sequential API Calls",
+    "subtitle": "Ordered Processing",
+    "description": "Execute API calls sequentially and render queued responses.",
+    "highlights": [
+      "Sequential calls",
+      "Queued responses"
+    ],
+    "launchButtonText": "Run Sequential",
+    "learnMoreText": "Learn More",
+    "learnMoreHref": "/sequentialDemo/details",
+    "gradients": {
+      "container": "bg-gradient-to-r from-red-600 to-red-400",
+      "bgShape1": "bg-orange-500",
+      "bgShape2": "bg-yellow-500",
+      "buttonGradient": "bg-red-600",
+      "linkColor": "text-red-300"
+    }
+  },
+  {
+    "id": "loadingDemo",
+    "icon": "⏳",
+    "title": "Loading State Demo",
+    "subtitle": "Spinner Loading",
+    "description": "Show a loading spinner before the payload is rendered.",
+    "highlights": [
+      "Loading state",
+      "Spinner"
+    ],
+    "launchButtonText": "Load Payload",
+    "learnMoreText": "Learn More",
+    "learnMoreHref": "/loadingDemo/details",
+    "gradients": {
+      "container": "bg-gradient-to-r from-teal-600 to-teal-400",
+      "bgShape1": "bg-blue-500",
+      "bgShape2": "bg-indigo-500",
+      "buttonGradient": "bg-teal-600",
+      "linkColor": "text-teal-300"
+    }
+  },
+  {
+    "id": "pollingDemo",
+    "icon": "⏲️",
+    "title": "Polling Demo",
+    "subtitle": "Scheduled Updates",
+    "description": "Poll the server at regular intervals to receive updates.",
+    "highlights": [
+      "Polling",
+      "Scheduled updates"
+    ],
+    "launchButtonText": "Start Polling",
+    "learnMoreText": "Learn More",
+    "learnMoreHref": "/pollingDemo/details",
+    "gradients": {
+      "container": "bg-gradient-to-r from-blue-600 to-blue-400",
+      "bgShape1": "bg-purple-500",
+      "bgShape2": "bg-pink-500",
+      "buttonGradient": "bg-blue-600",
+      "linkColor": "text-blue-300"
+    }
+  },
+  {
+    "id": "hoverTriggerDemo",
+    "icon": "👆",
+    "title": "Hover Trigger Demo",
+    "subtitle": "Debounced Hover Actions",
+    "description": "Trigger actions on hover with configurable debounce settings.",
+    "highlights": [
+      "Hover actions",
+      "Debounce"
+    ],
+    "launchButtonText": "Hover Action",
+    "learnMoreText": "Learn More",
+    "learnMoreHref": "/hoverTriggerDemo/details",
+    "gradients": {
+      "container": "bg-gradient-to-r from-teal-600 to-teal-400",
+      "bgShape1": "bg-green-500",
+      "bgShape2": "bg-blue-500",
+      "buttonGradient": "bg-teal-600",
+      "linkColor": "text-teal-300"
+    }
+  }
+]

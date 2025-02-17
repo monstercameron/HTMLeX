@@ -3,7 +3,8 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { DemoItem, renderFragment } from '../components/Components.js';
+import { DemoItem } from '../components/Components.js';
+import { renderFragment } from "../components/HTMLeX.js"
 import { render } from '../components/HTMLeX.js';
 
 // Determine __dirname in ES modules.

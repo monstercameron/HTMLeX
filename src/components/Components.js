@@ -3,7 +3,7 @@
  * This file composes virtual nodes using functions imported from HTMLeX.js.
  */
 
-import { tags, tag, render } from './HTMLeX.js';
+import { tags, tag, render, renderFragment } from './HTMLeX.js';
 
 const {
   html,
@@ -355,7 +355,6 @@ export function FullHTML({ headerProps, demos, canvasProps, footerProps }) {
   );
 }
 
-
 /**
  * Creates a virtual DOM node representing an individual todo item using HTMLeX virtual nodes.
  * The node includes action buttons for editing and deleting, styled for dark mode.
@@ -590,29 +589,6 @@ export function TodoWidget(todos) {
       ), renderTodoList(todos)
     )
   );
-}
-
-/**
- * Wraps HTML content into an HTMLeX fragment for progressive updates.
- *
- * @param {string} target - A CSS selector that identifies the target element.
- * @param {string} htmlContent - The HTML content to be injected.
- * @param {string} [status] - Optional status code to include in the fragment.
- * @returns {string} HTML string representing the fragment.
- *
- * @example
- * const fragHtml = renderFragment('#todoList(innerHTML)', '<div>Updated Content</div>');
- */
-export function renderFragment(target, htmlContent, status) {
-  // Create attributes for the fragment. Include the target and optional status.
-  const attrs = { target };
-  if (status) {
-    attrs.status = status;
-  }
-  // Create a virtual fragment node using the HTMLeX tag function.
-  const fragmentNode = tag('fragment', attrs, htmlContent);
-  // Render the virtual node to an HTML string.
-  return render(fragmentNode);
 }
 
 /**
@@ -878,6 +854,74 @@ export function SignalChainingDemo() {
       // Output area where all chain responses are appended.
       div(
         { id: 'chainOutput', class: 'p-4 bg-gray-700 rounded-md' }
+      )
+    )
+  );
+}
+
+/**
+ * Returns a virtual node representing the SSE Subscribers Demo widget.
+ *
+ * The component includes:
+ * - A section with dark mode styling.
+ * - A heading.
+ * - A button with a GET attribute for subscribing to SSE.
+ * - A div configured with subscribe, GET, and target attributes for SSE updates.
+ *
+ * @returns {Object} Virtual node representing the SSE Subscribers Demo.
+ *
+ * @example
+ * const sseDemoNode = SSESubscribersDemo();
+ */
+export function SSESubscribersDemo() {
+  return section(
+    { id: 'sseDemo', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
+    h2({ class: 'text-2xl font-semibold mb-4' }, 'SSE Subscriber (Simulated)'),
+    button(
+      { GET: '/sse/subscribe', class: 'btn bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-md' },
+      'Get SSE Signal'
+    ),
+    div(
+      {
+        subscribe: 'sseUpdate',
+        GET: '/sse/subscribe/message',
+        target: 'this(innerHTML)',
+        class: 'p-4 bg-gray-700 rounded-md mt-4'
+      },
+      'SSE updates will appear here...'
+    )
+  );
+}
+
+/**
+ * Returns a virtual node for the WebSocket Updates Demo.
+ *
+ * This demo section is styled for dark mode and uses custom HTMLeX attributes
+ * (such as `socket` and `target`) to enable live WebSocket updates.
+ *
+ * @returns {Object} A virtual node representing the WebSocket Updates Demo.
+ *
+ * @example
+ * const demoNode = WebSocketUpdatesDemo();
+ * // Use the virtual node as needed (e.g., pass it to render())
+ */
+export function WebSocketUpdatesDemo() {
+  return section(
+    { id: 'websocketUpdates', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
+    h2(
+      { class: 'text-2xl font-semibold mb-4' },
+      'Live WebSocket Feed'
+    ),
+    div(
+      {
+        id: 'liveFeed',
+        socket: 'wss://localhost:5500/updates',
+        target: '#liveFeed(innerHTML)',
+        class: 'max-h-48 overflow-y-auto p-4 bg-gray-700 rounded-md'
+      },
+      p(
+        { class: 'text-center text-gray-500' },
+        'Connecting to live feed...'
       )
     )
   );

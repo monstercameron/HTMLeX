@@ -58,10 +58,12 @@ const PROCESS_STEP5_ROUTE = '/process/step5';
 // Demo route handling
 const DEMO_LOADING_ROUTE = '/demo/loading';
 // Server Sent Events
+const SSE_DEMO_INIT = "/sse/init"
 const SSE_SUBSCRIBE_ROUTE = '/sse/subscribe';
 const SSE_SUBSCRIBE_MESSAGE_ROUTE = '/sse/subscribe/message';
 
 // Chat route
+const CHAT_DEMO_INIT = '/chat/init';
 const CHAT_SEND_ROUTE = '/chat/send';
 
 // TLS/Certificate file paths
@@ -151,6 +153,7 @@ app.get(PROCESS_STEP5_ROUTE, streaming.processStep5);
 app.get(DEMO_LOADING_ROUTE, streaming.demoLoading);
 
 // Server Sent events
+app.get(SSE_DEMO_INIT, streaming.sseDemoInit);
 app.get(SSE_SUBSCRIBE_ROUTE, streaming.sseSubscribe);
 app.get(SSE_SUBSCRIBE_MESSAGE_ROUTE, streaming.sseSubscribeMessage);
 
@@ -158,6 +161,7 @@ app.get(SSE_SUBSCRIBE_MESSAGE_ROUTE, streaming.sseSubscribeMessage);
 // Chat Endpoint
 // ------------------------------
 let io; // Socket.IO instance will be assigned later.
+app.get(CHAT_DEMO_INIT, streaming.chatDemoInit)
 app.post(CHAT_SEND_ROUTE, upload.none(), async (req, res) => {
   await chat.sendChatMessage(req, res, io.of(SOCKET_NS_CHAT));
 });
@@ -187,6 +191,7 @@ setupSocketNamespaces(io, chat.getChatHistory);
 server.on('error', (err) => {
   console.error('Server error:', err);
 });
+
 server.on('clientError', (err, socket) => {
   console.error('Client connection error:', err);
   if (socket && socket.writable && !socket.destroyed) {
@@ -229,6 +234,7 @@ process.on('SIGTERM', () => {
     process.exit(0);
   });
 });
+
 process.on('SIGINT', () => {
   console.log('SIGINT signal received: closing HTTP server');
   server.close(() => {

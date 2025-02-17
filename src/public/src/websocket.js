@@ -10,6 +10,7 @@ import { parseTargets, updateTarget } from './dom.js';
 
 /**
  * Establishes a Socket.IO connection for the given element.
+ * Automatically cleans up the connection if the element is removed from the DOM.
  * @param {Element} element - The DOM element to attach the socket to.
  * @param {string} socketUrl - The Socket.IO URL (e.g., "https://localhost:5500/chat").
  */
@@ -84,6 +85,23 @@ export function handleWebSocket(element, socketUrl) {
     // Save the socket instance on the element for potential later use.
     element._htmlexSocket = socket;
     Logger.debug("[Socket.IO] Socket assigned to element._htmlexSocket:", socket);
+
+    // Set up a MutationObserver to clean up the WebSocket when the element is removed.
+    const observer = new MutationObserver(() => {
+      // Check if the element is no longer in the document.
+      if (!document.body.contains(element)) {
+        Logger.info("[Socket.IO] Element removed from DOM. Disconnecting socket.");
+        if (element._htmlexSocket) {
+          element._htmlexSocket.disconnect();
+          Logger.debug("[Socket.IO] Socket disconnected.");
+          delete element._htmlexSocket;
+        }
+        observer.disconnect();
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    // Save the observer on the element for potential future reference.
+    element._htmlexSocketObserver = observer;
 
   } catch (error) {
     Logger.error("[Socket.IO] Failed to establish connection:", error);

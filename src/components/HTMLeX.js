@@ -162,3 +162,26 @@ export const generateFragment = (target, content, status) => {
   }
   return tag('fragment', attrs, content);
 };
+
+/**
+ * Wraps HTML content into an HTMLeX fragment for progressive updates.
+ *
+ * @param {string} target - A CSS selector that identifies the target element.
+ * @param {string} htmlContent - The HTML content to be injected.
+ * @param {string} [status] - Optional status code to include in the fragment.
+ * @returns {string} HTML string representing the fragment.
+ *
+ * @example
+ * const fragHtml = renderFragment('#todoList(innerHTML)', '<div>Updated Content</div>');
+ */
+export function renderFragment(target, htmlContent, status) {
+  // Create attributes for the fragment. Include the target and optional status.
+  const attrs = { target };
+  if (status) {
+    attrs.status = status;
+  }
+  // Create a virtual fragment node using the HTMLeX tag function.
+  const fragmentNode = tag('fragment', attrs, htmlContent);
+  // Render the virtual node to an HTML string.
+  return render(fragmentNode);
+}
