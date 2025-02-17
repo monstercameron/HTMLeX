@@ -24,27 +24,90 @@ import { handleWebSocket } from './websocket.js';
  * that if multiple fragments are returned, the first fragment replaces the content
  * and subsequent fragments are appended.
  *
+ * Additionally, if the element is in sequential mode (i.e. has the sequential attr),
+ * DOM updates are queued so they can later be inserted in FIFO order with a delay between each.
+ *
  * @param {Object} target - The target object (with a .selector property).
  * @param {string} content - The HTML fragment content.
  * @param {Element} resolvedElement - The element to update.
  */
 export function patchedUpdateTarget(target, content, resolvedElement) {
-  // Check if the target is “empty” or defaults to "this"
   const selector = target.selector.trim().toLowerCase();
+  // If in sequential mode, queue the update instead of applying immediately.
+  if (resolvedElement._htmlexSequentialMode) {
+    if (!resolvedElement._htmlexSequentialUpdates) {
+      resolvedElement._htmlexSequentialUpdates = [];
+    }
+    Logger.debug("[DEBUG] patchedUpdateTarget: Queuing sequential update for target", target.selector);
+    resolvedElement._htmlexSequentialUpdates.push({ target, content });
+    return;
+  }
+  // For default targets, apply first fragment replacement then append subsequent fragments.
   if (selector === "" || selector === "this") {
-    // Use a property on the element to record if the first update was done
     if (!resolvedElement._htmlexDefaultUpdated) {
       resolvedElement._htmlexDefaultUpdated = true;
-      Logger.debug("[DEBUG] patchedUpdateTarget: first fragment – replacing content");
+      Logger.debug("[DEBUG] patchedUpdateTarget: first fragment – replacing content for target", target.selector);
       return originalUpdateTarget(target, content, resolvedElement);
     } else {
-      Logger.debug("[DEBUG] patchedUpdateTarget: subsequent fragment – appending content");
+      Logger.debug("[DEBUG] patchedUpdateTarget: subsequent fragment – appending content for target", target.selector);
       resolvedElement.innerHTML += content;
       return;
     }
   }
   // For non‑default targets, delegate to the original logic.
   return originalUpdateTarget(target, content, resolvedElement);
+}
+
+/**
+ * processSequentialQueue
+ *
+ * Processes the FIFO queue of API calls for a sequential element. All API calls
+ * are initiated concurrently. This function awaits each API call’s promise (waiting
+ * if necessary) before flushing its queued DOM updates. Then it waits the specified
+ * delay before moving on to the next API call.
+ *
+ * @param {Element} element - The element with the sequential queue.
+ */
+async function processSequentialQueue(element) {
+  element._htmlexSequentialProcessing = true;
+  const delay = element._htmlexSequentialDelay || 0;
+  Logger.debug("[DEBUG] processSequentialQueue: Starting sequential processing with delay =", delay, "ms");
+  while (element._htmlexSequentialQueue && element._htmlexSequentialQueue.length > 0) {
+    const { promise, method, endpoint } = element._htmlexSequentialQueue.shift();
+    Logger.debug("[DEBUG] processSequentialQueue: Queue length is now", element._htmlexSequentialQueue.length);
+    Logger.debug("[DEBUG] processSequentialQueue: Awaiting API call promise for endpoint:", endpoint);
+    await promise;
+    Logger.debug("[DEBUG] processSequentialQueue: API call promise resolved for endpoint:", endpoint);
+    // Flush queued sequential updates (if any)
+    if (element._htmlexSequentialUpdates && element._htmlexSequentialUpdates.length > 0) {
+      Logger.debug("[DEBUG] processSequentialQueue: Flushing", element._htmlexSequentialUpdates.length, "queued update(s).");
+      while (element._htmlexSequentialUpdates.length > 0) {
+        const update = element._htmlexSequentialUpdates.shift();
+        let resolvedElement;
+        if (update.target.selector.trim().toLowerCase() === "this") {
+          resolvedElement = element;
+        } else {
+          resolvedElement = document.querySelector(update.target.selector);
+        }
+        if (!resolvedElement) {
+          Logger.debug("[DEBUG] processSequentialQueue: Target element not found for selector", update.target.selector);
+        } else {
+          Logger.debug("[DEBUG] processSequentialQueue: Applying update for target", update.target.selector);
+          originalUpdateTarget(update.target, update.content, resolvedElement);
+        }
+      }
+    }
+    if (delay > 0 && element._htmlexSequentialQueue.length > 0) {
+      Logger.debug("[DEBUG] processSequentialQueue: Waiting for sequential delay of", delay, "ms before next API call.");
+      await new Promise(resolve => setTimeout(() => {
+        Logger.debug("[DEBUG] processSequentialQueue: Delay complete, moving to next sequential call.");
+        resolve();
+      }, delay));
+    }
+  }
+  element._htmlexSequentialProcessing = false;
+  element._htmlexSequentialMode = false;
+  Logger.debug("[DEBUG] processSequentialQueue: Sequential processing complete.");
 }
 
 /** @type {WeakSet<Element>} */
@@ -77,14 +140,12 @@ export function registerElement(element) {
     !element.hasAttribute('type') &&
     element.closest('form')
   ) {
-    // Determine an identity string for the button.
     const identity =
       element.id
         ? `#${element.id}`
         : element.getAttribute('name')
         ? `[name="${element.getAttribute('name')}"]`
         : element.outerHTML.slice(0, 60) + '...';
-    
     Logger.warn(
       `[HTMLeX Warning] A <button> element (${identity}) inside a form does not specify a type attribute. ` +
       `It defaults to 'submit', which may trigger the form's API/signal in addition to its own. ` +
@@ -113,11 +174,10 @@ export function registerElement(element) {
   const wrappedHandler = async (event) => {
     Logger.debug(`[DEBUG] Event triggered: type="${event.type}", currentTarget=`, event.currentTarget, " target=", event.target);
 
-    // Only apply the child-target check for "click" and "submit". Other events are allowed.
     if ((triggerEvent === 'click' || triggerEvent === 'submit') &&
         element.tagName.toLowerCase() !== 'form' &&
         event.currentTarget !== event.target) {
-      Logger.debug("[DEBUG] Ignoring event from child element. triggerEvent:", triggerEvent, "event.currentTarget:", event.currentTarget, "event.target:", event.target);
+      Logger.debug("[DEBUG] Ignoring event from child element. triggerEvent:", triggerEvent);
       return;
     }
     
@@ -125,8 +185,49 @@ export function registerElement(element) {
     
     if (method) {
       if (triggerEvent === 'submit') event.preventDefault();
-      Logger.debug("[DEBUG] Calling handleAction with method:", method.toUpperCase(), "endpoint:", element.getAttribute(method));
-      await handleAction(element, method.toUpperCase(), element.getAttribute(method));
+      // Check if the element has a sequential attribute.
+      
+      if (element.hasAttribute('sequential')) {
+        const seqDelay = parseInt(element.getAttribute('sequential'), 10) || 0;
+        element._htmlexSequentialMode = true;
+        if (!element._htmlexSequentialQueue) {
+          element._htmlexSequentialQueue = [];
+          element._htmlexSequentialProcessing = false;
+          element._htmlexSequentialDelay = seqDelay;
+          Logger.debug("[DEBUG] Initialized sequential queue with delay:", seqDelay, "ms");
+        }
+        // Fire the API call immediately and store its promise in the sequential queue.
+        const promise = handleAction(element, method.toUpperCase(), element.getAttribute(method));
+        Logger.debug("[DEBUG] Sequential API call fired for endpoint:", element.getAttribute(method));
+        element._htmlexSequentialQueue.push({ promise, method: method.toUpperCase(), endpoint: element.getAttribute(method) });
+        Logger.debug("[DEBUG] Enqueued sequential API call. Queue length now:", element._htmlexSequentialQueue.length);
+        if (!element._htmlexSequentialProcessing) {
+          processSequentialQueue(element);
+        }
+      } else {
+        // Non‑sequential: cancel pending or in-flight API calls.
+        if (element._htmlexPendingCall) {
+          clearTimeout(element._htmlexPendingCall);
+          Logger.debug("[DEBUG] Cancelled previous pending non-sequential API call (timeout) for endpoint:", element.getAttribute(method));
+        }
+        if (element._htmlexAbortController) {
+          element._htmlexAbortController.abort();
+          Logger.debug("[DEBUG] Aborted previous in-flight non-sequential API call for endpoint:", element.getAttribute(method));
+        }
+        element._htmlexAbortController = new AbortController();
+        Logger.debug("[DEBUG] Created new AbortController for non-sequential API call for endpoint:", element.getAttribute(method));
+        element._htmlexPendingCall = setTimeout(() => {
+          Logger.debug("[DEBUG] Executing non-sequential API call for endpoint:", element.getAttribute(method));
+          handleAction(element, method.toUpperCase(), element.getAttribute(method), { signal: element._htmlexAbortController.signal })
+            .then(() => {
+              Logger.debug("[DEBUG] Non-sequential API call completed for endpoint:", element.getAttribute(method));
+            })
+            .catch(err => {
+              Logger.debug("[DEBUG] Non-sequential API call aborted or errored for endpoint:", element.getAttribute(method), err);
+            });
+          element._htmlexPendingCall = null;
+        }, 0);
+      }
     } else if (element.hasAttribute('publish')) {
       const publishSignal = element.getAttribute('publish');
       Logger.info(`[DEBUG] Emitting publish signal "${publishSignal}" on event "${triggerEvent}".`);
@@ -239,8 +340,6 @@ export function registerElement(element) {
   }
 
   // --- NEW: Timer Handling for Removal/Update ---
-  // If the element has a timer attribute, set up a timer that triggers a DOM update
-  // using the target attribute. This supports arbitrary target selectors.
   if (element.hasAttribute('timer')) {
     const timerDelay = parseInt(element.getAttribute('timer'), 10);
     setTimeout(() => {
@@ -258,13 +357,11 @@ export function registerElement(element) {
             Logger.warn(`[HTMLeX WARN] Timer triggered: target element "${target.selector}" not found.`);
             return;
           }
-          // If the replacement strategy is 'remove', remove the element.
           if (target.replacementStrategy && target.replacementStrategy === 'remove') {
             Logger.info(`[HTMLeX INFO] Timer triggered: removing element matching target "${target.selector}"`);
             resolvedElement.remove();
           } else {
             Logger.info(`[HTMLeX INFO] Timer triggered: updating element matching target "${target.selector}" with empty content`);
-            // For other strategies, update the target with an empty string.
             patchedUpdateTarget(target, "", resolvedElement);
           }
         });
@@ -296,7 +393,7 @@ export function initHTMLeX() {
   elements.forEach(el => registerElement(el));
   Logger.info(`[HTMLeX INFO] Registered ${elements.length} element(s).`);
   
-  // Observe for new elements added to the DOM (for progressive rendering).
+  // Observe for new elements added to the DOM.
   const observer = new MutationObserver(mutationsList => {
     mutationsList.forEach(mutation => {
       if (mutation.type === 'childList' && mutation.addedNodes.length) {
@@ -306,7 +403,6 @@ export function initHTMLeX() {
               Logger.debug("[DEBUG] New HTMLeX element found:", node);
               registerElement(node);
             }
-            // Also check for any descendants with HTMLeX attributes.
             const newElements = node.querySelectorAll(selectorString);
             newElements.forEach(el => {
               Logger.debug("[DEBUG] New descendant HTMLeX element found:", el);

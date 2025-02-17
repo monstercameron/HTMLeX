@@ -208,7 +208,7 @@
       "Sequential calls",
       "Queued responses"
     ],
-    "initDemoHref": "/process/init",
+    "initDemoHref": "/sequential/init",
     "launchButtonText": "Run Sequential",
     "learnMoreText": "Learn More",
     "learnMoreHref": "/sequentialDemo/details",
@@ -252,6 +252,7 @@
       "Polling",
       "Scheduled updates"
     ],
+    "initDemoHref": "/polling/init",
     "launchButtonText": "Start Polling",
     "learnMoreText": "Learn More",
     "learnMoreHref": "/pollingDemo/details",
@@ -273,6 +274,7 @@
       "Hover actions",
       "Debounce"
     ],
+    "initDemoHref": "/hover/init",
     "launchButtonText": "Hover Action",
     "learnMoreText": "Learn More",
     "learnMoreHref": "/hoverTriggerDemo/details",

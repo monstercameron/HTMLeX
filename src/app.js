@@ -47,7 +47,8 @@ const COUNTER_INCREMENT_ROUTE = '/counter/increment';
 const MULTI_DEMO_INIT = "/multi/init"
 const MULTI_FRAGMENT_ROUTE = '/multi/fragment';
 // Polling
-const SEQUENTIAL_POLL_ROUTE = '/sequential/poll';
+const SEQUENTIAL_DEMO_INIT = '/sequential/init';
+const SEQUENTIAL_POLL_NEXT = '/sequential/next';
 // Sequential FIFO with pacing
 const PROCESS_DEMO_INIT = '/process/init';
 const PROCESS_STEP1_ROUTE = '/process/step1';
@@ -142,7 +143,8 @@ app.get(MULTI_DEMO_INIT, streaming.multiFragmentDemoInit);
 app.get(MULTI_FRAGMENT_ROUTE, streaming.multiFragment);
 
 // FIFO and intra request wait demo
-app.get(SEQUENTIAL_POLL_ROUTE, streaming.sequentialPoll);
+app.get(SEQUENTIAL_DEMO_INIT, streaming.sequentialDemoInit);
+app.get(SEQUENTIAL_POLL_NEXT, streaming.sequentialNext);
 
 // Signal Chaining
 app.get(PROCESS_DEMO_INIT, streaming.processInit);

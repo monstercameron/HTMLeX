@@ -14,7 +14,8 @@ import {
   renderCounter, NotificationsDemo,
   ClickCounterWidget, multiFragmentDemo,
   SSESubscribersDemo, SignalChainingDemo,
-  WebSocketUpdatesDemo, loadingStateDemo
+  WebSocketUpdatesDemo, loadingStateDemo,
+  SequentialDemo
 } from '../components/Components.js';
 import { renderFragment } from "../components/HTMLeX.js"
 
@@ -229,23 +230,57 @@ export async function multiFragment(req, res) {
 }
 
 /**
- * Handles the '/sequential/poll' endpoint.
- * After a delay, sends the current poll value and increments it.
+ * Handles the '/sequential/init' endpoint.
+ * Sends the current poll value (via the SequentialDemo fragment) and increments it.
+ *
+ * This endpoint updates the "#demoCanvas" element's innerHTML with the output of `SequentialDemo()`
+ * and immediately terminates the response.
+ *
+ * @async
+ * @function sequentialDemoInit
+ * @param {import('express').Request} req - The Express request object.
+ * @param {import('express').Response} res - The Express response object.
+ * @returns {Promise<void>} A promise that resolves when the response has been fully sent.
+ */
+export async function sequentialDemoInit(req, res) {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  try {
+    res.write(renderFragment("#demoCanvas(innerHTML)", SequentialDemo()));
+  } catch (err) {
+    console.error('Error in sequentialDemoInit:', err);
+    if (!res.headersSent) {
+      res.status(500).send('Internal server error');
+    }
+  } finally {
+    res.end();
+  }
+}
+
+/**
+ * Handles the '/sequential/next' endpoint.
+ * After a delay, sends a div containing the exact timestamp to update the target.
+ *
  * @async
  * @param {import('express').Request} req - Express request object.
  * @param {import('express').Response} res - Express response object.
  * @returns {Promise<void>}
  */
-export async function sequentialPoll(req, res) {
-  setTimeout(() => {
-    try {
-      res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      res.send(renderFragment('this(innerHTML)', render(`${pollVal++}, \n`)));
-    } catch (err) {
-      console.error('Error in sequentialPoll:', err);
-      if (!res.headersSent) res.status(500).send('Internal server error');
+export async function sequentialNext(req, res) {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  try {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const timestamp = new Date().toISOString();
+    const contentNode = div({}, timestamp);
+    const htmlContent = render(contentNode);
+    res.write(renderFragment('#sequentialOutput(append)', htmlContent));
+  } catch (err) {
+    console.error('Error in sequentialNext:', err);
+    if (!res.headersSent) {
+      res.status(500).write('Internal server error');
     }
-  }, 1000);
+  } finally {
+    res.end();
+  }
 }
 
 /**
