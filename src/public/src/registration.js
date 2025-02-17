@@ -375,34 +375,62 @@ export function registerElement(element) {
   // --- NEW: Timer Handling for Removal/Update ---
   if (element.hasAttribute('timer')) {
     const timerDelay = parseInt(element.getAttribute('timer'), 10);
+    Logger.info(`[HTMLeX INFO] Timer set for element with delay ${timerDelay}ms.`);
     setTimeout(() => {
+      Logger.debug("[TIMER] Timer callback triggered for element:", element);
+      // First, if the element has an API call attribute, trigger that action.
+      const apiMethod = methodAttributes.find(m => element.hasAttribute(m));
+      if (apiMethod) {
+        Logger.info(`[TIMER] Timer triggered: Calling API with method ${apiMethod.toUpperCase()}.`);
+        handleAction(element, apiMethod.toUpperCase(), element.getAttribute(apiMethod));
+        return;
+      }
+      // Otherwise, if the element has a publish attribute, emit that signal.
+      if (element.hasAttribute('publish')) {
+        const publishSignal = element.getAttribute('publish');
+        Logger.info(`[TIMER] Timer triggered: Emitting publish signal "${publishSignal}".`);
+        emitSignal(publishSignal);
+        return;
+      }
+      // Otherwise, check if the target attribute includes a removal instruction.
       const targetAttr = element.getAttribute('target');
+      if (targetAttr && targetAttr.toLowerCase().includes("(remove)")) {
+        if (targetAttr.toLowerCase().includes("this(remove)")) {
+          Logger.info(`[TIMER] Timer triggered: Removing element as specified by target "this(remove)".`);
+          element.remove();
+          return;
+        } else {
+          const selector = targetAttr.replace(/\(remove\)/gi, '').trim();
+          const resolved = document.querySelector(selector);
+          if (resolved) {
+            Logger.info(`[TIMER] Timer triggered: Removing element matching selector "${selector}".`);
+            resolved.remove();
+            return;
+          } else {
+            Logger.warn(`[TIMER] Timer triggered: No element found for selector "${selector}" to remove.`);
+          }
+        }
+      }
+      // If no removal instruction, but a target attribute exists, clear its content.
       if (targetAttr) {
         const targets = parseTargets(targetAttr);
         targets.forEach(target => {
-          let resolvedElement = null;
+          let resolved;
           if (target.selector.trim().toLowerCase() === "this") {
-            resolvedElement = element;
+            resolved = element;
           } else {
-            resolvedElement = document.querySelector(target.selector);
+            resolved = document.querySelector(target.selector);
           }
-          if (!resolvedElement) {
-            Logger.warn(`[HTMLeX WARN] Timer triggered: target element "${target.selector}" not found.`);
-            return;
-          }
-          if (target.replacementStrategy && target.replacementStrategy === 'remove') {
-            Logger.info(`[HTMLeX INFO] Timer triggered: removing element matching target "${target.selector}"`);
-            resolvedElement.remove();
-          } else {
-            Logger.info(`[HTMLeX INFO] Timer triggered: updating element matching target "${target.selector}" with empty content`);
-            patchedUpdateTarget(target, "", resolvedElement);
+          if (resolved) {
+            Logger.info(`[TIMER] Timer triggered: Clearing content of element matching target "${target.selector}".`);
+            resolved.innerHTML = "";
           }
         });
       } else {
-        Logger.info("Timer triggered: No target attribute specified; no action taken.");
+        Logger.info("[TIMER] Timer triggered: No target attribute specified; removing the element.");
+        element.remove();
       }
     }, timerDelay);
-    Logger.info(`[HTMLeX INFO] Timer set for element with delay ${timerDelay}ms.`);
   }
   // --- END NEW: Timer Handling ---
 }
