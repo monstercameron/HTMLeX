@@ -1,4 +1,3 @@
-// src/fragments.js
 /**
  * @module Fragments
  * @description Processes a streaming HTTP response that uses <fragment> tags,
@@ -16,6 +15,9 @@ import { Logger } from './logger.js';
 import { parseTargets } from './dom.js';
 import { handleAction } from './actions.js';
 import { emitSignal } from './signals.js';
+// Import patchedUpdateTarget so that sequential updates are properly queued.
+import { patchedUpdateTarget } from './registration.js';
+import { updateTarget as originalUpdateTarget } from './dom.js';
 
 /**
  * Helper: Checks if an element has an API call attribute.
@@ -70,13 +72,14 @@ function setupTimerForElement(el) {
 
 /**
  * Processes the current buffer by extracting complete <fragment> blocks.
- * For each complete fragment found, it extracts the inner content, updates the DOM,
- * and if the inserted element has a timer attribute, sets up the timer.
+ * For each complete fragment found, it extracts the inner content and updates the DOM.
+ * If the triggering element is in streaming mode (as indicated by _htmlexStreaming),
+ * updates are applied immediately (bypassing sequential queuing). Otherwise, if the triggering
+ * element is in sequential mode, the update is queued; if neither, the update is applied immediately.
  * Returns the buffer with all complete fragments removed.
  *
  * @param {string} buffer - The current accumulated buffer from the stream.
- * @param {Element} [triggeringElement=null] - The element that triggered the API call,
- *   used when the fragment target is specified as "this(...)" or when no target is found.
+ * @param {Element} [triggeringElement=null] - The element that triggered the API call.
  * @returns {string} The buffer with complete fragments removed.
  */
 export function processFragmentBuffer(buffer, triggeringElement = null) {
@@ -150,61 +153,24 @@ export function processFragmentBuffer(buffer, triggeringElement = null) {
         return;
       }
       
-      targetElements.forEach(el => {
-        let insertedElement;
-        switch (target.strategy) {
-          case 'innerHTML':
-            Logger.info(`Updating innerHTML of element matching target "${target.selector}"`);
-            el.innerHTML = content;
-            insertedElement = el.querySelector('*');
-            break;
-          case 'outerHTML': {
-            Logger.info(`Replacing outerHTML of element matching target "${target.selector}"`);
-            const temp = document.createElement('template');
-            temp.innerHTML = content;
-            insertedElement = temp.content.firstElementChild;
-            el.replaceWith(insertedElement);
-            break;
-          }
-          case 'append':
-            Logger.info(`Appending content to element matching target "${target.selector}"`);
-            // Use insertAdjacentHTML with 'beforeend' to append without replacing existing content.
-            el.insertAdjacentHTML('beforeend', content);
-            insertedElement = el.lastElementChild;
-            break;
-          case 'prepend':
-            Logger.info(`Prepending content to element matching target "${target.selector}"`);
-            el.insertAdjacentHTML('afterbegin', content);
-            insertedElement = el.firstElementChild;
-            break;
-          case 'before':
-            Logger.info(`Inserting content before element matching target "${target.selector}"`);
-            el.insertAdjacentHTML('beforebegin', content);
-            insertedElement = el.previousElementSibling;
-            break;
-          case 'after':
-            Logger.info(`Inserting content after element matching target "${target.selector}"`);
-            el.insertAdjacentHTML('afterend', content);
-            insertedElement = el.nextElementSibling;
-            break;
-          case 'remove':
-            Logger.info(`Removing element as per target strategy "remove" for selector "${target.selector}"`);
-            el.remove();
-            insertedElement = null;
-            break;
-          default:
-            Logger.info(`Using default innerHTML strategy for target "${target.selector}"`);
-            el.innerHTML = content;
-            insertedElement = el.querySelector('*');
+      // If streaming is active, update immediately.
+      if (triggeringElement && triggeringElement._htmlexStreaming) {
+        Logger.debug("Streaming active: updating fragment immediately.");
+        targetElements.forEach(el => {
+          patchedUpdateTarget(target, content, el);
+        });
+      } else if (triggeringElement && triggeringElement._htmlexSequentialMode) {
+        Logger.debug("Queuing fragment update because triggering element is sequential.");
+        if (!triggeringElement._htmlexSequentialUpdates) {
+          triggeringElement._htmlexSequentialUpdates = [];
         }
-        if (insertedElement) {
-          Logger.debug("Inserted element:", insertedElement);
-          if (insertedElement.hasAttribute('timer')) {
-            Logger.debug("Inserted element has timer attribute. Setting up timer.");
-            setupTimerForElement(insertedElement);
-          }
-        }
-      });
+        triggeringElement._htmlexSequentialUpdates.push({ target, content });
+      } else {
+        // Otherwise, update immediately using patchedUpdateTarget.
+        targetElements.forEach(el => {
+          patchedUpdateTarget(target, content, el);
+        });
+      }
     });
   }
   

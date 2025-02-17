@@ -243,7 +243,7 @@ export async function updateTodo(req, res) {
     await writeTodos(todos);
     const updatedTodoItem = renderTodoItem(todos[index]);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment(`#todo-${id}(outerHTML)`, updatedTodoItem));
+    res.send(renderFragment(`#editForm-${id}(outerHTML)`, updatedTodoItem));
   } catch (err) {
     console.error('Error in updateTodo:', err);
     if (!res.headersSent) res.status(500).send('Internal server error');

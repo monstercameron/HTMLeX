@@ -991,7 +991,6 @@ export function loadingStateDemo() {
       {
         GET: '/demo/loading',
         target: '#loadingDemoOutput(innerHTML)',
-        sequential: '500',
         class: 'btn bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-8 rounded-md'
       },
       'Load Payload'
@@ -1002,37 +1001,3 @@ export function loadingStateDemo() {
     )
   );
 }
-
-/**
- * Renders the Sequential API Calls Demo widget using the HTMLeX API.
- *
- * This function returns the rendered HTML string for a widget that demonstrates
- * sequential API calls. The button triggers an API call that appends its response
- * to the output container.
- *
- * @returns {string} The HTML string representing the Sequential API Calls Demo.
- *
- * @example
- * const htmlString = SequentialDemo();
- */
-// export function SequentialDemo() {
-//   return render(
-//     section(
-//       { id: 'sequentialDemo', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
-//       h2({ class: 'text-2xl font-semibold mb-4' }, 'Sequential API Calls'),
-//       button(
-//         {
-//           GET: '/sequential/process',
-//           target: '#sequentialOutput(append)',
-//           sequential: '200',
-//           class: 'btn bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-md'
-//         },
-//         'Run Sequential Process'
-//       ),
-//       div(
-//         { id: 'sequentialOutput', class: 'mt-4 p-4 bg-gray-700 rounded-md' },
-//         '<!-- Sequential responses will be queued and rendered here -->'
-//       )
-//     )
-//   );
-// }

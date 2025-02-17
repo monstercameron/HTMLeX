@@ -1,4 +1,3 @@
-// src/actions.js
 /**
  * @module Actions
  * @description Handles API calls, lifecycle hooks, polling (via a Web Worker), and response processing.
@@ -12,11 +11,15 @@ import { fetchWithTimeout } from './fetchHelper.js';
 import { handleURLState } from './urlState.js';
 import { processFragmentBuffer } from './fragments.js';
 import { emitSignal } from './signals.js';
+// Import flushSequentialUpdates to support HTTP streaming chunk management.
+import { flushSequentialUpdates } from './registration.js';
 
 /**
  * Processes a streaming API response.
  * Reads chunks as they arrive from an open connection, accumulating a buffer.
- * For every chunk, any complete <fragment> blocks are extracted and processed immediately.
+ * For every chunk, any complete <fragment> blocks are extracted and processed.
+ * We count chunks so that if more than one chunk is received, we mark the response as streaming
+ * (which will cause fragment updates to be applied immediately, bypassing sequential queuing).
  * After the stream ends, any remaining text is used as a fallback update.
  *
  * @param {Response} response - The fetch response.
@@ -32,6 +35,13 @@ export async function processResponse(response, triggeringElement) {
     Logger.debug("Triggering element has no target attribute; will default to itself if needed.");
   }
 
+  // Initialize chunk counter.
+  let chunkCount = 0;
+  // Mark the element as streaming-active.
+  triggeringElement._htmlexStreamingActive = true;
+  // Initially assume not streaming.
+  triggeringElement._htmlexStreaming = false;
+
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -42,13 +52,19 @@ export async function processResponse(response, triggeringElement) {
       Logger.debug("Stream reading complete.");
       break;
     }
+    chunkCount++;
+    // Mark as streaming if more than one chunk is received.
+    if (chunkCount > 1) {
+      triggeringElement._htmlexStreaming = true;
+    }
     const chunk = decoder.decode(value, { stream: true });
     Logger.debug("Received chunk:", chunk);
     buffer += chunk;
     Logger.debug("Buffer before fragment processing:", buffer);
-    // Pass the triggering element so that "this(...)" targets can be resolved.
+    // Process complete fragment blocks.
     buffer = processFragmentBuffer(buffer, triggeringElement);
     Logger.debug("Buffer after fragment processing:", buffer);
+    // (No flush timer is needed here because streaming updates will be applied immediately if streaming.)
   }
 
   // Final flush: process any remaining complete fragments.
@@ -84,6 +100,10 @@ export async function processResponse(response, triggeringElement) {
   }
 
   triggeringElement._htmlexFragmentsProcessed = true;
+  // Mark streaming as complete.
+  triggeringElement._htmlexStreamingActive = false;
+  // Clear streaming flag so that subsequent non-streaming responses use sequential queuing.
+  triggeringElement._htmlexStreaming = false;
   Logger.debug("Completed processing response stream. Final leftover buffer:", buffer);
   return buffer;
 }
@@ -264,7 +284,7 @@ export async function handleAction(element, method, endpoint) {
 
   handleURLState(element);
 
-  // --- NEW CODE: Check for Emit header and publish corresponding signal ---
+  // --- NEW CODE: Check for Emit header and publish corresponding signal ---  
   if (response && response.headers) {
     const emitHeader = response.headers.get('Emit');
     if (emitHeader) {
@@ -322,8 +342,6 @@ export async function handleAction(element, method, endpoint) {
   }
 
   // --- NEW CODE: Polling Support via a Web Worker ---
-  // Create a worker if polling is enabled and not already started.
-  // In handleAction function, update the polling section:
   if (element.hasAttribute('poll') && !element._pollWorker) {
     const pollInterval = parseInt(element.getAttribute('poll'), 10);
     if (pollInterval < 100) {
