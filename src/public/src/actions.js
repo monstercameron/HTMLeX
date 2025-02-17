@@ -111,11 +111,16 @@ export async function processResponse(response, triggeringElement) {
 /**
  * Handles an API action including lifecycle hooks, extras, caching,
  * URL state updates, publish signal emission, and polling.
+ *
+ * Now accepts an extraOptions parameter (defaulting to an empty object)
+ * that is merged into the fetch options. This lets the AbortController signal be passed in.
+ *
  * @param {Element} element - The element triggering the action.
  * @param {string} method - The HTTP method (e.g., "GET", "POST").
  * @param {string} endpoint - The API endpoint.
+ * @param {object} [extraOptions={}] - Extra options to merge into the fetch options.
  */
-export async function handleAction(element, method, endpoint) {
+export async function handleAction(element, method, endpoint, extraOptions = {}) {
   // Early guard: if polling is disabled, abort further API calls.
   if (element._pollDisabled) {
     Logger.info("Polling has been disabled for this element; aborting API call.");
@@ -185,7 +190,8 @@ export async function handleAction(element, method, endpoint) {
     });
   }
 
-  const options = { method };
+  // Merge extraOptions into our fetch options.
+  const options = { method, ...extraOptions };
   let url = endpoint;
   if (method === 'GET') {
     const params = new URLSearchParams(formData).toString();
