@@ -208,6 +208,7 @@
       "Sequential calls",
       "Queued responses"
     ],
+    "initDemoHref": "/process/init",
     "launchButtonText": "Run Sequential",
     "learnMoreText": "Learn More",
     "learnMoreHref": "/sequentialDemo/details",

@@ -926,3 +926,38 @@ export function WebSocketUpdatesDemo() {
     )
   );
 }
+
+/**
+ * Renders the Sequential API Calls Demo widget using the HTMLeX API.
+ *
+ * This widget demonstrates triggering sequential API calls with the "sequential" attribute.
+ *
+ * @returns {string} The HTML string representing the Sequential API Calls Demo widget.
+ *
+ * @example
+ * const htmlString = SequentialDemo();
+ */
+export function SequentialDemo() {
+  return render(
+    section(
+      { id: 'sequentialDemo', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
+      h2({ class: 'text-2xl font-semibold mb-4' }, 'Sequential API Calls'),
+      button(
+        {
+          GET: '/sequential/process',
+          target: '#sequentialOutput(append)',
+          sequential: '200',
+          class: 'btn bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-md'
+        },
+        'Run Sequential Process'
+      ),
+      div(
+        {
+          id: 'sequentialOutput',
+          class: 'mt-4 p-4 bg-gray-700 rounded-md'
+        },
+        '<!-- Sequential responses will be queued and rendered here -->'
+      )
+    )
+  );
+}
