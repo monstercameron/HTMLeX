@@ -7,14 +7,14 @@
  * @module features/streaming
  */
 
-import { render } from '../components/HTMLeX.js';
+import { render, div, span } from '../components/HTMLeX.js';
 import {
   renderLoadingMessage,
   renderNotificationMessage,
   renderCounter, NotificationsDemo,
   ClickCounterWidget, multiFragmentDemo,
   SSESubscribersDemo, SignalChainingDemo,
-  WebSocketUpdatesDemo
+  WebSocketUpdatesDemo, loadingStateDemo
 } from '../components/Components.js';
 import { renderFragment } from "../components/HTMLeX.js"
 
@@ -264,7 +264,7 @@ function processStep(step, res) {
     try {
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       const message = `Step ${step}: Data received at ${new Date().toLocaleTimeString()}<br>`;
-      res.send(renderFragment('this(append)', render(message)));
+      res.send(renderFragment(`#chainOutput(${step === 1 ? "innerHTML" : "append"})`, render(message)));
     } catch (err) {
       console.error(`Error in processStep${step}:`, err);
       if (!res.headersSent) {
@@ -345,23 +345,72 @@ export function processStep4(req, res) {
  */
 export function processStep5(req, res) {
   processStep(5, res);
+
+}
+
+/**
+ * Handles the '/demo/init' endpoint.
+ * Sends a loading spinner fragment and then, after a delay, sends the final payload.
+ *
+ * This endpoint writes an HTML fragment that updates the "#demoCanvas" element's innerHTML
+ * with the output of `loadingStateDemo()`. After writing the fragment, the response is terminated.
+ *
+ * @async
+ * @function demoInit
+ * @param {import('express').Request} req - The Express request object.
+ * @param {import('express').Response} res - The Express response object.
+ * @returns {Promise<void>} A promise that resolves when the response has been fully sent.
+ */
+export async function demoInit(req, res) {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  try {
+    res.write(renderFragment("#demoCanvas(innerHTML)", loadingStateDemo()));
+    res.end();
+  } catch (err) {
+    console.error('Error in demoInit:', err);
+    if (!res.headersSent) {
+      res.status(500).end();
+    } else {
+      res.end();
+    }
+  }
 }
 
 /**
  * Handles the '/demo/loading' endpoint.
- * Sends a loading spinner and, after a delay, sends the final payload.
+ * Writes a loading spinner immediately and, after a 5-second delay,
+ * writes the final payload to the response using HTMLeX virtual nodes.
+ *
+ * This function uses progressive updates by wrapping the content in an HTMLeX fragment
+ * that targets the "#loadingDemoOutput" element's innerHTML.
+ *
  * @async
  * @param {import('express').Request} req - Express request object.
  * @param {import('express').Response} res - Express response object.
- * @returns {Promise<void>}
+ * @returns {Promise<void>} Resolves when the response has been fully sent.
  */
 export async function demoLoading(req, res) {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   try {
-    res.write(renderFragment('#loadingDemoOutput(innerHTML)', render(`<div><span class="spinner"></span>Loading, please wait...</div>`)));
+    // Create a virtual node for the loading state.
+    const loadingNode = div(
+      {},
+      span({ class: 'spinner' }),
+      'Loading, wait 5000ms'
+    );
+
+    // Write the loading fragment.
+    res.write(renderFragment('#loadingDemoOutput(innerHTML)', render(loadingNode)));
+
     setTimeout(() => {
       try {
-        res.write(renderFragment('#loadingDemoOutput(innerHTML)', render(`<div class="p-4 bg-green-700 rounded-md text-green-100">Payload loaded after 5 seconds!</div>`)));
+        // Create a virtual node for the final payload.
+        const payloadNode = div(
+          { class: 'p-4 bg-green-700 rounded-md text-green-100' },
+          'Payload received after 5000ms'
+        );
+        // Write the payload fragment.
+        res.write(renderFragment('#loadingDemoOutput(innerHTML)', render(payloadNode)));
       } catch (innerErr) {
         console.error('Error writing demo loading payload:', innerErr);
       }

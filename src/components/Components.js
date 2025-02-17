@@ -961,3 +961,36 @@ export function SequentialDemo() {
     )
   );
 }
+
+/**
+ * Creates a virtual node for the Loading State Demo.
+ *
+ * The returned node follows these HTMLeX rules:
+ * - The <section> is styled for dark mode.
+ * - The <button> includes custom HTMLeX attributes for GET, target, and sequential.
+ * - The <div> is a placeholder for loading payload content.
+ *
+ * @returns {Object} A virtual node representing the Loading State Demo.
+ *
+ * @example
+ * const demoNode = loadingStateDemo();
+ */
+export function loadingStateDemo() {
+  return section(
+    { id: 'loadingDemo', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
+    h2({ class: 'text-2xl font-semibold mb-4' }, 'Loading State Demo'),
+    button(
+      {
+        GET: '/demo/loading',
+        target: '#loadingDemoOutput(innerHTML)',
+        sequential: '500',
+        class: 'btn bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-8 rounded-md'
+      },
+      'Load Payload'
+    ),
+    div(
+      { id: 'loadingDemoOutput', class: 'mt-4 p-4 bg-gray-700 rounded-md' }
+      // The content inside this div will be dynamically replaced after a click.
+    )
+  );
+}

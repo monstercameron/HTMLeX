@@ -56,6 +56,7 @@ const PROCESS_STEP3_ROUTE = '/process/step3';
 const PROCESS_STEP4_ROUTE = '/process/step4';
 const PROCESS_STEP5_ROUTE = '/process/step5';
 // Demo route handling
+const DEMO_DEMO_INIT = '/demo/init';
 const DEMO_LOADING_ROUTE = '/demo/loading';
 // Server Sent Events
 const SSE_DEMO_INIT = "/sse/init"
@@ -150,6 +151,9 @@ app.get(PROCESS_STEP2_ROUTE, streaming.processStep2);
 app.get(PROCESS_STEP3_ROUTE, streaming.processStep3);
 app.get(PROCESS_STEP4_ROUTE, streaming.processStep4);
 app.get(PROCESS_STEP5_ROUTE, streaming.processStep5);
+
+// Hanlding loading state
+app.get(DEMO_DEMO_INIT, streaming.demoInit);
 app.get(DEMO_LOADING_ROUTE, streaming.demoLoading);
 
 // Server Sent events

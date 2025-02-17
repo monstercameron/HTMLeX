@@ -230,6 +230,7 @@
       "Loading state",
       "Spinner"
     ],
+    "initDemoHref": "/demo/init",
     "launchButtonText": "Load Payload",
     "learnMoreText": "Learn More",
     "learnMoreHref": "/loadingDemo/details",
