@@ -956,7 +956,7 @@ export function SequentialDemo() {
         {
           GET: '/sequential/next',
           target: '#sequentialOutput(append)',
-          debounce: '100',
+          debounce: '500',
           class: 'btn bg-red-600 hover:bg-red-700 mt-5 text-white font-bold py-3 px-8 rounded-md'
         },
         'Non Sequential Last In Last Out'
