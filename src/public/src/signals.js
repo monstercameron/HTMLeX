@@ -4,6 +4,8 @@
  * @description Provides a signal bus for chaining actions.
  */
 
+import { Logger } from './logger.js';
+
 /** @type {Map<string, Function[]>} */
 const signalBus = new Map();
 
@@ -15,8 +17,10 @@ const signalBus = new Map();
 export function registerSignalListener(signalName, callback) {
   if (!signalBus.has(signalName)) {
     signalBus.set(signalName, []);
+    Logger.system.debug(`[SIGNALS] Created new signal bus for "${signalName}".`);
   }
   signalBus.get(signalName).push(callback);
+  Logger.system.debug(`[SIGNALS] Registered listener for signal "${signalName}".`);
 }
 
 /**
@@ -24,13 +28,17 @@ export function registerSignalListener(signalName, callback) {
  * @param {string} signalName - The signal to emit.
  */
 export function emitSignal(signalName) {
+  Logger.system.debug(`[SIGNALS] Emitting signal "${signalName}".`);
   if (signalBus.has(signalName)) {
     signalBus.get(signalName).forEach(callback => {
       try {
         callback();
+        Logger.system.debug(`[SIGNALS] Signal "${signalName}" listener executed successfully.`);
       } catch (error) {
-        console.error(`Error in signal listener for "${signalName}": ${error}`);
+        Logger.system.error(`[SIGNALS] Error in signal listener for "${signalName}":`, error);
       }
     });
+  } else {
+    Logger.system.warn(`[SIGNALS] No listeners registered for signal "${signalName}".`);
   }
 }

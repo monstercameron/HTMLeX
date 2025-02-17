@@ -18,11 +18,18 @@ let processingQueue = false;
  */
 function processUpdateQueue() {
   if (updateQueue.length > 0) {
+    Logger.system.debug("[UTILS] Processing update from queue. Remaining updates:", updateQueue.length);
     const updateFn = updateQueue.shift();
-    updateFn();
+    try {
+      updateFn();
+      Logger.system.debug("[UTILS] Update function executed successfully.");
+    } catch (error) {
+      Logger.system.error("[UTILS] Error executing update function from queue:", error);
+    }
     requestAnimationFrame(processUpdateQueue);
   } else {
     processingQueue = false;
+    Logger.system.debug("[UTILS] Update queue empty. Stopping processing.");
   }
 }
 
@@ -33,12 +40,15 @@ function processUpdateQueue() {
  */
 export function scheduleUpdate(updateFn, sequential) {
   if (sequential) {
+    Logger.system.debug("[UTILS] Scheduling sequential update function.");
     updateQueue.push(updateFn);
     if (!processingQueue) {
       processingQueue = true;
+      Logger.system.debug("[UTILS] Starting update queue processing.");
       requestAnimationFrame(processUpdateQueue);
     }
   } else {
+    Logger.system.debug("[UTILS] Scheduling immediate (non-sequential) update function.");
     requestAnimationFrame(updateFn);
   }
 }
@@ -49,5 +59,7 @@ export function scheduleUpdate(updateFn, sequential) {
  * @returns {boolean} True if the element has sequential updates enabled.
  */
 export function isSequential(element) {
-  return element.hasAttribute('sequential') && element.getAttribute('sequential') !== 'false';
+  const sequential = element.hasAttribute('sequential') && element.getAttribute('sequential') !== 'false';
+  Logger.system.debug("[UTILS] Element", element, "sequential update:", sequential);
+  return sequential;
 }

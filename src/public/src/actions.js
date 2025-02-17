@@ -27,14 +27,14 @@ import { flushSequentialUpdates } from './registration.js';
  * @returns {Promise<string>} The final leftover text from the stream.
  */
 export async function processResponse(response, triggeringElement) {
-  Logger.debug("Starting to process response stream.");
-
+  Logger.system.debug("Starting to process response stream.");
+  
   if (triggeringElement.hasAttribute("target")) {
-    Logger.debug("Triggering element target attribute:", triggeringElement.getAttribute("target"));
+    Logger.system.debug("Triggering element target attribute:", triggeringElement.getAttribute("target"));
   } else {
-    Logger.debug("Triggering element has no target attribute; will default to itself if needed.");
+    Logger.system.debug("Triggering element has no target attribute; will default to itself if needed.");
   }
-
+  
   // Initialize chunk counter.
   let chunkCount = 0;
   // Mark the element as streaming-active.
@@ -49,7 +49,7 @@ export async function processResponse(response, triggeringElement) {
   while (true) {
     const { done, value } = await reader.read();
     if (done) {
-      Logger.debug("Stream reading complete.");
+      Logger.system.debug("Stream reading complete.");
       break;
     }
     chunkCount++;
@@ -58,41 +58,40 @@ export async function processResponse(response, triggeringElement) {
       triggeringElement._htmlexStreaming = true;
     }
     const chunk = decoder.decode(value, { stream: true });
-    Logger.debug("Received chunk:", chunk);
+    Logger.system.debug(`Received chunk #${chunkCount}:`, chunk);
     buffer += chunk;
-    Logger.debug("Buffer before fragment processing:", buffer);
+    Logger.system.debug("Buffer before fragment processing (length):", buffer.length);
     // Process complete fragment blocks.
     buffer = processFragmentBuffer(buffer, triggeringElement);
-    Logger.debug("Buffer after fragment processing:", buffer);
-    // (No flush timer is needed here because streaming updates will be applied immediately if streaming.)
+    Logger.system.debug("Buffer after fragment processing (length):", buffer.length);
   }
 
   // Final flush: process any remaining complete fragments.
   const finalChunk = decoder.decode();
-  Logger.debug("Final chunk after stream complete:", finalChunk);
+  Logger.system.debug("Final chunk after stream complete:", finalChunk);
   buffer += finalChunk;
   buffer = processFragmentBuffer(buffer, triggeringElement);
-  Logger.debug("Final buffer after processing:", buffer);
+  Logger.system.debug("Final buffer after processing (length):", buffer.length);
 
   // Fallback update: if no fragments were processed and leftover text exists.
   if (!triggeringElement._htmlexFragmentsProcessed && buffer.trim() !== "") {
-    Logger.debug("No fragments processed; performing fallback update with leftover text.");
+    Logger.system.debug("No fragments processed; performing fallback update with leftover text.");
     if (triggeringElement.hasAttribute("target")) {
       const targets = parseTargets(triggeringElement.getAttribute("target"));
       targets.forEach(target => {
         let resolvedElement;
         if (target.selector.trim().toLowerCase() === "this") {
           resolvedElement = triggeringElement;
-          Logger.debug("Fallback: target selector is 'this'; using triggering element.");
+          Logger.system.debug("Fallback: target selector is 'this'; using triggering element.");
         } else {
           resolvedElement = document.querySelector(target.selector);
           if (!resolvedElement) {
-            Logger.debug(`Fallback: No element found for selector "${target.selector}". Using triggering element.`);
+            Logger.system.debug(`Fallback: No element found for selector "${target.selector}". Using triggering element.`);
             resolvedElement = triggeringElement;
           }
         }
         scheduleUpdate(() => {
-          Logger.debug("Applying fallback update to target:", target, "resolved as:", resolvedElement);
+          Logger.system.debug("Applying fallback update to target:", target, "resolved as:", resolvedElement);
           updateTarget(target, buffer, resolvedElement);
         }, isSequential(triggeringElement));
       });
@@ -104,7 +103,7 @@ export async function processResponse(response, triggeringElement) {
   triggeringElement._htmlexStreamingActive = false;
   // Clear streaming flag so that subsequent non-streaming responses use sequential queuing.
   triggeringElement._htmlexStreaming = false;
-  Logger.debug("Completed processing response stream. Final leftover buffer:", buffer);
+  Logger.system.debug("Completed processing response stream. Final leftover buffer:", buffer);
   return buffer;
 }
 
@@ -121,36 +120,36 @@ export async function processResponse(response, triggeringElement) {
  * @param {object} [extraOptions={}] - Extra options to merge into the fetch options.
  */
 export async function handleAction(element, method, endpoint, extraOptions = {}) {
+  Logger.system.debug("handleAction invoked for element:", element);
+  
   // Early guard: if polling is disabled, abort further API calls.
   if (element._pollDisabled) {
-    Logger.info("Polling has been disabled for this element; aborting API call.");
+    Logger.system.info("Polling has been disabled for this element; aborting API call.");
     return;
   }
-
-  Logger.debug("handleAction called for element:", element);
-
+  
   // Lifecycle hook: onbefore (before API call starts)
   if (element.hasAttribute('onbefore')) {
     try {
-      Logger.debug("Executing onbefore hook for element.");
+      Logger.system.debug("Executing onbefore hook for element.");
       new Function("event", element.getAttribute('onbefore'))(null);
     } catch (error) {
-      Logger.error("Error in onbefore hook:", error);
+      Logger.system.error("Error in onbefore hook:", error);
     }
   }
 
-  Logger.info(`Handling ${method} action for endpoint: ${endpoint}`);
+  Logger.system.info(`Handling ${method} action for endpoint: ${endpoint}`);
 
   const formData = new FormData();
   if (element.tagName.toLowerCase() === 'form') {
     new FormData(element).forEach((value, key) => {
-      Logger.debug(`Adding form field from form: ${key} = ${value}`);
+      Logger.system.debug(`Adding form field from form: ${key} = ${value}`);
       formData.append(key, value);
     });
   } else {
     element.querySelectorAll('input, select, textarea').forEach(input => {
       if (input.name) {
-        Logger.debug(`Adding input field: ${input.name} = ${input.value}`);
+        Logger.system.debug(`Adding input field: ${input.name} = ${input.value}`);
         formData.append(input.name, input.value);
       }
     });
@@ -159,10 +158,10 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
   if (element.hasAttribute('source')) {
     const selectors = element.getAttribute('source').split(/\s+/);
     selectors.forEach(selector => {
-      Logger.debug(`Processing source selector: ${selector}`);
+      Logger.system.debug(`Processing source selector: ${selector}`);
       document.querySelectorAll(selector).forEach(input => {
         if (input.name) {
-          Logger.debug(`Adding source input: ${input.name} = ${input.value}`);
+          Logger.system.debug(`Adding source input: ${input.name} = ${input.value}`);
           formData.append(input.name, input.value);
         }
       });
@@ -174,7 +173,7 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
     const extras = element.getAttribute('extras').split(/\s+/);
     extras.forEach(pair => {
       const [key, value] = pair.split('=');
-      Logger.debug(`Processing extra: ${key} = ${value}`);
+      Logger.system.debug(`Processing extra: ${key} = ${value}`);
       if (key && value) {
         formData.append(key, value);
       }
@@ -185,7 +184,7 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
   if (element.hasAttribute('loading')) {
     const loadingTargets = parseTargets(element.getAttribute('loading'));
     loadingTargets.forEach(target => {
-      Logger.debug("Updating loading target:", target);
+      Logger.system.debug("Updating loading target:", target);
       scheduleUpdate(() => updateTarget(target, '<div class="loading">Loading...</div>'), isSequential(element));
     });
   }
@@ -196,21 +195,22 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
   if (method === 'GET') {
     const params = new URLSearchParams(formData).toString();
     url += (url.includes('?') ? '&' : '?') + params;
-    Logger.debug("GET request URL with params:", url);
+    Logger.system.debug("GET request URL with params:", url);
   } else {
     options.body = formData;
-    Logger.debug("Non-GET request, using FormData body.");
+    Logger.system.debug("Non-GET request, using FormData body.");
   }
 
+  // Caching support.
   if (element.hasAttribute('cache')) {
     const cached = getCache(url);
     if (cached !== null) {
-      Logger.info(`Using cached response for: ${url}`);
+      Logger.system.info(`Using cached response for: ${url}`);
       if (element.hasAttribute('target')) {
         const targets = parseTargets(element.getAttribute('target'));
         targets.forEach(target => {
           scheduleUpdate(() => {
-            Logger.debug("Updating target with cached response:", target);
+            Logger.system.debug("Updating target with cached response:", target);
             updateTarget(target, cached);
           }, isSequential(element));
         });
@@ -224,32 +224,34 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
   let responseText = null;
   let response = null;
 
+  Logger.system.debug("Initiating fetch attempts. Timeout:", timeoutMs, "Retry count:", retryCount);
   for (let attempt = 0; attempt <= retryCount; attempt++) {
     try {
-      Logger.debug(`Attempt ${attempt + 1}: Fetching URL ${url}`);
+      Logger.system.debug(`Attempt ${attempt + 1}: Fetching URL ${url}`);
       response = await fetchWithTimeout(url, options, timeoutMs);
 
       // Lifecycle hook: onbeforeSwap (before DOM update)
       if (element.hasAttribute('onbeforeSwap')) {
         try {
-          Logger.debug("Executing onbeforeSwap hook for element.");
+          Logger.system.debug("Executing onbeforeSwap hook for element.");
           new Function("event", element.getAttribute('onbeforeSwap'))(null);
         } catch (error) {
-          Logger.error("Error in onbeforeSwap hook:", error);
+          Logger.system.error("Error in onbeforeSwap hook:", error);
         }
       }
 
       // Process the response.
       responseText = await processResponse(response, element);
+      Logger.system.debug("Fetch and processing succeeded on attempt", attempt + 1);
       break;
     } catch (error) {
-      Logger.warn(`Attempt ${attempt + 1} failed: ${error.message}`);
+      Logger.system.warn(`Attempt ${attempt + 1} failed: ${error.message}`);
       if (attempt === retryCount) {
         if (element.hasAttribute('onerror')) {
           const errorTargets = parseTargets(element.getAttribute('onerror'));
           errorTargets.forEach(target => {
             scheduleUpdate(() => {
-              Logger.debug("Updating error target after failure:", target);
+              Logger.system.debug("Updating error target after failure:", target);
               updateTarget(target, `<div class="error">Error: ${error.message}</div>`);
             }, isSequential(element));
           });
@@ -266,24 +268,25 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
       let resolvedElement;
       if (target.selector.trim().toLowerCase() === "this") {
         resolvedElement = element;
+        Logger.system.debug("Fallback: target selector is 'this'; using triggering element.");
       } else {
         resolvedElement = document.querySelector(target.selector);
         if (!resolvedElement) {
-          Logger.debug(`No element found for selector "${target.selector}". Falling back to triggering element.`);
+          Logger.system.debug(`No element found for selector "${target.selector}". Falling back to triggering element.`);
           resolvedElement = element;
         }
       }
       scheduleUpdate(() => {
-        Logger.debug("Fallback updating target:", target, "resolved as:", resolvedElement);
+        Logger.system.debug("Fallback updating target:", target, "resolved as:", resolvedElement);
         updateTarget(target, responseText, resolvedElement);
       }, isSequential(element));
     });
     if (element.hasAttribute('onafterSwap')) {
       try {
-        Logger.debug("Executing onafterSwap hook for element.");
+        Logger.system.debug("Executing onafterSwap hook for element.");
         new Function("event", element.getAttribute('onafterSwap'))(null);
       } catch (error) {
-        Logger.error("Error in onafterSwap hook:", error);
+        Logger.system.error("Error in onafterSwap hook:", error);
       }
     }
   }
@@ -294,7 +297,7 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
   if (response && response.headers) {
     const emitHeader = response.headers.get('Emit');
     if (emitHeader) {
-      Logger.info(`Received Emit header: ${emitHeader}`);
+      Logger.system.info(`Received Emit header: ${emitHeader}`);
       let emitSignalName = '';
       let emitDelay = 0;
       const parts = emitHeader.split(';').map(part => part.trim());
@@ -308,11 +311,11 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
       });
       if (emitDelay > 0) {
         setTimeout(() => {
-          Logger.info(`Emitting signal "${emitSignalName}" after ${emitDelay}ms delay (Emit header).`);
+          Logger.system.info(`Emitting signal "${emitSignalName}" after ${emitDelay}ms delay (Emit header).`);
           emitSignal(emitSignalName);
         }, emitDelay);
       } else {
-        Logger.info(`Emitting signal "${emitSignalName}" immediately (Emit header).`);
+        Logger.system.info(`Emitting signal "${emitSignalName}" immediately (Emit header).`);
         emitSignal(emitSignalName);
       }
     }
@@ -321,12 +324,12 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
 
   if (element.hasAttribute('publish')) {
     const publishSignal = element.getAttribute('publish');
-    Logger.info(`Emitting signal "${publishSignal}" after successful API call.`);
+    Logger.system.info(`Emitting signal "${publishSignal}" after successful API call.`);
     emitSignal(publishSignal);
     if (element.hasAttribute('timer')) {
       const delay = parseInt(element.getAttribute('timer'), 10);
       setTimeout(() => {
-        Logger.debug(`Emitting delayed signal "${publishSignal}" after ${delay}ms.`);
+        Logger.system.debug(`Emitting delayed signal "${publishSignal}" after ${delay}ms.`);
         emitSignal(publishSignal);
       }, delay);
     }
@@ -335,15 +338,15 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
   if (element.hasAttribute('cache')) {
     const cacheTTL = parseInt(element.getAttribute('cache'), 10);
     setCache(url, responseText, cacheTTL);
-    Logger.debug("Response cached with TTL:", cacheTTL);
+    Logger.system.debug("Response cached with TTL:", cacheTTL);
   }
 
   if (element.hasAttribute('onafter')) {
     try {
-      Logger.debug("Executing onafter hook for element.");
+      Logger.system.debug("Executing onafter hook for element.");
       new Function("event", element.getAttribute('onafter'))(null);
     } catch (error) {
-      Logger.error("Error in onafter hook:", error);
+      Logger.system.error("Error in onafter hook:", error);
     }
   }
 
@@ -351,7 +354,7 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
   if (element.hasAttribute('poll') && !element._pollWorker) {
     const pollInterval = parseInt(element.getAttribute('poll'), 10);
     if (pollInterval < 100) {
-      Logger.warn('Poll interval too small, minimum is 100ms');
+      Logger.system.warn('Poll interval too small, minimum is 100ms');
       return;
     }
 
@@ -368,6 +371,7 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
           if (!element._pollInProgress) {
             element._pollInProgress = true;
             try {
+              Logger.system.debug("Polling worker triggered API call.");
               await handleAction(element, method, endpoint);
             } finally {
               element._pollInProgress = false;
@@ -376,14 +380,14 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
           break;
 
         case 'done':
-          Logger.info(`Polling complete after ${pollCount} iterations`);
+          Logger.system.info(`Polling complete after ${pollCount} iterations`);
           element._pollWorker.terminate();
           element._pollWorker = null;
           element._pollDisabled = true;
           break;
 
         case 'error':
-          Logger.error(`Polling error: ${message}`);
+          Logger.system.error(`Polling error: ${message}`);
           element._pollWorker.terminate();
           element._pollWorker = null;
           break;
@@ -397,7 +401,7 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
       limit: repeatLimit
     });
 
-    Logger.debug(`Started polling worker: interval=${pollInterval}ms, limit=${repeatLimit}`);
+    Logger.system.debug(`Started polling worker: interval=${pollInterval}ms, limit=${repeatLimit}`);
   }
   // ---------------------------------------------------------------------------
 }

@@ -31,11 +31,11 @@ function getAPIMethod(el) {
   const methods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
   for (const m of methods) {
     if (el.hasAttribute(m)) {
-      Logger.debug(`Element has API method: ${m}`);
+      Logger.system.debug(`Element has API method: ${m}`);
       return m;
     }
   }
-  Logger.debug("No API method attribute found on element.");
+  Logger.system.debug("No API method attribute found on element.");
   return null;
 }
 
@@ -50,36 +50,36 @@ function getAPIMethod(el) {
  */
 function setupTimerForElement(el) {
   const timerVal = parseInt(el.getAttribute('timer'), 10);
-  Logger.debug("[FRAG TIMER] Setting up timer for element:", el, `with delay: ${timerVal}ms`);
+  Logger.system.debug("[FRAG TIMER] Setting up timer for element:", el, `with delay: ${timerVal}ms`);
   setTimeout(() => {
-    Logger.debug("[FRAG TIMER] Timer callback fired for element:", el);
+    Logger.system.debug("[FRAG TIMER] Timer callback fired for element:", el);
     const apiMethod = getAPIMethod(el);
     if (apiMethod) {
-      Logger.info(`[FRAG TIMER] Timer triggered: Calling API with method ${apiMethod.toUpperCase()}.`);
+      Logger.system.info(`[FRAG TIMER] Timer triggered: Calling API with method ${apiMethod.toUpperCase()}.`);
       handleAction(el, apiMethod.toUpperCase(), el.getAttribute(apiMethod));
       return;
     }
     if (el.hasAttribute('publish')) {
       const publishSignal = el.getAttribute('publish');
-      Logger.info(`[FRAG TIMER] Timer triggered: Emitting publish signal "${publishSignal}".`);
+      Logger.system.info(`[FRAG TIMER] Timer triggered: Emitting publish signal "${publishSignal}".`);
       emitSignal(publishSignal);
       return;
     }
     const targetAttr = el.getAttribute('target');
     if (targetAttr && targetAttr.toLowerCase().includes("(remove)")) {
       if (targetAttr.toLowerCase().includes("this(remove)")) {
-        Logger.info("[FRAG TIMER] Timer triggered: Removing element as specified by target 'this(remove)'.");
+        Logger.system.info("[FRAG TIMER] Timer triggered: Removing element as specified by target 'this(remove)'.");
         el.remove();
         return;
       } else {
         const selector = targetAttr.replace(/\(remove\)/gi, '').trim();
         const resolved = document.querySelector(selector);
         if (resolved) {
-          Logger.info(`[FRAG TIMER] Timer triggered: Removing element matching selector "${selector}".`);
+          Logger.system.info(`[FRAG TIMER] Timer triggered: Removing element matching selector "${selector}".`);
           resolved.remove();
           return;
         } else {
-          Logger.warn(`[FRAG TIMER] Timer triggered: No element found for selector "${selector}" to remove.`);
+          Logger.system.warn(`[FRAG TIMER] Timer triggered: No element found for selector "${selector}" to remove.`);
         }
       }
     }
@@ -93,12 +93,12 @@ function setupTimerForElement(el) {
           resolved = document.querySelector(target.selector);
         }
         if (resolved) {
-          Logger.info(`[FRAG TIMER] Timer triggered: Clearing content of element matching target "${target.selector}".`);
+          Logger.system.info(`[FRAG TIMER] Timer triggered: Clearing content of element matching target "${target.selector}".`);
           resolved.innerHTML = "";
         }
       });
     } else {
-      Logger.info("[FRAG TIMER] Timer triggered: No target attribute specified; removing the element.");
+      Logger.system.info("[FRAG TIMER] Timer triggered: No target attribute specified; removing the element.");
       el.remove();
     }
   }, timerVal);
@@ -119,54 +119,54 @@ function setupTimerForElement(el) {
  * @returns {string} The buffer with complete fragments removed.
  */
 export function processFragmentBuffer(buffer, triggeringElement = null) {
-  Logger.debug("[FRAG] Processing fragment buffer. Current buffer:", buffer);
+  Logger.system.debug("[FRAG] Processing fragment buffer. Buffer length:", buffer.length);
   const fragmentRegex = /<fragment\b[^>]*>[\s\S]*?<\/fragment>/gi;
   let match;
   
   while ((match = fragmentRegex.exec(buffer)) !== null) {
     const fragmentHTML = match[0];
-    Logger.debug("[FRAG] Found fragment HTML:", fragmentHTML);
+    Logger.system.debug("[FRAG] Found fragment HTML:", fragmentHTML);
     
     // Parse the fragment HTML.
     const template = document.createElement('template');
     template.innerHTML = fragmentHTML;
     const fragmentElem = template.content.firstElementChild;
     if (!fragmentElem) {
-      Logger.debug("[FRAG] No valid fragment element found in parsed HTML.");
+      Logger.system.debug("[FRAG] No valid fragment element found in parsed HTML.");
       continue;
     }
     
     // Get the fragment's target attribute (default to "this(innerHTML)" if missing).
     let fragTargetAttr = fragmentElem.getAttribute('target');
     if (!fragTargetAttr) {
-      Logger.warn("[FRAG] Fragment found without target attribute. Defaulting to 'this(innerHTML)'.");
+      Logger.system.warn("[FRAG] Fragment found without target attribute. Defaulting to 'this(innerHTML)'.");
       fragTargetAttr = "this(innerHTML)";
     }
-    Logger.debug("[FRAG] Fragment target attribute:", fragTargetAttr);
+    Logger.system.debug("[FRAG] Fragment target attribute:", fragTargetAttr);
     
     // Extract inner content (exclude the <fragment> wrapper)
     const content = fragmentElem.innerHTML;
-    Logger.debug("[FRAG] Extracted fragment content:", content);
+    Logger.system.debug("[FRAG] Extracted fragment content:", content);
     
     // Parse the fragment's target(s)
     let fragTargets = parseTargets(fragTargetAttr);
-    Logger.debug("[FRAG] Parsed fragment targets:", fragTargets);
+    Logger.system.debug("[FRAG] Parsed fragment targets:", fragTargets);
     
     fragTargets.forEach(target => {
       // --- Override logic for "this" target ---
       if (target.selector.trim().toLowerCase() === "this") {
-        Logger.debug("[FRAG] Fragment target selector is 'this'. Checking triggering element for an overriding target.");
+        Logger.system.debug("[FRAG] Fragment target selector is 'this'. Checking triggering element for an overriding target.");
         if (triggeringElement && triggeringElement.hasAttribute("target")) {
           const callerTargets = parseTargets(triggeringElement.getAttribute("target"));
           if (callerTargets.length > 0) {
-            Logger.debug("[FRAG] Overriding fragment target with caller target(s):", callerTargets);
+            Logger.system.debug("[FRAG] Overriding fragment target with caller target(s):", callerTargets);
             target = callerTargets[0];
           } else {
-            Logger.debug("[FRAG] Triggering element has no valid target attribute. Using triggering element as target.");
+            Logger.system.debug("[FRAG] Triggering element has no valid target attribute. Using triggering element as target.");
             target.selector = "this";
           }
         } else {
-          Logger.debug("[FRAG] No overriding target on triggering element. Using triggering element as target.");
+          Logger.system.debug("[FRAG] No overriding target on triggering element. Using triggering element as target.");
         }
       }
       // --- End override logic ---
@@ -178,13 +178,13 @@ export function processFragmentBuffer(buffer, triggeringElement = null) {
       } else {
         targetElements = document.querySelectorAll(target.selector);
         if (!targetElements || targetElements.length === 0) {
-          Logger.debug(`[FRAG] No elements found for selector "${target.selector}". Falling back to triggering element.`);
+          Logger.system.debug(`[FRAG] No elements found for selector "${target.selector}". Falling back to triggering element.`);
           targetElements = triggeringElement ? [triggeringElement] : [];
         }
       }
       
       if (!targetElements || targetElements.length === 0) {
-        Logger.warn("[FRAG] No elements resolved for fragment target:", target.selector);
+        Logger.system.warn("[FRAG] No elements resolved for fragment target:", target.selector);
         return;
       }
       
@@ -192,10 +192,10 @@ export function processFragmentBuffer(buffer, triggeringElement = null) {
       targetElements.forEach(el => {
         let insertedElement;
         if (triggeringElement && triggeringElement._htmlexStreaming) {
-          Logger.debug("[FRAG] Streaming active: updating fragment immediately.");
+          Logger.system.debug("[FRAG] Streaming active: updating fragment immediately.");
           insertedElement = patchedUpdateTarget(target, content, el);
         } else if (triggeringElement && triggeringElement._htmlexSequentialMode) {
-          Logger.debug("[FRAG] Queuing fragment update because triggering element is sequential.");
+          Logger.system.debug("[FRAG] Queuing fragment update because triggering element is sequential.");
           if (!triggeringElement._htmlexSequentialUpdates) {
             triggeringElement._htmlexSequentialUpdates = [];
           }
@@ -208,12 +208,12 @@ export function processFragmentBuffer(buffer, triggeringElement = null) {
         const timerElems = el.querySelectorAll('[timer]');
         timerElems.forEach(timerEl => {
           if (!timerEl.hasAttribute('data-timer-set')) {
-            Logger.debug("[FRAG] Found timer element:", timerEl);
+            Logger.system.debug("[FRAG] Found timer element:", timerEl);
             setupTimerForElement(timerEl);
             timerEl.setAttribute('data-timer-set', 'true');
-            Logger.debug("[FRAG] Timer set for element:", timerEl);
+            Logger.system.debug("[FRAG] Timer set for element:", timerEl);
           } else {
-            Logger.debug("[FRAG] Timer already set for element:", timerEl);
+            Logger.system.debug("[FRAG] Timer already set for element:", timerEl);
           }
         });
       });
@@ -221,6 +221,6 @@ export function processFragmentBuffer(buffer, triggeringElement = null) {
   }
   
   const newBuffer = buffer.replace(fragmentRegex, '');
-  Logger.debug("[FRAG] Buffer after removing processed fragments:", newBuffer);
+  Logger.system.debug("[FRAG] Buffer after removing processed fragments. New buffer length:", newBuffer.length);
   return newBuffer;
 }

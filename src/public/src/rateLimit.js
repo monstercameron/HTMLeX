@@ -17,10 +17,12 @@ import { Logger } from './logger.js';
  */
 export function debounce(func, wait) {
   let hasFired = false;
+  Logger.system.debug("[DEBOUNCE] Creating debounced function with wait period:", wait, "ms");
+  
   return function(...args) {
     const context = this;
-    Logger.debug("[DEBOUNCE] Called with arguments:", args, "and context:", context);
-    
+    Logger.system.debug("[DEBOUNCE] Debounced function invoked with arguments:", args, "and context:", context);
+
     // If the first argument is an Event, clone its key properties.
     if (args.length > 0 && args[0] instanceof Event) {
       const originalEvent = args[0];
@@ -29,19 +31,24 @@ export function debounce(func, wait) {
         target: originalEvent.target,
         currentTarget: originalEvent.currentTarget
       };
-      Logger.debug("[DEBOUNCE] Cloned event object:", args[0]);
+      Logger.system.debug("[DEBOUNCE] Cloned event object:", args[0]);
     }
-    
+
     if (!hasFired) {
-      Logger.debug("[DEBOUNCE] No active debounce; invoking function immediately.");
+      Logger.system.debug("[DEBOUNCE] No active debounce; invoking function immediately.");
       hasFired = true;
-      func.apply(context, args);
+      try {
+        func.apply(context, args);
+        Logger.system.debug("[DEBOUNCE] Function executed successfully.");
+      } catch (error) {
+        Logger.system.error("[DEBOUNCE] Error executing debounced function:", error);
+      }
       setTimeout(() => {
-        Logger.debug("[DEBOUNCE] Debounce period ended; resetting state.");
         hasFired = false;
+        Logger.system.debug("[DEBOUNCE] Debounce period ended; state reset.");
       }, wait);
     } else {
-      Logger.warn("[DEBOUNCE] Debounce active; event blocked.");
+      Logger.system.warn("[DEBOUNCE] Debounce active; event blocked. Arguments:", args);
     }
   };
 }
@@ -53,19 +60,28 @@ export function debounce(func, wait) {
  * @returns {Function} The throttled function.
  */
 export function throttle(func, limit) {
-  let inThrottle;
+  let inThrottle = false;
+  Logger.system.debug("[THROTTLE] Creating throttled function with limit:", limit, "ms");
+
   return function(...args) {
     const context = this;
+    Logger.system.debug("[THROTTLE] Throttled function invoked with arguments:", args, "and context:", context);
+
     if (!inThrottle) {
-      Logger.debug("[THROTTLE] Invoking function with arguments:", args);
-      func.apply(context, args);
+      Logger.system.debug("[THROTTLE] Not in throttle; invoking function.");
+      try {
+        func.apply(context, args);
+        Logger.system.debug("[THROTTLE] Function executed successfully.");
+      } catch (error) {
+        Logger.system.error("[THROTTLE] Error executing throttled function:", error);
+      }
       inThrottle = true;
       setTimeout(() => {
         inThrottle = false;
-        Logger.debug("[THROTTLE] Throttle period ended; ready for next call.");
+        Logger.system.debug("[THROTTLE] Throttle period ended; ready for next call.");
       }, limit);
     } else {
-      Logger.warn("[THROTTLE] Function call throttled. Arguments:", args);
+      Logger.system.warn("[THROTTLE] Function call throttled. Arguments:", args);
     }
   };
 }

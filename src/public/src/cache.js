@@ -8,6 +8,8 @@
  * @property {number} expireAt - The expiration time in milliseconds.
  */
 
+import { Logger } from './logger.js';
+
 /** @type {Map<string, CacheEntry>} */
 const cacheStore = new Map();
 
@@ -20,6 +22,7 @@ const cacheStore = new Map();
 export function setCache(key, response, ttl) {
   const expireAt = Date.now() + ttl;
   cacheStore.set(key, { response, expireAt });
+  Logger.system.debug("[CACHE] Cached response for key:", key, "TTL:", ttl, "Expires at:", expireAt);
 }
 
 /**
@@ -31,10 +34,14 @@ export function getCache(key) {
   if (cacheStore.has(key)) {
     const { response, expireAt } = cacheStore.get(key);
     if (Date.now() < expireAt) {
+      Logger.system.debug("[CACHE] Cache hit for key:", key);
       return response;
     } else {
+      Logger.system.warn("[CACHE] Cache expired for key:", key, "Deleting entry.");
       cacheStore.delete(key);
     }
+  } else {
+    Logger.system.debug("[CACHE] Cache miss for key:", key);
   }
   return null;
 }
