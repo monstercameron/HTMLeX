@@ -1,0 +1,15 @@
+# Changelog
+
+## 2026-04-29
+
+Reviewed prior repository history before this release. The earlier commits built the demo catalog, todo demo, arbitrary targeting and removal strategies, multi-fragment updates, click counter, signal chaining, loading states, websocket/live-update demos, sequential queuing fixes, debounce behavior, non-sequential cancellation, target removal handling, logger revisions, and README updates.
+
+This update hardens that surface and packages it for repeatable testing:
+
+- Reworked the playground shell with Bootstrap 5, a more polished catalog/workspace layout, and HTML snippets for every demo example.
+- Simplified the dev server to HTTPS over Express with generated local certificates and removed committed certificate artifacts.
+- Tightened HTMLeX registration, cleanup, timer, subscription, socket, cache, source, target, and fragment handling to avoid stale listeners, stale swaps, accidental global source matches, duplicate fragment timers, and unnecessary modifier-only registrations.
+- Added extensive Playwright coverage for the demo pages, complex page scenarios, interceptors, edge cases, and browser-context property behavior.
+- Added unit coverage for rendering, components, cache behavior, route registration, rate limiting, and streaming routes.
+- Updated dependencies, test scripts, Playwright configuration, and package lock data.
+
