@@ -1,6 +1,7 @@
 import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { logFeatureError, logFeatureWarning } from './serverLogger.js';
 
 function fileExists(filePath) {
   try {
@@ -58,6 +59,10 @@ export function getHttpsOptions(projectRoot) {
 
   if (explicitKeyPath || explicitCertPath) {
     if (!explicitKeyPath || !explicitCertPath) {
+      logFeatureError('certificates', 'Incomplete explicit TLS configuration.', null, {
+        hasKeyPath: Boolean(explicitKeyPath),
+        hasCertPath: Boolean(explicitCertPath),
+      });
       throw new Error('Both TLS_KEY_PATH and TLS_CERT_PATH must be set when using explicit TLS files.');
     }
 
@@ -76,8 +81,12 @@ export function getHttpsOptions(projectRoot) {
 
   if (!fileExists(keyPath) || !fileExists(certPath)) {
     try {
+      logFeatureWarning('certificates', 'Local HTTPS certificate is missing. Generating a localhost certificate.', {
+        certDir,
+      });
       generateLocalhostCertificate(keyPath, certPath);
     } catch (error) {
+      logFeatureError('certificates', 'Failed to generate local HTTPS certificate.', error, { certDir });
       throw new Error(
         `Unable to generate a local HTTPS certificate with openssl. ` +
         `Install openssl or set TLS_KEY_PATH and TLS_CERT_PATH. Cause: ${error.message}`

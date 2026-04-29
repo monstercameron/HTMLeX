@@ -5,6 +5,8 @@
  * @module features/chat
  */
 
+import { logRequestError, logRequestWarning } from '../serverLogger.js';
+
 /**
  * In-memory storage for chat messages.
  * @type {Array<Object>}
@@ -31,6 +33,7 @@ export async function sendChatMessage(req, res, chatNamespace) {
   try {
     const message = normalizeText(req.body.message, MAX_MESSAGE_LENGTH);
     if (!message) {
+      logRequestWarning(req, 'Rejected chat message without text.', { statusCode: 400 });
       if (!res.headersSent) {
         res.status(400).send('Missing chat message');
       }
@@ -46,7 +49,7 @@ export async function sendChatMessage(req, res, chatNamespace) {
     chatNamespace.emit('chatMessage', chatMessage);
     res.status(204).end();
   } catch (error) {
-    console.error('Error in sendChatMessage:', error);
+    logRequestError(req, 'Failed to send chat message.', error);
     if (!res.headersSent) res.status(500).send('Internal server error');
   }
 }

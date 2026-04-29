@@ -1,4 +1,5 @@
 import { renderFragment } from '../components/HTMLeX.js';
+import { logRequestWarning } from '../serverLogger.js';
 
 const HTML_CONTENT_TYPE = 'text/html; charset=utf-8';
 const DEFAULT_ERROR_MESSAGE = 'Internal server error';
@@ -28,7 +29,12 @@ export function endResponse(res) {
 export function sendServerError(res, message = DEFAULT_ERROR_MESSAGE) {
   if (!res.headersSent) {
     res.status(500).send(message);
+    return;
   }
+
+  logRequestWarning(res.req, 'Unable to send 500 response because headers were already sent.', {
+    attemptedMessage: message,
+  });
 }
 
 export function endServerError(res) {
@@ -37,5 +43,6 @@ export function endServerError(res) {
     return;
   }
 
+  logRequestWarning(res.req, 'Ending already-started response after server error.');
   endResponse(res);
 }

@@ -32,6 +32,7 @@ import {
   sendServerError,
   writeFragmentResponse,
 } from './responses.js';
+import { logRequestError } from '../serverLogger.js';
 
 function responseDelay(ms) {
   return process.env.HTMLEX_TEST_FAST === '1' ? Math.min(ms, 25) : ms;
@@ -67,12 +68,12 @@ export async function loadMoreItems(req, res) {
       try {
         writeFragmentResponse(res, '#infiniteList(append)', renderLoadMoreItems());
       } catch (writeError) {
-        console.error('Error while writing items in loadMoreItems:', writeError);
+        logRequestError(req, 'Failed to write streamed load-more items.', writeError);
       }
       endResponse(res);
     }, responseDelay(2000));
   } catch (error) {
-    console.error('Error in loadMoreItems:', error);
+    logRequestError(req, 'Failed to stream load-more items.', error);
     endServerError(res);
   }
 }
@@ -81,7 +82,7 @@ export async function infiniteScrollDemoInit(req, res) {
   try {
     sendFragmentResponse(res, '#demoCanvas(innerHTML)', InfiniteScrollDemo());
   } catch (error) {
-    console.error('Error in infiniteScrollDemoInit:', error);
+    logRequestError(req, 'Failed to initialize infinite-scroll demo.', error);
     sendServerError(res);
   }
 }
@@ -104,7 +105,7 @@ export async function notificationsDemoInit(req, res) {
     writeFragmentResponse(res, '#demoCanvas(innerHTML)', render(NotificationsDemo()));
     endResponse(res);
   } catch (error) {
-    console.error('Error in notificationsDemoInit:', error);
+    logRequestError(req, 'Failed to initialize notifications demo.', error);
     endServerError(res);
   }
 }
@@ -139,13 +140,13 @@ export async function fetchNotification(req, res) {
           { timer: '5000' }
         );
       } catch (writeError) {
-        console.error('Error while writing notification in fetchNotification:', writeError);
+        logRequestError(req, 'Failed to write delayed notification fragment.', writeError);
       } finally {
         endResponse(res);
       }
     }, responseDelay(2500));
   } catch (error) {
-    console.error('Error in fetchNotification:', error);
+    logRequestError(req, 'Failed to fetch notification.', error);
     endServerError(res);
   }
 }
@@ -161,7 +162,7 @@ export async function incrementCounterDemoInit(req, res) {
   try {
     sendFragmentResponse(res, '#demoCanvas(innerHTML)', ClickCounterWidget());
   } catch (error) {
-    console.error('Error in incrementCounter:', error);
+    logRequestError(req, 'Failed to initialize counter demo.', error);
     sendServerError(res);
   }
 }
@@ -178,7 +179,7 @@ export async function incrementCounter(req, res) {
     clickerCounter++;
     sendFragmentResponse(res, '#counterDisplay(innerHTML)', renderCounter(clickerCounter));
   } catch (error) {
-    console.error('Error in incrementCounter:', error);
+    logRequestError(req, 'Failed to increment counter demo.', error);
     sendServerError(res);
   }
 }
@@ -202,7 +203,7 @@ export async function multiFragmentDemoInit(req, res) {
     writeFragmentResponse(res, '#demoCanvas(innerHTML)', render(multiFragmentDemo()));
     endResponse(res);
   } catch (error) {
-    console.error('Error in multiFragmentDemoInit:', error);
+    logRequestError(req, 'Failed to initialize multi-fragment demo.', error);
     endServerError(res);
   }
 }
@@ -235,7 +236,7 @@ export async function multiFragment(req, res) {
     );
     endResponse(res);
   } catch (error) {
-    console.error('Error in multiFragment:', error);
+    logRequestError(req, 'Failed to send multi-fragment response.', error);
     endServerError(res);
   }
 }
@@ -257,7 +258,7 @@ export async function sequentialDemoInit(req, res) {
   try {
     writeFragmentResponse(res, '#demoCanvas(innerHTML)', SequentialDemo());
   } catch (error) {
-    console.error('Error in sequentialDemoInit:', error);
+    logRequestError(req, 'Failed to initialize sequential demo.', error);
     endServerError(res);
   } finally {
     endResponse(res);
@@ -281,7 +282,7 @@ export async function sequentialNext(req, res) {
     const htmlContent = render(contentNode);
     writeFragmentResponse(res, '#sequentialOutput(append)', htmlContent);
   } catch (error) {
-    console.error('Error in sequentialNext:', error);
+    logRequestError(req, 'Failed to append sequential update.', error);
     if (!res.headersSent) {
       res.status(500).write('Internal server error');
     }
@@ -307,7 +308,7 @@ function processStep(step, res) {
       const message = `Step ${step}: Data received at ${new Date().toLocaleTimeString()}`;
       sendFragmentResponse(res, `#chainOutput(${step === 1 ? 'innerHTML' : 'append'})`, render(div({}, message)));
     } catch (error) {
-      console.error(`Error in processStep${step}:`, error);
+      logRequestError(res.req, `Failed to render process step ${step}.`, error);
       sendServerError(res);
     }
   }, responseDelay(1000));
@@ -329,7 +330,7 @@ export function processInit(req, res) {
     writeFragmentResponse(res, '#demoCanvas(innerHTML)', render(SignalChainingDemo()));
     endResponse(res);
   } catch (error) {
-    console.error('Error in processInit:', error);
+    logRequestError(req, 'Failed to initialize signal chaining demo.', error);
     endServerError(res);
   }
 }
@@ -397,7 +398,7 @@ export async function demoInit(req, res) {
     writeFragmentResponse(res, '#demoCanvas(innerHTML)', render(loadingStateDemo()));
     endResponse(res);
   } catch (error) {
-    console.error('Error in demoInit:', error);
+    logRequestError(req, 'Failed to initialize loading demo.', error);
     endServerError(res);
   }
 }
@@ -433,12 +434,12 @@ export async function demoLoading(req, res) {
         );
         writeFragmentResponse(res, '#loadingDemoOutput(innerHTML)', render(payloadNode));
       } catch (writeError) {
-        console.error('Error writing demo loading payload:', writeError);
+        logRequestError(req, 'Failed to write delayed loading-demo payload.', writeError);
       }
       endResponse(res);
     }, responseDelay(5000));
   } catch (error) {
-    console.error('Error in demoLoading:', error);
+    logRequestError(req, 'Failed to stream loading demo.', error);
     endServerError(res);
   }
 }
@@ -461,7 +462,7 @@ export async function sseDemoInit(req, res) {
     writeFragmentResponse(res, '#demoCanvas(innerHTML)', render(SSESubscribersDemo()));
     endResponse(res);
   } catch (error) {
-    console.error('Error in sseDemoInit:', error);
+    logRequestError(req, 'Failed to initialize SSE demo.', error);
     endServerError(res);
   }
 }
@@ -479,7 +480,7 @@ export async function sseSubscribe(req, res) {
     res.setHeader('Emit', 'sseUpdate');
     res.send('');
   } catch (error) {
-    console.error('Error in sseSubscribe:', error);
+    logRequestError(req, 'Failed to emit SSE subscription signal.', error);
     sendServerError(res, '');
   }
 }
@@ -502,7 +503,7 @@ export async function sseSubscribeMessage(req, res) {
     const message = render('SSE action performed');
     sendFragmentResponse(res, 'this(innerHTML)', message);
   } catch (error) {
-    console.error('Error in sseSubscribeMessage:', error);
+    logRequestError(req, 'Failed to render SSE subscription message.', error);
     sendServerError(res);
   }
 }
@@ -525,7 +526,7 @@ export async function chatDemoInit(req, res) {
     writeFragmentResponse(res, '#demoCanvas(innerHTML)', render(ChatInterfaceDemo()));
     endResponse(res);
   } catch (error) {
-    console.error('Error in chatDemoInit:', error);
+    logRequestError(req, 'Failed to initialize chat demo.', error);
     endServerError(res);
   }
 }
@@ -535,7 +536,7 @@ export async function webSocketUpdatesDemoInit(req, res) {
     writeFragmentResponse(res, '#demoCanvas(innerHTML)', render(WebSocketUpdatesDemo()));
     endResponse(res);
   } catch (error) {
-    console.error('Error in webSocketUpdatesDemoInit:', error);
+    logRequestError(req, 'Failed to initialize websocket updates demo.', error);
     endServerError(res);
   }
 }
@@ -544,7 +545,7 @@ export async function pollingDemoInit(req, res) {
   try {
     sendFragmentResponse(res, '#demoCanvas(innerHTML)', PollingDemo());
   } catch (error) {
-    console.error('Error in pollingDemoInit:', error);
+    logRequestError(req, 'Failed to initialize polling demo.', error);
     sendServerError(res);
   }
 }
@@ -554,7 +555,7 @@ export async function pollingTick(req, res) {
     const timestamp = new Date().toISOString();
     sendFragmentResponse(res, '#pollingOutput(innerHTML)', render(div({}, `Polling update at ${timestamp}`)));
   } catch (error) {
-    console.error('Error in pollingTick:', error);
+    logRequestError(req, 'Failed to render polling tick.', error);
     sendServerError(res);
   }
 }
@@ -563,7 +564,7 @@ export async function hoverDemoInit(req, res) {
   try {
     sendFragmentResponse(res, '#demoCanvas(innerHTML)', HoverTriggerDemo());
   } catch (error) {
-    console.error('Error in hoverDemoInit:', error);
+    logRequestError(req, 'Failed to initialize hover demo.', error);
     sendServerError(res);
   }
 }
@@ -572,7 +573,7 @@ export async function hoverMessage(req, res) {
   try {
     sendFragmentResponse(res, '#hoverOutput(innerHTML)', render(div({}, 'Hover action loaded')));
   } catch (error) {
-    console.error('Error in hoverMessage:', error);
+    logRequestError(req, 'Failed to render hover message.', error);
     sendServerError(res);
   }
 }

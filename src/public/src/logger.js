@@ -95,3 +95,27 @@ export const Logger = {
     }
   }
 };
+
+let runtimeErrorBoundaryInstalled = false;
+
+function getRuntimeErrorDetails(event) {
+  return {
+    message: event.message,
+    source: event.filename,
+    line: event.lineno,
+    column: event.colno,
+    error: event.error,
+  };
+}
+
+export function installRuntimeErrorBoundary() {
+  if (runtimeErrorBoundaryInstalled || typeof window === 'undefined') return;
+
+  runtimeErrorBoundaryInstalled = true;
+  window.addEventListener('error', (event) => {
+    Logger.system.error('[Runtime] Unhandled browser error:', getRuntimeErrorDetails(event));
+  });
+  window.addEventListener('unhandledrejection', (event) => {
+    Logger.system.error('[Runtime] Unhandled promise rejection:', event.reason);
+  });
+}

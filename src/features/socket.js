@@ -3,6 +3,8 @@
  * @module features/socket
  */
 
+import { logFeatureError, logFeatureWarning } from '../serverLogger.js';
+
 function socketDelay(ms) {
   return process.env.HTMLEX_TEST_FAST === '1' ? Math.min(ms, 25) : ms;
 }
@@ -30,6 +32,9 @@ export function setupCounterNamespace(socketServer) {
     }, socketDelay(1000));
 
     socket.on('disconnect', () => clearInterval(intervalId));
+    socket.on('error', (error) => {
+      logFeatureError('socket.counter', 'Counter namespace socket error.', error, { socketId: socket.id });
+    });
   });
 }
 
@@ -46,13 +51,19 @@ export function setupChatNamespace(socketServer, getChatHistory) {
 
     socket.on('chatMessage', (message) => {
       const text = normalizeChatText(message);
-      if (!text) return;
+      if (!text) {
+        logFeatureWarning('socket.chat', 'Ignored empty chat socket message.', { socketId: socket.id });
+        return;
+      }
 
       chatNamespace.emit('chatMessage', {
         id: Date.now(),
         username: normalizeUsername(message),
         text
       });
+    });
+    socket.on('error', (error) => {
+      logFeatureError('socket.chat', 'Chat namespace socket error.', error, { socketId: socket.id });
     });
   });
 }
@@ -71,6 +82,9 @@ export function setupUpdatesNamespace(socketServer) {
     }, socketDelay(3000));
 
     socket.on('disconnect', () => clearInterval(intervalId));
+    socket.on('error', (error) => {
+      logFeatureError('socket.updates', 'Updates namespace socket error.', error, { socketId: socket.id });
+    });
   });
 }
 

@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { DemoItem } from '../components/Components.js';
 import { render } from '../components/HTMLeX.js';
+import { logRequestError } from '../serverLogger.js';
 import { sendFragmentResponse } from './responses.js';
 
 // Determine __dirname in ES modules.
@@ -42,7 +43,7 @@ export async function loadAndRenderDemos(req, res) {
   try {
     sendFragmentResponse(res, 'this(innerHTML)', await getRenderedDemosHtml());
   } catch (error) {
-    console.error('Error loading demos:', error);
+    logRequestError(req, 'Failed to load demo catalog.', error);
     res.status(500).send('Error loading demos');
   }
 }

@@ -17,6 +17,7 @@ import {
 } from '../components/Components.js';
 import { render } from '../components/HTMLeX.js';
 import { sendFragmentResponse, sendServerError } from './responses.js';
+import { logFeatureError, logRequestError, logRequestWarning } from '../serverLogger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,7 +48,7 @@ export async function loadTodos() {
     const data = await readFile(TODOS_FILE, 'utf8');
     return JSON.parse(data);
   } catch (error) {
-    console.error('Error loading todos:', error);
+    logFeatureError('todos', 'Failed to load todos from disk.', error, { file: TODOS_FILE });
     return [];
   }
 }
@@ -66,14 +67,14 @@ export async function getToDoWidget(req, res) {
     const todos = await loadTodos();
 
     if (!Array.isArray(todos)) {
-      console.error('Loaded todos is not an array:', todos);
+      logRequestError(req, 'Loaded todo data is not an array.', null, { dataType: typeof todos });
       sendServerError(res, 'Internal server error: Invalid todo data');
       return;
     }
 
     sendFragmentResponse(res, '#demoCanvas(innerHTML)', TodoWidget(todos));
   } catch (error) {
-    console.error('Error in getToDoWidget:', error);
+    logRequestError(req, 'Failed to render todo widget.', error);
     sendServerError(res);
   }
 }
@@ -88,7 +89,7 @@ export async function writeTodos(todos) {
   try {
     await writeFile(TODOS_FILE, JSON.stringify(todos, null, 2));
   } catch (error) {
-    console.error('Error writing todos:', error);
+    logFeatureError('todos', 'Failed to write todos to disk.', error, { file: TODOS_FILE });
     throw error;
   }
 }
@@ -108,7 +109,7 @@ export async function createTodo(req, res) {
     const submittedText = Array.isArray(req.body.todo) ? req.body.todo[0] : req.body.todo;
     const normalizedText = String(submittedText ?? '').trim();
     if (!normalizedText) {
-      console.error('Missing todo text in request');
+      logRequestWarning(req, 'Rejected todo create request without text.', { statusCode: 400 });
       if (!res.headersSent) {
         res.status(400).send('Missing todo text');
       }
@@ -119,7 +120,7 @@ export async function createTodo(req, res) {
     await writeTodos(todos);
     sendFragmentResponse(res, '#todoList(outerHTML)', render(renderTodoList(todos)));
   } catch (error) {
-    console.error('Error in createTodo:', error);
+    logRequestError(req, 'Failed to create todo.', error);
     sendServerError(res);
   }
 }
@@ -136,13 +137,13 @@ export async function listTodos(req, res) {
   try {
     const todos = await loadTodos();
     if (!Array.isArray(todos)) {
-      console.error('Loaded todos is not an array:', todos);
+      logRequestError(req, 'Loaded todo data is not an array.', null, { dataType: typeof todos });
       sendServerError(res, 'Internal server error: Invalid todo data');
       return;
     }
     sendFragmentResponse(res, '#todoList(outerHTML)', render(renderTodoList(todos)));
   } catch (error) {
-    console.error('Error in listTodos:', error);
+    logRequestError(req, 'Failed to list todos.', error);
     sendServerError(res);
   }
 }
@@ -160,13 +161,13 @@ export async function getTodoItem(req, res) {
     const id = parseInt(req.params.id, 10);
     const todo = todos.find(t => t.id === id);
     if (!todo) {
-      console.error(`Todo with id ${id} not found`);
+      logRequestWarning(req, 'Todo item was not found.', { id, statusCode: 404 });
       if (!res.headersSent) return res.status(404).send('Todo not found');
       return;
     }
     sendFragmentResponse(res, `#editForm-${id}(outerHTML)`, render(renderTodoItem(todo)));
   } catch (error) {
-    console.error('Error in getTodoItem:', error);
+    logRequestError(req, 'Failed to render todo item.', error);
     sendServerError(res);
   }
 }
@@ -184,13 +185,13 @@ export async function getEditTodoForm(req, res) {
     const id = parseInt(req.params.id, 10);
     const todo = todos.find(t => t.id === id);
     if (!todo) {
-      console.error(`Todo with id ${id} not found`);
+      logRequestWarning(req, 'Todo edit target was not found.', { id, statusCode: 404 });
       if (!res.headersSent) return res.status(404).send('Todo not found');
       return;
     }
     sendFragmentResponse(res, `#todo-${id}(outerHTML)`, renderEditForm(todo));
   } catch (error) {
-    console.error('Error in getEditTodoForm:', error);
+    logRequestError(req, 'Failed to render todo edit form.', error);
     sendServerError(res);
   }
 }
@@ -209,14 +210,14 @@ export async function updateTodo(req, res) {
     const id = parseInt(req.params.id, 10);
     const index = todos.findIndex(todo => todo.id === id);
     if (index === -1) {
-      console.error(`Todo with id ${id} not found`);
+      logRequestWarning(req, 'Todo update target was not found.', { id, statusCode: 404 });
       if (!res.headersSent) return res.status(404).send('Todo not found');
       return;
     }
     const submittedText = Array.isArray(req.body.todo) ? req.body.todo[0] : req.body.todo;
     const normalizedText = String(submittedText ?? '').trim();
     if (!normalizedText) {
-      console.error('Missing updated todo text');
+      logRequestWarning(req, 'Rejected todo update request without text.', { id, statusCode: 400 });
       if (!res.headersSent) return res.status(400).send('Missing updated todo text');
       return;
     }
@@ -224,7 +225,7 @@ export async function updateTodo(req, res) {
     await writeTodos(todos);
     sendFragmentResponse(res, `#editForm-${id}(outerHTML)`, render(renderTodoItem(todos[index])));
   } catch (error) {
-    console.error('Error in updateTodo:', error);
+    logRequestError(req, 'Failed to update todo.', error);
     sendServerError(res);
   }
 }
@@ -243,7 +244,7 @@ export async function deleteTodo(req, res) {
     const id = parseInt(req.params.id, 10);
     const index = todos.findIndex(todo => todo.id === id);
     if (index === -1) {
-      console.error(`Todo with id ${id} not found`);
+      logRequestWarning(req, 'Todo delete target was not found.', { id, statusCode: 404 });
       if (!res.headersSent) return res.status(404).send('Todo not found');
       return;
     }
@@ -251,7 +252,7 @@ export async function deleteTodo(req, res) {
     await writeTodos(todos);
     sendFragmentResponse(res, '#todoList(outerHTML)', render(renderTodoList(todos)));
   } catch (error) {
-    console.error('Error in deleteTodo:', error);
+    logRequestError(req, 'Failed to delete todo.', error);
     sendServerError(res);
   }
 }
