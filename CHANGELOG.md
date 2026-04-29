@@ -26,3 +26,9 @@ Diagnostics and error-boundary pass:
 - Replaced feature-route `console.error` calls with request-aware warnings and errors across todos, demos, streaming, chat, sockets, TLS setup, and shared response helpers.
 - Added a browser runtime error boundary for uncaught errors and unhandled promise rejections through the HTMLeX logger.
 - Added unit coverage for server logger normalization and request-ID diagnostics on missing routes.
+
+Diagnostics follow-up:
+
+- Added an in-browser HTMLeX diagnostics ring buffer and `htmlex:log` event stream so warnings, errors, and runtime-boundary failures can be inspected from DevTools or tests.
+- Added optional JSON server-log formatting via `HTMLEX_LOG_FORMAT=json` and dynamic `HTMLEX_LOG_LEVEL` handling.
+- Added browser e2e coverage for warning/error diagnostics and runtime-boundary logging, plus cleaner unit-test output for expected warning paths.
