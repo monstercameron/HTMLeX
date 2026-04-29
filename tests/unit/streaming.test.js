@@ -5,7 +5,7 @@ import { after, before, test } from 'node:test';
 let server;
 let port;
 
-function get(pathname, timeout = 2000) {
+function get(pathname, timeout = 2000, headers = {}) {
   return new Promise((resolve, reject) => {
     const req = https.request(
       {
@@ -13,6 +13,7 @@ function get(pathname, timeout = 2000) {
         port,
         path: pathname,
         method: 'GET',
+        headers,
         rejectUnauthorized: false,
         timeout
       },
@@ -22,6 +23,7 @@ function get(pathname, timeout = 2000) {
         res.on('end', () => {
           resolve({
             statusCode: res.statusCode,
+            headers: res.headers,
             body: Buffer.concat(chunks).toString('utf8')
           });
         });
@@ -59,4 +61,14 @@ test('demoLoading writes loading and final fragments then closes', async () => {
   assert.equal(response.statusCode, 200);
   assert.match(response.body, /Loading, wait 5000ms/);
   assert.match(response.body, /Payload received after 5000ms/);
+});
+
+test('missing routes return a request id for debugging', async () => {
+  const response = await get('/missing-route', 2000, {
+    'x-request-id': 'unit-test-request'
+  });
+
+  assert.equal(response.statusCode, 404);
+  assert.equal(response.headers['x-request-id'], 'unit-test-request');
+  assert.match(response.body, /Request ID: unit-test-request/);
 });
