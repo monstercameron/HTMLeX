@@ -71,3 +71,8 @@ Modern async cleanup:
 
 - Converted remaining runtime `Promise.resolve` flows to direct `async` returns.
 - Extended the modern JavaScript gate to block `Promise.resolve` and `Promise.reject` helper usage.
+
+Unit coverage expansion:
+
+- Added focused unit coverage for browser helper modules covering signal cleanup, target parsing, URL state updates, fetch timeout handling, cache expiry, scheduled updates, diagnostics logging, and Socket.IO client connection cleanup.
+- Added server-side unit coverage for chat message validation/history capping, explicit TLS option loading, and Socket.IO namespace setup.
