@@ -7,6 +7,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon --ignore src/persistence/* src/server.js",
+    "check:syntax": "node scripts/check-syntax.mjs",
+    "quality": "npm run check:syntax && npm test",
     "test": "npm run test:unit && npm run test:e2e",
     "test:unit": "node --test tests/unit/*.test.js",
     "test:e2e": "playwright test"

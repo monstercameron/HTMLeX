@@ -32,3 +32,16 @@ test('renderFragment preserves trusted server-owned fragment HTML', () => {
     '<fragment target="#target(innerHTML)"><div class="ok">Ready</div></fragment>'
   );
 });
+
+test('renderFragment supports fragment attributes without overriding the target', () => {
+  const html = renderFragment(
+    '#target(innerHTML)',
+    '<div class="ok">Ready</div>',
+    { timer: '5000', target: '#ignored(remove)' }
+  );
+
+  assert.equal(
+    html,
+    '<fragment timer="5000" target="#target(innerHTML)"><div class="ok">Ready</div></fragment>'
+  );
+});
