@@ -2,11 +2,14 @@
   "name": "htmlex",
   "version": "1.0.0",
   "type": "module",
-  "description": "*Version 1.0 • Last Updated: 2025-02-10*",
-  "main": "index.js",
+  "description": "Server-driven UI playground and HTMLeX demo app",
+  "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon --ignore src/persistence/* src/server.js"
+    "dev": "nodemon --ignore src/persistence/* src/server.js",
+    "test": "npm run test:unit && npm run test:e2e",
+    "test:unit": "node --test tests/unit/*.test.js",
+    "test:e2e": "playwright test"
   },
   "repository": {
     "type": "git",
@@ -20,13 +23,11 @@
   "homepage": "https://github.com/monstercameron/HTMLeX#readme",
   "dependencies": {
     "express": "^4.21.2",
-    "fs": "^0.0.1-security",
-    "http2-express-bridge": "^1.0.7",
-    "multer": "^1.4.5-lts.1",
-    "nodemon": "^3.1.9",
-    "path": "^0.12.7",
-    "socket.io": "^4.8.1",
-    "spdy": "^4.0.2",
-    "ws": "^8.18.0"
+    "multer": "^2.0.2",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0",
+    "nodemon": "^3.1.10"
   }
 }

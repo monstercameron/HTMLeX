@@ -1,6 +1,6 @@
 /node_modules
-package-lock.json
-server/cert/server.crt
-server/cert/localhost.pfx
-server/cert/server.key
-tmp
+/tmp
+/src/cert
+/test-results
+/playwright-report
+/.playwright

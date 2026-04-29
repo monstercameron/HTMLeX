@@ -1,13 +1,13 @@
 // ./src/app.js
 
 import express from 'express';
-import createHttp2Express from 'http2-express-bridge';
 import path from 'path';
 import fs from 'fs';
-import http2 from 'http2';
+import https from 'https';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { renderDefaultIndexPage } from './components/Components.js';
+import { getHttpsOptions } from './certificates.js';
 
 import { Server as SocketIOServer } from 'socket.io';
 
@@ -37,6 +37,7 @@ const TODO_DELETE_ROUTE = '/todos/:id';
 // Streaming routes
 // Infinite scrolling
 const ITEMS_LOAD_MORE_ROUTE = '/items/loadMore';
+const ITEMS_DEMO_INIT = '/items/init';
 // SSE Notifications
 const NOTIFICATIONS_DEMO_INIT = "/notifications/init"
 const NOTIFICATIONS_ROUTE = '/notifications';
@@ -67,11 +68,11 @@ const SSE_SUBSCRIBE_MESSAGE_ROUTE = '/sse/subscribe/message';
 // Chat route
 const CHAT_DEMO_INIT = '/chat/init';
 const CHAT_SEND_ROUTE = '/chat/send';
-
-// TLS/Certificate file paths
-const CERT_DIR = 'cert';
-const TLS_KEY_FILE = 'localhost+2-key.pem';
-const TLS_CERT_FILE = 'localhost+2.pem';
+const UPDATES_DEMO_INIT = '/updates/init';
+const POLLING_DEMO_INIT = '/polling/init';
+const POLLING_TICK_ROUTE = '/polling/tick';
+const HOVER_DEMO_INIT = '/hover/init';
+const HOVER_MESSAGE_ROUTE = '/hover/message';
 
 // Socket.IO namespaces
 const SOCKET_NS_COUNTER = '/counter';
@@ -87,8 +88,8 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('UNHANDLED REJECTION at:', promise, 'reason:', reason);
 });
 
-// Create an Express app using the HTTP/2 bridge.
-const app = createHttp2Express(express);
+// Create the Express app.
+const app = express();
 
 // Get __dirname in ES modules.
 const __filename = fileURLToPath(import.meta.url);
@@ -126,8 +127,9 @@ app.put(TODO_UPDATE_ROUTE, upload.none(), todos.updateTodo);
 app.delete(TODO_DELETE_ROUTE, todos.deleteTodo);
 
 // ------------------------------
-// Streaming Endpoints (HTTP/2)
+// Streaming Endpoints
 // ------------------------------
+app.get(ITEMS_DEMO_INIT, streaming.infiniteScrollDemoInit);
 app.get(ITEMS_LOAD_MORE_ROUTE, streaming.loadMoreItems);
 
 // SS notifications
@@ -162,6 +164,11 @@ app.get(DEMO_LOADING_ROUTE, streaming.demoLoading);
 app.get(SSE_DEMO_INIT, streaming.sseDemoInit);
 app.get(SSE_SUBSCRIBE_ROUTE, streaming.sseSubscribe);
 app.get(SSE_SUBSCRIBE_MESSAGE_ROUTE, streaming.sseSubscribeMessage);
+app.get(UPDATES_DEMO_INIT, streaming.webSocketUpdatesDemoInit);
+app.get(POLLING_DEMO_INIT, streaming.pollingDemoInit);
+app.get(POLLING_TICK_ROUTE, streaming.pollingTick);
+app.get(HOVER_DEMO_INIT, streaming.hoverDemoInit);
+app.get(HOVER_MESSAGE_ROUTE, streaming.hoverMessage);
 
 // ------------------------------
 // Chat Endpoint
@@ -173,15 +180,12 @@ app.post(CHAT_SEND_ROUTE, upload.none(), async (req, res) => {
 });
 
 // ------------------------------
-// Server Setup with TLS (HTTP/2 with HTTP/1 fallback)
+// Server Setup with TLS
 // ------------------------------
-const http2Options = {
-  key: fs.readFileSync(path.join(__dirname, CERT_DIR, TLS_KEY_FILE)),
-  cert: fs.readFileSync(path.join(__dirname, CERT_DIR, TLS_CERT_FILE)),
-  allowHTTP1: true // Enables fallback to HTTP/1.1 (and thus our Express bridge)
-};
+const projectRoot = path.resolve(__dirname, '..');
+const httpsOptions = getHttpsOptions(projectRoot);
 
-const server = http2.createSecureServer(http2Options, app);
+const server = https.createServer(httpsOptions, app);
 
 // ------------------------------
 // Socket.IO Setup
@@ -199,6 +203,11 @@ server.on('error', (err) => {
 });
 
 server.on('clientError', (err, socket) => {
+  if (err?.code === 'ERR_SSL_SSL/TLS_ALERT_CERTIFICATE_UNKNOWN' || err?.code === 'ECONNRESET') {
+    if (socket && !socket.destroyed) socket.destroy();
+    return;
+  }
+
   console.error('Client connection error:', err);
   if (socket && socket.writable && !socket.destroyed) {
     socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
@@ -212,23 +221,28 @@ server.on('clientError', (err, socket) => {
 });
 
 export function startServer(port = PORT) {
+  if (server.listening) {
+    return Promise.resolve(server);
+  }
+
   return new Promise((resolve, reject) => {
-    const listener = server.listen(port, (err) => {
-      if (err) {
-        console.error('Failed to start server:', err);
-        reject(err);
-        return;
-      }
-      console.log(`Express HTTP/2 server (local dev) listening on https://localhost:${port}`);
+    const onError = (err) => {
+      console.error('Failed to start server:', err);
+      reject(err);
+    };
+
+    server.once('error', onError);
+    server.listen(port, () => {
+      server.off('error', onError);
+      const address = server.address();
+      const actualPort = typeof address === 'object' && address ? address.port : port;
+      console.log(`Express HTTPS server (local dev) listening on https://localhost:${actualPort}`);
       console.log('Server Features:');
-      console.log('- HTTP/2 Enabled with HTTP/1 fallback (via http2-express-bridge)');
+      console.log('- HTTPS Enabled');
       console.log(`- Socket.IO Namespaces: ${SOCKET_NS_COUNTER}, ${SOCKET_NS_CHAT}, ${SOCKET_NS_UPDATES}`);
       console.log('- Todo API Endpoints');
       console.log('- Streaming Support');
       resolve(server);
-    });
-    listener.on('error', err => {
-      console.error("Server LISTENER error", err);
     });
   });
 }
@@ -257,3 +271,4 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 }
 
 export default server;
+export { app };
