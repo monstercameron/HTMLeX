@@ -13,3 +13,8 @@ This update hardens that surface and packages it for repeatable testing:
 - Added unit coverage for rendering, components, cache behavior, route registration, rate limiting, and streaming routes.
 - Updated dependencies, test scripts, Playwright configuration, and package lock data.
 
+Follow-up quality pass:
+
+- Modernized remaining runtime loops and queues, tightened naming, and extracted clearer helpers around target resolution, timer handling, sockets, logging, and fragment responses.
+- Added a dependency-free syntax check to the quality gate and direct unit coverage for shared fragment response helpers.
+- Re-ran the complete quality suite: syntax check, unit tests, and full Playwright e2e coverage.
