@@ -3,7 +3,19 @@ import test from 'node:test';
 import { render } from '../../src/components/HTMLeX.js';
 import {
   DEMO_SNIPPETS,
+  ChatInterfaceDemo,
+  ClickCounterWidget,
+  HoverTriggerDemo,
   HtmlSnippet,
+  InfiniteScrollDemo,
+  NotificationsDemo,
+  PollingDemo,
+  SSESubscribersDemo,
+  SequentialDemo,
+  SignalChainingDemo,
+  WebSocketUpdatesDemo,
+  loadingStateDemo,
+  multiFragmentDemo,
   renderEditForm,
   renderTodoList,
   TodoWidget
@@ -47,4 +59,32 @@ test('todo widget includes the feature HTML snippet inside the demo area', () =>
 
   assert.match(html, /snippet-panel/);
   assert.match(html, /&lt;input id=&quot;todoInput&quot;/);
+});
+
+test('demo widgets expose their expected HTMLeX declarative attributes', () => {
+  const html = [
+    NotificationsDemo(),
+    ClickCounterWidget(),
+    ChatInterfaceDemo(),
+    multiFragmentDemo(),
+    SignalChainingDemo(),
+    SSESubscribersDemo(),
+    WebSocketUpdatesDemo(),
+    InfiniteScrollDemo(),
+    PollingDemo(),
+    HoverTriggerDemo(),
+    SequentialDemo(),
+    loadingStateDemo(),
+  ].map(component => typeof component === 'string' ? component : render(component)).join('\n');
+
+  assert.match(html, /GET="\/notifications"/);
+  assert.match(html, /POST="\/chat\/send"/);
+  assert.match(html, /socket="\/updates"/);
+  assert.match(html, /subscribe="sseUpdate"/);
+  assert.match(html, /publish="chain1"/);
+  assert.match(html, /poll="1000"/);
+  assert.match(html, /trigger="mouseenter"/);
+  assert.match(html, /sequential="2500"/);
+  assert.match(html, /GET="\/demo\/loading"/);
+  assert.match(html, /target="#loadingDemoOutput\(innerHTML\)"/);
 });

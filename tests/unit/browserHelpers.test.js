@@ -7,6 +7,7 @@ import {
   parseTargets,
   querySelectorAllResult,
   querySelectorSafe,
+  updateTarget,
 } from '../../src/public/src/dom.js';
 import { fetchWithTimeout } from '../../src/public/src/fetchHelper.js';
 import { Logger, LogLevel } from '../../src/public/src/logger.js';
@@ -23,6 +24,7 @@ let originalFetch;
 let originalHistory;
 let originalDocument;
 let originalElement;
+let originalCustomEvent;
 let originalIo;
 let originalMutationObserver;
 let originalRequestAnimationFrame;
@@ -36,6 +38,7 @@ beforeEach(() => {
   originalHistory = globalThis.history;
   originalDocument = globalThis.document;
   originalElement = globalThis.Element;
+  originalCustomEvent = globalThis.CustomEvent;
   originalIo = globalThis.io;
   originalMutationObserver = globalThis.MutationObserver;
   originalRequestAnimationFrame = globalThis.requestAnimationFrame;
@@ -69,6 +72,12 @@ afterEach(() => {
     delete globalThis.Element;
   } else {
     globalThis.Element = originalElement;
+  }
+
+  if (originalCustomEvent === undefined) {
+    delete globalThis.CustomEvent;
+  } else {
+    globalThis.CustomEvent = originalCustomEvent;
   }
 
   if (originalIo === undefined) {
@@ -166,6 +175,53 @@ test('DOM target parsing normalizes strategies and invalid selector helpers fail
     matches: [],
     valid: false,
   });
+});
+
+test('updateTarget applies insertion and removal strategies and emits DOM update events', () => {
+  const dispatchedEvents = [];
+  const targetElement = {
+    inserted: [],
+    parentElement: { id: 'parent' },
+    insertAdjacentHTML(position, content) {
+      this.inserted.push({ position, content });
+    },
+    remove() {
+      this.removed = true;
+    }
+  };
+  globalThis.CustomEvent = class CustomEvent {
+    constructor(type, init = {}) {
+      this.type = type;
+      this.detail = init.detail;
+    }
+  };
+  globalThis.document = {
+    body: { id: 'body' },
+    querySelectorAll(selector) {
+      return selector === '#target' ? [targetElement] : [];
+    },
+    dispatchEvent(event) {
+      dispatchedEvents.push(event);
+    }
+  };
+
+  updateTarget(
+    { selector: '#target', strategy: 'append' },
+    '<button GET="/unit">Run</button>'
+  );
+  updateTarget(
+    { selector: '#target', strategy: 'remove' },
+    ''
+  );
+
+  assert.deepEqual(targetElement.inserted, [{
+    position: 'beforeend',
+    content: '<button GET="/unit">Run</button>'
+  }]);
+  assert.equal(targetElement.removed, true);
+  assert.equal(dispatchedEvents.length, 1);
+  assert.equal(dispatchedEvents[0].type, 'htmlex:dom-updated');
+  assert.equal(dispatchedEvents[0].detail.root, targetElement);
 });
 
 test('URL state applies push, pull, path, and history modes', () => {

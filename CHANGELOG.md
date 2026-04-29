@@ -76,3 +76,9 @@ Unit coverage expansion:
 
 - Added focused unit coverage for browser helper modules covering signal cleanup, target parsing, URL state updates, fetch timeout handling, cache expiry, scheduled updates, diagnostics logging, and Socket.IO client connection cleanup.
 - Added server-side unit coverage for chat message validation/history capping, explicit TLS option loading, and Socket.IO namespace setup.
+
+Todo and demo unit coverage expansion:
+
+- Added unit coverage for todo route handlers, including widget/list rendering, create/update/delete validation, 404 paths, persistence writes, and invalid JSON recovery.
+- Added unit coverage for demo catalog rendering and demo component declarative attributes across notifications, chat, sockets, signals, polling, hover, sequential, and loading examples.
+- Added direct DOM update unit coverage for append/remove target strategies and `htmlex:dom-updated` event dispatch.
