@@ -9,14 +9,20 @@ const LEVEL_PRIORITY = {
   silent: Number.POSITIVE_INFINITY,
 };
 
-const DEFAULT_LOG_LEVEL = process.env.HTMLEX_LOG_LEVEL || 'info';
+function normalizeLogLevel(level) {
+  return Object.hasOwn(LEVEL_PRIORITY, level) ? level : 'info';
+}
 
 function getLogLevel() {
-  return LEVEL_PRIORITY[DEFAULT_LOG_LEVEL] ? DEFAULT_LOG_LEVEL : 'info';
+  return normalizeLogLevel(process.env.HTMLEX_LOG_LEVEL || 'info');
 }
 
 function shouldLog(level) {
   return LEVEL_PRIORITY[level] >= LEVEL_PRIORITY[getLogLevel()];
+}
+
+function getLogFormat() {
+  return process.env.HTMLEX_LOG_FORMAT === 'json' ? 'json' : 'text';
 }
 
 function inspectValue(value) {
@@ -62,13 +68,30 @@ function cleanDetails(details = {}) {
   );
 }
 
+export function createLogRecord(level, scope, message, details = {}) {
+  return {
+    timestamp: new Date().toISOString(),
+    level,
+    scope,
+    message,
+    ...cleanDetails(details),
+  };
+}
+
+export function formatLogRecord(record, format = getLogFormat()) {
+  if (format === 'json') {
+    return JSON.stringify(record);
+  }
+
+  const { timestamp, level, scope, message, ...details } = record;
+  const suffix = Object.keys(details).length ? ` ${inspectValue(details)}` : '';
+  return `[${timestamp}] [${level.toUpperCase()}] [${scope}] ${message}${suffix}`;
+}
+
 function writeLog(level, scope, message, details = {}) {
   if (!shouldLog(level)) return;
 
-  const timestamp = new Date().toISOString();
-  const payload = cleanDetails(details);
-  const suffix = Object.keys(payload).length ? ` ${inspectValue(payload)}` : '';
-  const line = `[${timestamp}] [${level.toUpperCase()}] [${scope}] ${message}${suffix}`;
+  const line = formatLogRecord(createLogRecord(level, scope, message, details));
 
   if (level === 'error' || level === 'fatal') {
     console.error(line);
