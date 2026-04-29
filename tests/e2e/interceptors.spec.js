@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { setTimeout as delay } from 'node:timers/promises';
 
 async function mountHTMLeX(page, html) {
   await page.evaluate(async (fixtureHtml) => {
@@ -173,7 +174,7 @@ test('runs lifecycle hooks, loading state, error target, retries, and timeout ha
     body: 'Lifecycle complete'
   }));
   await page.route('**/test/loading', async (route) => {
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await delay(100);
     await route.fulfill({ contentType: 'text/html', body: 'Loaded complete' });
   });
   await page.route('**/test/fails', route => route.fulfill({
@@ -190,7 +191,7 @@ test('runs lifecycle hooks, loading state, error target, retries, and timeout ha
     });
   });
   await page.route('**/test/slow', async (route) => {
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await delay(200);
     await route.fulfill({ contentType: 'text/html', body: 'Too late' });
   });
 
@@ -460,7 +461,7 @@ test('queues sequential fragment responses in trigger order', async ({ page }) =
   await page.route('**/test/sequential', async (route) => {
     sequentialCalls += 1;
     const id = sequentialCalls;
-    await new Promise(resolve => setTimeout(resolve, id === 1 ? 120 : 20));
+    await delay(id === 1 ? 120 : 20);
     await route.fulfill({
       contentType: 'text/html',
       body: `<fragment target="#sequentialOut(append)"><span class="seq-item">seq:${id}</span></fragment>`

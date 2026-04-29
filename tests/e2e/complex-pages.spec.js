@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { setTimeout as delay } from 'node:timers/promises';
 
 async function mountHTMLeX(page, html) {
   await page.evaluate(async (fixtureHtml) => {
@@ -107,7 +108,7 @@ test('operations board handles mutation-registered controls, sequential response
   await page.route('**/scenario/task', async (route) => {
     taskCalls += 1;
     const id = taskCalls;
-    await new Promise(resolve => setTimeout(resolve, id === 1 ? 120 : 15));
+    await delay(id === 1 ? 120 : 15);
     await route.fulfill({
       contentType: 'text/html',
       body: `<fragment target="#taskQueue(append)"><span class="task-event">Task ${id}</span></fragment>`
@@ -116,7 +117,7 @@ test('operations board handles mutation-registered controls, sequential response
   await page.route('**/scenario/retry', async (route) => {
     retryCalls += 1;
     if (retryCalls === 1) {
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await delay(150);
     }
     return route.fulfill({
       status: retryCalls < 3 ? 503 : 200,

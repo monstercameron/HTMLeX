@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { setTimeout as delay } from 'node:timers/promises';
 
 async function mountHTMLeX(page, html) {
   await page.evaluate(async (fixtureHtml) => {
@@ -441,7 +442,7 @@ test('does not render errors for requests canceled by a newer action', async ({ 
     cancelCalls += 1;
     const id = cancelCalls;
     if (id === 1) {
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await delay(200);
     }
     await route.fulfill({ contentType: 'text/html', body: `done:${id}` });
   });
@@ -1419,7 +1420,7 @@ test('sequential false values are handled case-insensitively', async ({ page }) 
   await page.route('**/edge/sequential-false-case', async (route) => {
     sequentialFalseCalls += 1;
     const id = sequentialFalseCalls;
-    await new Promise(resolve => setTimeout(resolve, id === 1 ? 160 : 20));
+    await delay(id === 1 ? 160 : 20);
     return route.fulfill({
       contentType: 'text/html',
       body: `<span class="sequential-false-case-item">seq-false:${id}</span>`
@@ -1602,7 +1603,7 @@ test('default fragments register inserted HTMLeX controls', async ({ page }) => 
 
 test('loading and error this targets resolve to the triggering element', async ({ page }) => {
   await page.route('**/edge/loading-this', async (route) => {
-    await new Promise(resolve => setTimeout(resolve, 120));
+    await delay(120);
     await route.fulfill({ contentType: 'text/html', body: 'loading complete' });
   });
   await page.route('**/edge/error-this', route => route.fulfill({

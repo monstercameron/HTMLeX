@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import { Logger } from '../../src/public/src/logger.js';
 import { debounce, throttle } from '../../src/public/src/rateLimit.js';
@@ -30,7 +31,7 @@ test('debounce cancel resolves pending work without invoking the handler', async
     const pending = debounced();
     debounced.cancel();
     assert.equal(await pending, undefined);
-    await new Promise(resolve => setTimeout(resolve, 40));
+    await delay(40);
     assert.equal(calls, 0);
   } finally {
     Logger.enabled = wasEnabled;

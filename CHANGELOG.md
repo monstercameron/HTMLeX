@@ -57,3 +57,7 @@ ESNext syntax coverage follow-up:
 
 - Expanded the syntax gate to walk JavaScript from the repository root, including root-level tool configuration.
 - Made syntax-file discovery deterministic and added `.cjs` coverage while ignoring generated and dependency directories.
+
+ESNext timer modernization follow-up:
+
+- Replaced Node-side promise-wrapped test and streaming delays with `node:timers/promises`.

@@ -7,6 +7,7 @@
  * @module features/streaming
  */
 
+import { setTimeout as delay } from 'node:timers/promises';
 import { render, div, span } from '../components/HTMLeX.js';
 import {
   renderLoadingMessage,
@@ -39,7 +40,7 @@ function responseDelay(ms) {
 }
 
 function waitForResponseDelay(ms) {
-  return new Promise(resolve => setTimeout(resolve, responseDelay(ms)));
+  return delay(responseDelay(ms));
 }
 
 function renderLoadMoreItems(count = 5) {
