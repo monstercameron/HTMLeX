@@ -4,8 +4,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { DemoItem } from '../components/Components.js';
-import { renderFragment } from "../components/HTMLeX.js"
 import { render } from '../components/HTMLeX.js';
+import { sendFragmentResponse } from './responses.js';
 
 // Determine __dirname in ES modules.
 const __filename = fileURLToPath(import.meta.url);
@@ -33,18 +33,14 @@ async function getRenderedDemosHtml() {
 
 /**
  * Express route handler that loads demos from the JSON file,
- * wraps each demo item in an HTMLeX fragment using the exported renderFragment,
- * and sends the concatenated HTML fragments as the response.
+ * wraps the rendered catalog in an HTMLeX fragment and sends it as the response.
  *
  * @param {import('express').Request} req - The Express request object.
  * @param {import('express').Response} res - The Express response object.
  */
 export async function loadAndRenderDemos(req, res) {
   try {
-    const html = renderFragment('this(innerHTML)', await getRenderedDemosHtml());
-
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(html);
+    sendFragmentResponse(res, 'this(innerHTML)', await getRenderedDemosHtml());
   } catch (error) {
     console.error('Error loading demos:', error);
     res.status(500).send('Error loading demos');

@@ -6,7 +6,7 @@
 
 import { Logger } from './logger.js';
 
-/** @type {Map<string, Function[]>} */
+/** @type {Map<string, Set<Function>>} */
 const signalBus = new Map();
 
 /**
@@ -21,21 +21,22 @@ export function registerSignalListener(signalName, callback) {
     return () => {};
   }
 
-  if (!signalBus.has(signalName)) {
-    signalBus.set(signalName, []);
+  let listeners = signalBus.get(signalName);
+  if (!listeners) {
+    listeners = new Set();
+    signalBus.set(signalName, listeners);
     Logger.system.debug(`[SIGNALS] Created new signal bus for "${signalName}".`);
   }
-  signalBus.get(signalName).push(callback);
+
+  listeners.add(callback);
   Logger.system.debug(`[SIGNALS] Registered listener for signal "${signalName}".`);
   return () => {
     const listeners = signalBus.get(signalName);
     if (!listeners) return;
-    const index = listeners.indexOf(callback);
-    if (index >= 0) {
-      listeners.splice(index, 1);
+    if (listeners.delete(callback)) {
       Logger.system.debug(`[SIGNALS] Unregistered listener for signal "${signalName}".`);
     }
-    if (!listeners.length) {
+    if (!listeners.size) {
       signalBus.delete(signalName);
     }
   };
@@ -43,7 +44,7 @@ export function registerSignalListener(signalName, callback) {
 
 // Internal diagnostic used by the browser e2e suite to verify cleanup behavior.
 export function __getSignalListenerCount(signalName) {
-  return signalBus.get(signalName)?.length || 0;
+  return signalBus.get(signalName)?.size || 0;
 }
 
 /**
@@ -57,16 +58,16 @@ export function emitSignal(signalName) {
   }
 
   Logger.system.debug(`[SIGNALS] Emitting signal "${signalName}".`);
-  if (signalBus.has(signalName)) {
-    const listeners = [...signalBus.get(signalName)];
-    listeners.forEach(callback => {
+  const listeners = signalBus.get(signalName);
+  if (listeners) {
+    for (const callback of [...listeners]) {
       try {
         callback();
         Logger.system.debug(`[SIGNALS] Signal "${signalName}" listener executed successfully.`);
       } catch (error) {
         Logger.system.error(`[SIGNALS] Error in signal listener for "${signalName}":`, error);
       }
-    });
+    }
   } else {
     Logger.system.warn(`[SIGNALS] No listeners registered for signal "${signalName}".`);
   }

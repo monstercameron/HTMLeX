@@ -31,11 +31,11 @@ function cloneEventArgs(args) {
  * If the first argument is an Event, a shallow copy of its key properties is made
  * to avoid issues with the event being reused.
  *
- * @param {Function} func - The function to debounce.
+ * @param {Function} callback - The function to debounce.
  * @param {number} wait - The debounce interval in milliseconds.
  * @returns {Function} The debounced function.
  */
-export function debounce(func, wait) {
+export function debounce(callback, wait) {
   let timeoutId = null;
   let resolvePending = null;
   Logger.system.debug("[DEBOUNCE] Creating debounced function with wait period:", wait, "ms");
@@ -60,7 +60,7 @@ export function debounce(func, wait) {
         timeoutId = null;
         resolvePending = null;
         try {
-          const result = await func.apply(context, invocationArgs);
+          const result = await callback.apply(context, invocationArgs);
           Logger.system.debug("[DEBOUNCE] Function executed successfully.");
           resolve(result);
         } catch (error) {
@@ -87,11 +87,11 @@ export function debounce(func, wait) {
 
 /**
  * Creates a throttled version of the function.
- * @param {Function} func - The function to throttle.
+ * @param {Function} callback - The function to throttle.
  * @param {number} limit - The throttle interval in milliseconds.
  * @returns {Function} The throttled function.
  */
-export function throttle(func, limit) {
+export function throttle(callback, limit) {
   let inThrottle = false;
   let timeoutId = null;
   Logger.system.debug("[THROTTLE] Creating throttled function with limit:", limit, "ms");
@@ -110,7 +110,7 @@ export function throttle(func, limit) {
         Logger.system.debug("[THROTTLE] Throttle period ended; ready for next call.");
       }, limit);
       return Promise.resolve()
-        .then(() => func.apply(context, invocationArgs))
+        .then(() => callback.apply(context, invocationArgs))
         .then(result => {
           Logger.system.debug("[THROTTLE] Function executed successfully.");
           return result;

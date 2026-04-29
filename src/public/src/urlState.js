@@ -22,26 +22,26 @@ function parseKeyValueList(value) {
  */
 export function handleURLState(element) {
   Logger.system.debug("[URLState] Starting URL state update for element:", element);
-  let newUrl = new URL(window.location.href);
+  const newUrl = new URL(window.location.href);
   Logger.system.debug("[URLState] Current URL:", window.location.href);
 
   if (element.hasAttribute('push')) {
     const pushValue = element.getAttribute('push');
     Logger.system.debug("[URLState] Found 'push' attribute with value:", pushValue);
-    parseKeyValueList(pushValue).forEach(({ key, value }) => {
+    for (const { key, value } of parseKeyValueList(pushValue)) {
       Logger.system.debug(`[URLState] Setting search parameter: ${key}=${value}`);
       newUrl.searchParams.set(key, value);
-    });
+    }
   }
 
   if (element.hasAttribute('pull')) {
     const pullValue = element.getAttribute('pull');
     Logger.system.debug("[URLState] Found 'pull' attribute with value:", pullValue);
     const keys = String(pullValue ?? '').split(/\s+/).filter(Boolean);
-    keys.forEach(key => {
+    for (const key of keys) {
       Logger.system.debug(`[URLState] Removing search parameter: ${key}`);
       newUrl.searchParams.delete(key);
-    });
+    }
   }
 
   if (element.hasAttribute('path')) {

@@ -36,18 +36,17 @@ export async function sendChatMessage(req, res, chatNamespace) {
       }
       return;
     }
-    const newMessage = {
+    const chatMessage = {
       id: Date.now(),
       username: normalizeText(req.body.username, MAX_USERNAME_LENGTH) || 'Anonymous',
       text: message
     };
-    chatMessages.push(newMessage);
+    chatMessages.push(chatMessage);
     chatMessages = chatMessages.slice(-MAX_CHAT_MESSAGES);
-    // Broadcast the new message via the provided Socket.IO namespace.
-    chatNamespace.emit('chatMessage', newMessage);
+    chatNamespace.emit('chatMessage', chatMessage);
     res.status(204).end();
-  } catch (err) {
-    console.error('Error in sendChatMessage:', err);
+  } catch (error) {
+    console.error('Error in sendChatMessage:', error);
     if (!res.headersSent) res.status(500).send('Internal server error');
   }
 }

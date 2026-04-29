@@ -6,7 +6,7 @@
  * @module features/todos
  */
 
-import fs from 'fs';
+import { access, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
@@ -14,16 +14,13 @@ import {
   renderTodoList,
   renderEditForm,
   TodoWidget,
-
 } from '../components/Components.js';
-import { render, renderFragment } from "../components/HTMLeX.js"
+import { render } from '../components/HTMLeX.js';
+import { sendFragmentResponse, sendServerError } from './responses.js';
 
-// Determine the directory name of this module.
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Path to the data file storing todos.
-const dataPath = path.join(__dirname, '..', 'persistence/data.json');
+const TODOS_FILE = path.join(__dirname, '..', 'persistence/data.json');
 
 /**
  * Ensures that the data file exists.
@@ -33,10 +30,9 @@ const dataPath = path.join(__dirname, '..', 'persistence/data.json');
  */
 async function ensureDataFile() {
   try {
-    await fs.promises.access(dataPath);
-  } catch (err) {
-    console.log('Data file not found, creating empty file');
-    await fs.promises.writeFile(dataPath, JSON.stringify([], null, 2));
+    await access(TODOS_FILE);
+  } catch {
+    await writeFile(TODOS_FILE, JSON.stringify([], null, 2));
   }
 }
 
@@ -48,10 +44,10 @@ async function ensureDataFile() {
 export async function loadTodos() {
   await ensureDataFile();
   try {
-    const data = await fs.promises.readFile(dataPath, 'utf8');
+    const data = await readFile(TODOS_FILE, 'utf8');
     return JSON.parse(data);
-  } catch (err) {
-    console.error('Error loading todos:', err);
+  } catch (error) {
+    console.error('Error loading todos:', error);
     return [];
   }
 }
@@ -71,20 +67,14 @@ export async function getToDoWidget(req, res) {
 
     if (!Array.isArray(todos)) {
       console.error('Loaded todos is not an array:', todos);
-      if (!res.headersSent) {
-        return res.status(500).send('Internal server error: Invalid todo data');
-      }
+      sendServerError(res, 'Internal server error: Invalid todo data');
       return;
     }
 
-    const htmlSnippet = TodoWidget(todos);
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment('#demoCanvas(innerHTML)', htmlSnippet));
-  } catch (err) {
-    console.error('Error in getToDoWidget:', err);
-    if (!res.headersSent) {
-      res.status(500).send('Internal server error');
-    }
+    sendFragmentResponse(res, '#demoCanvas(innerHTML)', TodoWidget(todos));
+  } catch (error) {
+    console.error('Error in getToDoWidget:', error);
+    sendServerError(res);
   }
 }
 
@@ -96,10 +86,10 @@ export async function getToDoWidget(req, res) {
  */
 export async function writeTodos(todos) {
   try {
-    await fs.promises.writeFile(dataPath, JSON.stringify(todos, null, 2));
-  } catch (err) {
-    console.error('Error writing todos:', err);
-    throw err;
+    await writeFile(TODOS_FILE, JSON.stringify(todos, null, 2));
+  } catch (error) {
+    console.error('Error writing todos:', error);
+    throw error;
   }
 }
 
@@ -115,8 +105,8 @@ export async function writeTodos(todos) {
 export async function createTodo(req, res) {
   try {
     const todos = await loadTodos();
-    const newText = Array.isArray(req.body.todo) ? req.body.todo[0] : req.body.todo;
-    const normalizedText = String(newText ?? '').trim();
+    const submittedText = Array.isArray(req.body.todo) ? req.body.todo[0] : req.body.todo;
+    const normalizedText = String(submittedText ?? '').trim();
     if (!normalizedText) {
       console.error('Missing todo text in request');
       if (!res.headersSent) {
@@ -127,12 +117,10 @@ export async function createTodo(req, res) {
     const newTodo = { id: Date.now(), text: normalizedText };
     todos.push(newTodo);
     await writeTodos(todos);
-    const htmlSnippet = render(renderTodoList(todos));
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment('#todoList(outerHTML)', htmlSnippet));
-  } catch (err) {
-    console.error('Error in createTodo:', err);
-    if (!res.headersSent) res.status(500).send('Internal server error');
+    sendFragmentResponse(res, '#todoList(outerHTML)', render(renderTodoList(todos)));
+  } catch (error) {
+    console.error('Error in createTodo:', error);
+    sendServerError(res);
   }
 }
 
@@ -149,16 +137,13 @@ export async function listTodos(req, res) {
     const todos = await loadTodos();
     if (!Array.isArray(todos)) {
       console.error('Loaded todos is not an array:', todos);
-      if (!res.headersSent)
-        return res.status(500).send('Internal server error: Invalid todo data');
+      sendServerError(res, 'Internal server error: Invalid todo data');
       return;
     }
-    const htmlSnippet = render(renderTodoList(todos));
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment('#todoList(outerHTML)', htmlSnippet));
-  } catch (err) {
-    console.error('Error in listTodos:', err);
-    if (!res.headersSent) res.status(500).send('Internal server error');
+    sendFragmentResponse(res, '#todoList(outerHTML)', render(renderTodoList(todos)));
+  } catch (error) {
+    console.error('Error in listTodos:', error);
+    sendServerError(res);
   }
 }
 
@@ -179,12 +164,10 @@ export async function getTodoItem(req, res) {
       if (!res.headersSent) return res.status(404).send('Todo not found');
       return;
     }
-    const htmlSnippet = render(renderTodoItem(todo));
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment(`#editForm-${id}(outerHTML)`, htmlSnippet));
-  } catch (err) {
-    console.error('Error in getTodoItem:', err);
-    if (!res.headersSent) res.status(500).send('Internal server error');
+    sendFragmentResponse(res, `#editForm-${id}(outerHTML)`, render(renderTodoItem(todo)));
+  } catch (error) {
+    console.error('Error in getTodoItem:', error);
+    sendServerError(res);
   }
 }
 
@@ -205,12 +188,10 @@ export async function getEditTodoForm(req, res) {
       if (!res.headersSent) return res.status(404).send('Todo not found');
       return;
     }
-    const htmlSnippet = renderEditForm(todo);
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment(`#todo-${id}(outerHTML)`, htmlSnippet));
-  } catch (err) {
-    console.error('Error in getEditTodoForm:', err);
-    if (!res.headersSent) res.status(500).send('Internal server error');
+    sendFragmentResponse(res, `#todo-${id}(outerHTML)`, renderEditForm(todo));
+  } catch (error) {
+    console.error('Error in getEditTodoForm:', error);
+    sendServerError(res);
   }
 }
 
@@ -232,8 +213,8 @@ export async function updateTodo(req, res) {
       if (!res.headersSent) return res.status(404).send('Todo not found');
       return;
     }
-    const newText = Array.isArray(req.body.todo) ? req.body.todo[0] : req.body.todo;
-    const normalizedText = String(newText ?? '').trim();
+    const submittedText = Array.isArray(req.body.todo) ? req.body.todo[0] : req.body.todo;
+    const normalizedText = String(submittedText ?? '').trim();
     if (!normalizedText) {
       console.error('Missing updated todo text');
       if (!res.headersSent) return res.status(400).send('Missing updated todo text');
@@ -241,12 +222,10 @@ export async function updateTodo(req, res) {
     }
     todos[index].text = normalizedText;
     await writeTodos(todos);
-    const updatedTodoItem = render(renderTodoItem(todos[index]));
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment(`#editForm-${id}(outerHTML)`, updatedTodoItem));
-  } catch (err) {
-    console.error('Error in updateTodo:', err);
-    if (!res.headersSent) res.status(500).send('Internal server error');
+    sendFragmentResponse(res, `#editForm-${id}(outerHTML)`, render(renderTodoItem(todos[index])));
+  } catch (error) {
+    console.error('Error in updateTodo:', error);
+    sendServerError(res);
   }
 }
 
@@ -270,12 +249,10 @@ export async function deleteTodo(req, res) {
     }
     todos.splice(index, 1);
     await writeTodos(todos);
-    const updatedList = render(renderTodoList(todos));
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment('#todoList(outerHTML)', updatedList));
-  } catch (err) {
-    console.error('Error in deleteTodo:', err);
-    if (!res.headersSent) res.status(500).send('Internal server error');
+    sendFragmentResponse(res, '#todoList(outerHTML)', render(renderTodoList(todos)));
+  } catch (error) {
+    console.error('Error in deleteTodo:', error);
+    sendServerError(res);
   }
 }
 

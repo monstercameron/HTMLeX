@@ -1,10 +1,8 @@
 // src/logger.js
 /**
  * @module Logger
- * @description Provides logging functionality with configurable log levels,
- * a global on/off switch, and two “namespaces” – one for generic system logs and
- * one for element-specific logs. Element-specific logs are only output if the
- * element has the `debug` attribute.
+ * @description Provides logging with configurable levels, a global on/off switch,
+ * and separate namespaces for system logs and element-scoped logs.
  */
 
 /** @enum {string} */
@@ -24,79 +22,76 @@ function getInitialLogLevel() {
 
     const params = new URLSearchParams(typeof window !== 'undefined' ? window.location?.search || '' : '');
     if (params.get('htmlexDebug') === '1') return LogLevel.DEBUG;
-  } catch (error) {
+  } catch {
     // Logging configuration should never block app startup.
   }
 
   return LogLevel.WARN;
 }
 
+function shouldLog(levels) {
+  return Logger.enabled && Logger.namespaces.system && levels.includes(Logger.logLevel);
+}
+
+function shouldLogElement(element, levels) {
+  return (
+    Logger.enabled &&
+    element instanceof HTMLElement &&
+    element.hasAttribute('debug') &&
+    levels.includes(Logger.logLevel)
+  );
+}
+
 export const Logger = {
-  // Global flag to completely enable/disable logging.
   enabled: true,
-
-  // The current log level.
   logLevel: getInitialLogLevel(),
-
-  // Namespace flags – you can add more namespaces if needed.
   namespaces: {
-    system: true, // when true, generic (system) logs are shown.
+    system: true,
   },
 
-  // -------------------------------
-  // Generic/system logging methods
-  // These logs are not associated with any specific element.
-  // -------------------------------
   system: {
-    debug: (msg, ...args) => {
-      if (!Logger.enabled || !Logger.namespaces.system) return;
-      if ([LogLevel.DEBUG].includes(Logger.logLevel))
-        console.debug("[HTMLeX SYSTEM DEBUG]", msg, ...args);
+    debug: (message, ...args) => {
+      if (shouldLog([LogLevel.DEBUG])) {
+        console.debug('[HTMLeX SYSTEM DEBUG]', message, ...args);
+      }
     },
-    info: (msg, ...args) => {
-      if (!Logger.enabled || !Logger.namespaces.system) return;
-      if ([LogLevel.DEBUG, LogLevel.INFO].includes(Logger.logLevel))
-        console.info("[HTMLeX SYSTEM INFO]", msg, ...args);
+    info: (message, ...args) => {
+      if (shouldLog([LogLevel.DEBUG, LogLevel.INFO])) {
+        console.info('[HTMLeX SYSTEM INFO]', message, ...args);
+      }
     },
-    warn: (msg, ...args) => {
-      if (!Logger.enabled || !Logger.namespaces.system) return;
-      if ([LogLevel.DEBUG, LogLevel.INFO, LogLevel.WARN].includes(Logger.logLevel))
-        console.warn("[HTMLeX SYSTEM WARN]", msg, ...args);
+    warn: (message, ...args) => {
+      if (shouldLog([LogLevel.DEBUG, LogLevel.INFO, LogLevel.WARN])) {
+        console.warn('[HTMLeX SYSTEM WARN]', message, ...args);
+      }
     },
-    error: (msg, ...args) => {
-      if (!Logger.enabled || !Logger.namespaces.system) return;
-      console.error("[HTMLeX SYSTEM ERROR]", msg, ...args);
+    error: (message, ...args) => {
+      if (Logger.enabled && Logger.namespaces.system) {
+        console.error('[HTMLeX SYSTEM ERROR]', message, ...args);
+      }
     }
   },
 
-  // -------------------------------
-  // Element-specific logging methods
-  // These methods expect an HTML element as the first parameter.
-  // They will only log if the element has the `debug` attribute.
-  // -------------------------------
   element: {
-    debug: (elem, msg, ...args) => {
-      if (!Logger.enabled) return;
-      if (!(elem instanceof HTMLElement && elem.hasAttribute("debug"))) return;
-      if ([LogLevel.DEBUG].includes(Logger.logLevel))
-        console.debug("[HTMLeX DEBUG]", msg, ...args);
+    debug: (element, message, ...args) => {
+      if (shouldLogElement(element, [LogLevel.DEBUG])) {
+        console.debug('[HTMLeX DEBUG]', message, ...args);
+      }
     },
-    info: (elem, msg, ...args) => {
-      if (!Logger.enabled) return;
-      if (!(elem instanceof HTMLElement && elem.hasAttribute("debug"))) return;
-      if ([LogLevel.DEBUG, LogLevel.INFO].includes(Logger.logLevel))
-        console.info("[HTMLeX INFO]", msg, ...args);
+    info: (element, message, ...args) => {
+      if (shouldLogElement(element, [LogLevel.DEBUG, LogLevel.INFO])) {
+        console.info('[HTMLeX INFO]', message, ...args);
+      }
     },
-    warn: (elem, msg, ...args) => {
-      if (!Logger.enabled) return;
-      if (!(elem instanceof HTMLElement && elem.hasAttribute("debug"))) return;
-      if ([LogLevel.DEBUG, LogLevel.INFO, LogLevel.WARN].includes(Logger.logLevel))
-        console.warn("[HTMLeX WARN]", msg, ...args);
+    warn: (element, message, ...args) => {
+      if (shouldLogElement(element, [LogLevel.DEBUG, LogLevel.INFO, LogLevel.WARN])) {
+        console.warn('[HTMLeX WARN]', message, ...args);
+      }
     },
-    error: (elem, msg, ...args) => {
-      if (!Logger.enabled) return;
-      if (!(elem instanceof HTMLElement && elem.hasAttribute("debug"))) return;
-      console.error("[HTMLeX ERROR]", msg, ...args);
+    error: (element, message, ...args) => {
+      if (Logger.enabled && element instanceof HTMLElement && element.hasAttribute('debug')) {
+        console.error('[HTMLeX ERROR]', message, ...args);
+      }
     }
   }
 };

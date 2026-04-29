@@ -52,17 +52,20 @@ export function setCache(key, response, ttl) {
  */
 export function getCache(key) {
   pruneCache();
-  if (cacheStore.has(key)) {
-    const { response, expireAt } = cacheStore.get(key);
-    if (Date.now() < expireAt) {
-      Logger.system.debug("[CACHE] Cache hit for key:", key);
-      return response;
-    } else {
-      Logger.system.warn("[CACHE] Cache expired for key:", key, "Deleting entry.");
-      cacheStore.delete(key);
-    }
-  } else {
+
+  const entry = cacheStore.get(key);
+  if (!entry) {
     Logger.system.debug("[CACHE] Cache miss for key:", key);
+    return null;
   }
+
+  const { response, expireAt } = entry;
+  if (Date.now() < expireAt) {
+    Logger.system.debug("[CACHE] Cache hit for key:", key);
+    return response;
+  }
+
+  Logger.system.warn("[CACHE] Cache expired for key:", key, "Deleting entry.");
+  cacheStore.delete(key);
   return null;
 }

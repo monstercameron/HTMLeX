@@ -1,12 +1,12 @@
 /**
  * @module Actions
- * @description Handles API calls, lifecycle hooks, polling (via a Web Worker), and response processing.
+ * @description Handles API calls, lifecycle hooks, request side effects, and response processing.
  */
 
 import { Logger } from './logger.js';
 import { getCache, setCache } from './cache.js';
 import { scheduleUpdate, isSequential } from './utils.js';
-import { parseTargets, querySelectorSafe, updateTarget } from './dom.js';
+import { parseTargets, querySelectorAllResult, querySelectorSafe, updateTarget } from './dom.js';
 import { fetchWithTimeout } from './fetchHelper.js';
 import { handleURLState } from './urlState.js';
 import { processFragmentBuffer } from './fragments.js';
@@ -31,19 +31,35 @@ function scheduleTargetUpdate(element, target, content, sequentialEntry = null, 
   scheduleUpdate(updateFn, isSequential(element));
 }
 
+function isSelfTarget(target) {
+  return String(target?.selector ?? '').trim().toLowerCase() === 'this';
+}
+
+function resolveTargetElement(target, fallbackElement) {
+  if (isSelfTarget(target)) {
+    return fallbackElement;
+  }
+
+  return querySelectorSafe(target.selector) || fallbackElement;
+}
+
+function resolveSelfTargetElement(target, fallbackElement) {
+  return isSelfTarget(target) ? fallbackElement : null;
+}
+
 function appendControlValue(formData, control) {
   if (!control.name || control.disabled) return;
   if ((control.type === 'checkbox' || control.type === 'radio') && !control.checked) return;
   if (control instanceof HTMLSelectElement && control.multiple) {
-    Array.from(control.selectedOptions).forEach(option => {
+    for (const option of control.selectedOptions) {
       formData.append(control.name, option.value);
-    });
+    }
     return;
   }
   if (control instanceof HTMLInputElement && control.type === 'file') {
-    Array.from(control.files || []).forEach(file => {
+    for (const file of control.files || []) {
       formData.append(control.name, file);
-    });
+    }
     return;
   }
   formData.append(control.name, control.value);
@@ -51,7 +67,9 @@ function appendControlValue(formData, control) {
 
 function appendElementValues(formData, element) {
   if (element.tagName.toLowerCase() === 'form') {
-    new FormData(element).forEach((value, key) => formData.append(key, value));
+    for (const [key, value] of new FormData(element)) {
+      formData.append(key, value);
+    }
     return;
   }
 
@@ -59,53 +77,39 @@ function appendElementValues(formData, element) {
     appendControlValue(formData, element);
   }
 
-  element.querySelectorAll('input, select, textarea').forEach(input => {
+  for (const input of element.querySelectorAll('input, select, textarea')) {
     appendControlValue(formData, input);
-  });
+  }
 }
 
-function resolveSourceElements(sourceAttr) {
-  const raw = String(sourceAttr ?? '').trim();
-  if (!raw) return [];
+const collectSelectorResults = selectors => (
+  selectors.map(selector => querySelectorAllResult(selector))
+);
 
-  const selectors = raw.includes(',')
-    ? raw.split(',').map(selector => selector.trim()).filter(Boolean)
-    : [raw];
-  const results = selectors.map(selector => {
-    try {
-      return {
-        valid: true,
-        matches: Array.from(document.querySelectorAll(selector))
-      };
-    } catch (error) {
-      Logger.system.warn(`[DOM] Invalid selector "${selector}"`, error);
-      return { valid: false, matches: [] };
-    }
-  });
-  const directMatches = results.flatMap(result => result.matches);
-  if (directMatches.length || raw.includes(',') || results.every(result => result.valid)) {
-    return directMatches;
+const flattenSelectorMatches = results => results.flatMap(({ matches }) => matches);
+
+function resolveSourceElements(sourceAttribute) {
+  const sourceExpression = String(sourceAttribute ?? '').trim();
+  if (!sourceExpression) return [];
+
+  const selectors = sourceExpression.includes(',')
+    ? sourceExpression.split(',').map(selector => selector.trim()).filter(Boolean)
+    : [sourceExpression];
+  const results = collectSelectorResults(selectors);
+  const matchedElements = flattenSelectorMatches(results);
+
+  if (matchedElements.length || sourceExpression.includes(',') || results.every(result => result.valid)) {
+    return matchedElements;
   }
 
-  const fallbackResults = raw.split(/\s+/).filter(Boolean).map(selector => {
-    try {
-      return {
-        valid: true,
-        matches: Array.from(document.querySelectorAll(selector))
-      };
-    } catch (error) {
-      Logger.system.warn(`[DOM] Invalid selector "${selector}"`, error);
-      return { valid: false, matches: [] };
-    }
-  });
-  if (!fallbackResults.every(result => result.valid)) {
-    return [];
-  }
-  return fallbackResults.flatMap(result => result.matches);
+  const fallbackResults = collectSelectorResults(sourceExpression.split(/\s+/).filter(Boolean));
+  return fallbackResults.every(result => result.valid)
+    ? flattenSelectorMatches(fallbackResults)
+    : [];
 }
 
-function appendExtras(formData, extrasAttr) {
-  String(extrasAttr ?? '').split(/\s+/).filter(Boolean).forEach(pair => {
+function appendExtras(formData, extrasAttribute) {
+  for (const pair of String(extrasAttribute ?? '').split(/\s+/).filter(Boolean)) {
     const separatorIndex = pair.indexOf('=');
     const key = separatorIndex >= 0 ? pair.slice(0, separatorIndex) : pair;
     const value = separatorIndex >= 0 ? pair.slice(separatorIndex + 1) : '';
@@ -113,7 +117,7 @@ function appendExtras(formData, extrasAttr) {
     if (key) {
       formData.append(key, value);
     }
-  });
+  }
 }
 
 function serializeFormDataValue(value) {
@@ -134,7 +138,7 @@ function buildCacheKey(method, url, formData) {
     return `${method} ${url}`;
   }
 
-  const entries = Array.from(formData.entries()).map(([key, value]) => [
+  const entries = [...formData.entries()].map(([key, value]) => [
     key,
     serializeFormDataValue(value)
   ]);
@@ -153,7 +157,7 @@ function runHook(element, hookName, event = null) {
   if (!element.hasAttribute(hookName)) return;
   try {
     Logger.system.debug(`Executing ${hookName} hook.`);
-    new Function("event", element.getAttribute(hookName))(event);
+    new Function('event', element.getAttribute(hookName))(event);
   } catch (error) {
     Logger.system.error(`Error in ${hookName} hook:`, error);
   }
@@ -203,20 +207,15 @@ function createSwapLifecycle(element, afterSwapComplete = null, event = null) {
 function replayResponseText(element, responseText, sequentialEntry = null, afterSwapComplete = null, event = null, requestId = null) {
   resetResponseState(element);
   const swapLifecycle = createSwapLifecycle(element, afterSwapComplete, event);
-  const leftover = processFragmentBuffer(responseText, element, sequentialEntry, swapLifecycle);
+  const remainingContent = processFragmentBuffer(responseText, element, sequentialEntry, swapLifecycle);
 
-  if (!element._htmlexFragmentsProcessed && leftover.trim() !== "" && element.hasAttribute("target")) {
-    const targets = parseTargets(element.getAttribute("target"));
-    targets.forEach(target => {
-      let resolvedElement;
-      if (target.selector.trim().toLowerCase() === "this") {
-        resolvedElement = element;
-      } else {
-        resolvedElement = querySelectorSafe(target.selector) || element;
-      }
+  if (!element._htmlexFragmentsProcessed && remainingContent.trim() !== '' && element.hasAttribute('target')) {
+    const targets = parseTargets(element.getAttribute('target'));
+    for (const target of targets) {
+      const resolvedElement = resolveTargetElement(target, element);
       const afterSwap = swapLifecycle?.createUpdateCallback();
-      scheduleTargetUpdate(element, target, leftover, sequentialEntry, resolvedElement, afterSwap, requestId);
-    });
+      scheduleTargetUpdate(element, target, remainingContent, sequentialEntry, resolvedElement, afterSwap, requestId);
+    }
     element._htmlexFallbackUpdated = true;
   }
 
@@ -247,22 +246,22 @@ function emitSignalWithDelay(element, signalName, delay, context) {
 function emitHeaderSignal(element, response) {
   if (!response?.headers) return;
 
-  const emitHeader = response.headers.get('Emit');
-  if (!emitHeader) return;
+  const headerValue = response.headers.get('Emit');
+  if (!headerValue) return;
 
-  Logger.system.info(`Received Emit header: ${emitHeader}`);
-  const parts = emitHeader.split(';').map(part => part.trim()).filter(Boolean);
-  const emitSignalName = parts[0] || '';
-  let emitDelay = 0;
+  Logger.system.info(`Received Emit header: ${headerValue}`);
+  const headerParts = headerValue.split(';').map(part => part.trim()).filter(Boolean);
+  const signalName = headerParts[0] || '';
+  let delayMs = 0;
 
-  parts.slice(1).forEach(param => {
+  for (const param of headerParts.slice(1)) {
     if (param.startsWith('delay=')) {
       const parsedDelay = parseInt(param.split('=')[1], 10);
-      emitDelay = Number.isFinite(parsedDelay) && parsedDelay > 0 ? parsedDelay : 0;
+      delayMs = Number.isFinite(parsedDelay) && parsedDelay > 0 ? parsedDelay : 0;
     }
-  });
+  }
 
-  emitSignalWithDelay(element, emitSignalName, emitDelay, 'Emit header');
+  emitSignalWithDelay(element, signalName, delayMs, 'Emit header');
 }
 
 function emitPublishSignal(element) {
@@ -304,95 +303,70 @@ function runSuccessSideEffects(element, response = null) {
  */
 export async function processResponse(response, triggeringElement, sequentialEntry = null, afterSwapComplete = null, event = null, requestId = null) {
   Logger.system.debug("Starting to process response stream.");
-  
-  if (triggeringElement.hasAttribute("target")) {
-    Logger.system.debug("Triggering element target attribute:", triggeringElement.getAttribute("target"));
-  } else {
-    Logger.system.debug("Triggering element has no target attribute; will default to itself if needed.");
-  }
-  
-  // Initialize chunk counter.
+
   let chunkCount = 0;
   triggeringElement._htmlexFragmentsProcessed = false;
   triggeringElement._htmlexFallbackUpdated = false;
   triggeringElement._htmlexDefaultUpdated = false;
-  // Mark the element as streaming-active.
   triggeringElement._htmlexStreamingActive = true;
-  // Initially assume not streaming.
   triggeringElement._htmlexStreaming = false;
 
   if (!response.body) {
     triggeringElement._htmlexStreamingActive = false;
     triggeringElement._htmlexStreaming = false;
-    return "";
+    return '';
   }
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
-  let buffer = "";
-  let responseText = "";
+  let fragmentBuffer = '';
+  let responseText = '';
   const swapLifecycle = createSwapLifecycle(triggeringElement, afterSwapComplete, event);
 
   try {
     while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      Logger.system.debug("Stream reading complete.");
-      break;
-    }
-    chunkCount++;
-    // Mark as streaming if more than one chunk is received.
-    if (chunkCount > 1) {
-      triggeringElement._htmlexStreaming = true;
-    }
-    const chunk = decoder.decode(value, { stream: true });
-    responseText += chunk;
-    Logger.system.debug(`Received chunk #${chunkCount}:`, chunk);
-    buffer += chunk;
-    Logger.system.debug("Buffer before fragment processing (length):", buffer.length);
-    // Process complete fragment blocks.
-    buffer = processFragmentBuffer(buffer, triggeringElement, sequentialEntry, swapLifecycle);
-    Logger.system.debug("Buffer after fragment processing (length):", buffer.length);
-  }
+      const { done, value } = await reader.read();
+      if (done) {
+        Logger.system.debug("Stream reading complete.");
+        break;
+      }
 
-  // Final flush: process any remaining complete fragments.
-  const finalChunk = decoder.decode();
-  responseText += finalChunk;
-  Logger.system.debug("Final chunk after stream complete:", finalChunk);
-  buffer += finalChunk;
-  buffer = processFragmentBuffer(buffer, triggeringElement, sequentialEntry, swapLifecycle);
-  Logger.system.debug("Final buffer after processing (length):", buffer.length);
+      chunkCount += 1;
+      triggeringElement._htmlexStreaming = chunkCount > 1;
 
-  // Fallback update: if no fragments were processed and leftover text exists.
-  if (!triggeringElement._htmlexFragmentsProcessed && buffer.trim() !== "") {
-    Logger.system.debug("No fragments processed; performing fallback update with leftover text.");
-    if (triggeringElement.hasAttribute("target")) {
-      const targets = parseTargets(triggeringElement.getAttribute("target"));
-      targets.forEach(target => {
-        let resolvedElement;
-        if (target.selector.trim().toLowerCase() === "this") {
-          resolvedElement = triggeringElement;
-          Logger.system.debug("Fallback: target selector is 'this'; using triggering element.");
-        } else {
-          resolvedElement = querySelectorSafe(target.selector);
-          if (!resolvedElement) {
-            Logger.system.debug(`Fallback: No element found for selector "${target.selector}". Using triggering element.`);
-            resolvedElement = triggeringElement;
-          }
+      const chunk = decoder.decode(value, { stream: true });
+      responseText += chunk;
+      fragmentBuffer = processFragmentBuffer(fragmentBuffer + chunk, triggeringElement, sequentialEntry, swapLifecycle);
+      Logger.system.debug(`Processed chunk #${chunkCount}. Remaining buffer length:`, fragmentBuffer.length);
+    }
+
+    const finalChunk = decoder.decode();
+    if (finalChunk) {
+      responseText += finalChunk;
+      fragmentBuffer = processFragmentBuffer(fragmentBuffer + finalChunk, triggeringElement, sequentialEntry, swapLifecycle);
+    }
+
+    if (!triggeringElement._htmlexFragmentsProcessed && fragmentBuffer.trim() !== '' && triggeringElement.hasAttribute('target')) {
+      Logger.system.debug("No fragments processed; performing fallback update with leftover text.");
+      const targets = parseTargets(triggeringElement.getAttribute('target'));
+      for (const target of targets) {
+        const resolvedElement = resolveTargetElement(target, triggeringElement);
+
+        if (resolvedElement === triggeringElement && !isSelfTarget(target)) {
+          Logger.system.debug(`Fallback: No element found for selector "${target.selector}". Using triggering element.`);
         }
+
         Logger.system.debug("Applying fallback update to target:", target, "resolved as:", resolvedElement);
         const afterSwap = swapLifecycle?.createUpdateCallback();
-        scheduleTargetUpdate(triggeringElement, target, buffer, sequentialEntry, resolvedElement, afterSwap, requestId);
-      });
+        scheduleTargetUpdate(triggeringElement, target, fragmentBuffer, sequentialEntry, resolvedElement, afterSwap, requestId);
+      }
       triggeringElement._htmlexFallbackUpdated = true;
     }
-  }
 
-  swapLifecycle?.finishScheduling();
-    Logger.system.debug("Completed processing response stream. Final leftover buffer:", buffer);
+    swapLifecycle?.finishScheduling();
+    Logger.system.debug("Completed processing response stream. Final leftover buffer:", fragmentBuffer);
     return responseText;
   } finally {
-    // Clear streaming state even when the stream errors or is aborted mid-read.
     triggeringElement._htmlexStreamingActive = false;
     triggeringElement._htmlexStreaming = false;
   }
@@ -401,9 +375,6 @@ export async function processResponse(response, triggeringElement, sequentialEnt
 /**
  * Handles an API action including lifecycle hooks, extras, caching,
  * URL state updates, publish signal emission, and polling.
- *
- * Now accepts an extraOptions parameter (defaulting to an empty object)
- * that is merged into the fetch options. This lets the AbortController signal be passed in.
  *
  * @param {Element} element - The element triggering the action.
  * @param {string} method - The HTTP method (e.g., "GET", "POST").
@@ -445,9 +416,9 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
   appendElementValues(formData, element);
 
   if (element.hasAttribute('source')) {
-    resolveSourceElements(element.getAttribute('source')).forEach(sourceElement => {
+    for (const sourceElement of resolveSourceElements(element.getAttribute('source'))) {
       appendElementValues(formData, sourceElement);
-    });
+    }
   }
 
   // Process extras (inline parameters)
@@ -458,19 +429,19 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
   // If a loading state is desired, update the loading target immediately.
   if (element.hasAttribute('loading')) {
     const loadingTargets = parseTargets(element.getAttribute('loading'));
-    loadingTargets.forEach(target => {
+    for (const target of loadingTargets) {
       Logger.system.debug("Updating loading target:", target);
       scheduleUpdate(() => {
         if (element._htmlexRequestId === requestId && element._htmlexRequestPending) {
-          const resolvedElement = target.selector.trim().toLowerCase() === 'this' ? element : null;
+          const resolvedElement = resolveSelfTargetElement(target, element);
           updateTarget(target, '<div class="loading">Loading...</div>', resolvedElement);
         }
       }, isSequential(element));
-    });
+    }
   }
 
   // Merge caller-provided fetch options into our request options.
-  const options = { method, ...fetchOptions };
+  const requestOptions = { method, ...fetchOptions };
   let url = endpoint;
   if (method === 'GET') {
     const params = new URLSearchParams(formData).toString();
@@ -479,7 +450,7 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
     }
     Logger.system.debug("GET request URL with params:", url);
   } else {
-    options.body = formData;
+    requestOptions.body = formData;
     Logger.system.debug("Non-GET request, using FormData body.");
   }
   const cacheKey = buildCacheKey(method, url, formData);
@@ -510,7 +481,7 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
   for (let attempt = 0; attempt <= retryCount; attempt++) {
     try {
       Logger.system.debug(`Attempt ${attempt + 1}: Fetching URL ${url}`);
-      response = await fetchWithTimeout(url, options, timeoutMs);
+      response = await fetchWithTimeout(url, requestOptions, timeoutMs);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status} ${response.statusText}`.trim());
       }
@@ -533,8 +504,8 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
         completeCurrentRequest();
         if (element.hasAttribute('onerror')) {
           const errorTargets = parseTargets(element.getAttribute('onerror'));
-          errorTargets.forEach(target => {
-            const resolvedElement = target.selector.trim().toLowerCase() === 'this' ? element : null;
+          for (const target of errorTargets) {
+            const resolvedElement = resolveSelfTargetElement(target, element);
             Logger.system.debug("Updating error target after failure:", target);
             scheduleTargetUpdate(
               element,
@@ -545,7 +516,7 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
               null,
               requestId
             );
-          });
+          }
         }
         return;
       }
@@ -556,31 +527,26 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
   if (element.hasAttribute('target') && !element._htmlexFragmentsProcessed && !element._htmlexFallbackUpdated && responseText) {
     const swapLifecycle = createSwapLifecycle(element, runAfterHook, htmlexEvent);
     const targets = parseTargets(element.getAttribute('target'));
-    targets.forEach(target => {
-      let resolvedElement;
-      if (target.selector.trim().toLowerCase() === "this") {
-        resolvedElement = element;
+    for (const target of targets) {
+      const resolvedElement = resolveTargetElement(target, element);
+      if (isSelfTarget(target)) {
         Logger.system.debug("Fallback: target selector is 'this'; using triggering element.");
-      } else {
-        resolvedElement = querySelectorSafe(target.selector);
-        if (!resolvedElement) {
-          Logger.system.debug(`No element found for selector "${target.selector}". Falling back to triggering element.`);
-          resolvedElement = element;
-        }
+      } else if (resolvedElement === element) {
+        Logger.system.debug(`No element found for selector "${target.selector}". Falling back to triggering element.`);
       }
       Logger.system.debug("Fallback updating target:", target, "resolved as:", resolvedElement);
       const afterSwap = swapLifecycle?.createUpdateCallback();
       scheduleTargetUpdate(element, target, responseText, htmlexSequentialEntry, resolvedElement, afterSwap, requestId);
-    });
+    }
     swapLifecycle?.finishScheduling();
   }
 
   runSuccessSideEffects(element, response);
 
   if (element.hasAttribute('cache')) {
-    const cacheTTL = parseInt(element.getAttribute('cache'), 10);
-    setCache(cacheKey, responseText, cacheTTL);
-    Logger.system.debug("Response cached with TTL:", cacheTTL);
+    const cacheTtl = parseInt(element.getAttribute('cache'), 10);
+    setCache(cacheKey, responseText, cacheTtl);
+    Logger.system.debug("Response cached with TTL:", cacheTtl);
   }
 
   if (!element._htmlexOnAfterDeferred) {

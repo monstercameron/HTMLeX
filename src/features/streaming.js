@@ -11,16 +11,39 @@ import { render, div, span } from '../components/HTMLeX.js';
 import {
   renderLoadingMessage,
   renderNotificationMessage,
-  renderCounter, NotificationsDemo,
-  ClickCounterWidget, multiFragmentDemo,
-  SSESubscribersDemo, SignalChainingDemo,
-  ChatInterfaceDemo, WebSocketUpdatesDemo, loadingStateDemo,
-  SequentialDemo, InfiniteScrollDemo, PollingDemo, HoverTriggerDemo
+  renderCounter,
+  NotificationsDemo,
+  ClickCounterWidget,
+  multiFragmentDemo,
+  SSESubscribersDemo,
+  SignalChainingDemo,
+  ChatInterfaceDemo,
+  WebSocketUpdatesDemo,
+  loadingStateDemo,
+  SequentialDemo,
+  InfiniteScrollDemo,
+  PollingDemo,
+  HoverTriggerDemo,
 } from '../components/Components.js';
-import { renderFragment } from "../components/HTMLeX.js"
+import {
+  endResponse,
+  endServerError,
+  sendFragmentResponse,
+  sendServerError,
+  writeFragmentResponse,
+} from './responses.js';
 
 function responseDelay(ms) {
   return process.env.HTMLEX_TEST_FAST === '1' ? Math.min(ms, 25) : ms;
+}
+
+function renderLoadMoreItems(count = 5) {
+  let itemsHtml = '';
+  const baseTimestamp = Date.now();
+  for (let index = 0; index < count; index += 1) {
+    itemsHtml += render(div({ class: 'surface-muted p-3 small' }, `Item ${baseTimestamp + index}`));
+  }
+  return itemsHtml;
 }
 
 /**
@@ -28,12 +51,6 @@ function responseDelay(ms) {
  * @type {number}
  */
 let clickerCounter = 0;
-
-/**
- * Module-level value for sequential polling.
- * @type {number}
- */
-let pollVal = 0;
 
 /**
  * Handles the '/items/loadMore' endpoint.
@@ -44,35 +61,28 @@ let pollVal = 0;
  * @returns {Promise<void>}
  */
 export async function loadMoreItems(req, res) {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   try {
-    res.write(renderFragment('#infiniteList(append)', renderLoadingMessage("Loading more items...")));
+    writeFragmentResponse(res, '#infiniteList(append)', renderLoadingMessage('Loading more items...'));
     setTimeout(() => {
       try {
-        let itemsHtml = "";
-        for (let i = 0; i < 5; i++) {
-          itemsHtml += render(div({ class: 'surface-muted p-3 small' }, `Item ${Date.now() + i}`));
-        }
-        res.write(renderFragment('#infiniteList(append)', itemsHtml));
-      } catch (innerErr) {
-        console.error('Error while writing items in loadMoreItems:', innerErr);
+        writeFragmentResponse(res, '#infiniteList(append)', renderLoadMoreItems());
+      } catch (writeError) {
+        console.error('Error while writing items in loadMoreItems:', writeError);
       }
-      res.end();
+      endResponse(res);
     }, responseDelay(2000));
-  } catch (err) {
-    console.error('Error in loadMoreItems:', err);
-    if (!res.headersSent) res.status(500).end();
-    else res.end();
+  } catch (error) {
+    console.error('Error in loadMoreItems:', error);
+    endServerError(res);
   }
 }
 
 export async function infiniteScrollDemoInit(req, res) {
   try {
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment('#demoCanvas(innerHTML)', InfiniteScrollDemo()));
-  } catch (err) {
-    console.error('Error in infiniteScrollDemoInit:', err);
-    if (!res.headersSent) res.status(500).send('Internal server error');
+    sendFragmentResponse(res, '#demoCanvas(innerHTML)', InfiniteScrollDemo());
+  } catch (error) {
+    console.error('Error in infiniteScrollDemoInit:', error);
+    sendServerError(res);
   }
 }
 
@@ -90,18 +100,12 @@ export async function infiniteScrollDemoInit(req, res) {
  * @returns {Promise<void>} Resolves when the response has been fully sent.
  */
 export async function notificationsDemoInit(req, res) {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   try {
-    // Write the final notification fragment immediately.
-    res.write(renderFragment('#demoCanvas(innerHTML)', render(NotificationsDemo())));
-    res.end();
-  } catch (err) {
-    console.error('Error in notificationsDemoInit:', err);
-    if (!res.headersSent) {
-      res.status(500).end();
-    } else {
-      res.end();
-    }
+    writeFragmentResponse(res, '#demoCanvas(innerHTML)', render(NotificationsDemo()));
+    endResponse(res);
+  } catch (error) {
+    console.error('Error in notificationsDemoInit:', error);
+    endServerError(res);
   }
 }
 
@@ -120,39 +124,29 @@ export async function notificationsDemoInit(req, res) {
  * @returns {Promise<void>} Resolves when the entire response has been sent.
  */
 export async function fetchNotification(req, res) {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   try {
-    // Write a loading message fragment immediately.
-    res.write(
-      renderFragment(
-        '#notificationArea(innerHTML)',
-        renderLoadingMessage("Fetching notification in 2500ms...")
-      )
+    writeFragmentResponse(
+      res,
+      '#notificationArea(innerHTML)',
+      renderLoadingMessage('Fetching notification in 2500ms...')
     );
-    // After 2500ms, write the final notification fragment and then close the response.
     setTimeout(() => {
       try {
-        res.write(
-          renderFragment(
-            '#notificationArea(innerHTML)',
-            renderNotificationMessage("You have a new notification! It will disappear in 5000ms"),
-            { timer: "5000" }
-          )
+        writeFragmentResponse(
+          res,
+          '#notificationArea(innerHTML)',
+          renderNotificationMessage('You have a new notification! It will disappear in 5000ms'),
+          { timer: '5000' }
         );
-      } catch (innerErr) {
-        console.error('Error while writing notification in fetchNotification:', innerErr);
+      } catch (writeError) {
+        console.error('Error while writing notification in fetchNotification:', writeError);
       } finally {
-        // Ensure the response is closed regardless of errors.
-        res.end();
+        endResponse(res);
       }
     }, responseDelay(2500));
-  } catch (err) {
-    console.error('Error in fetchNotification:', err);
-    if (!res.headersSent) {
-      res.status(500).end();
-    } else {
-      res.end();
-    }
+  } catch (error) {
+    console.error('Error in fetchNotification:', error);
+    endServerError(res);
   }
 }
 
@@ -165,11 +159,10 @@ export async function fetchNotification(req, res) {
  */
 export async function incrementCounterDemoInit(req, res) {
   try {
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment('#demoCanvas(innerHTML)', ClickCounterWidget()));
-  } catch (err) {
-    console.error('Error in incrementCounter:', err);
-    if (!res.headersSent) res.status(500).send('Internal server error');
+    sendFragmentResponse(res, '#demoCanvas(innerHTML)', ClickCounterWidget());
+  } catch (error) {
+    console.error('Error in incrementCounter:', error);
+    sendServerError(res);
   }
 }
 
@@ -183,11 +176,10 @@ export async function incrementCounterDemoInit(req, res) {
 export async function incrementCounter(req, res) {
   try {
     clickerCounter++;
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment('#counterDisplay(innerHTML)', renderCounter(clickerCounter)));
-  } catch (err) {
-    console.error('Error in incrementCounter:', err);
-    if (!res.headersSent) res.status(500).send('Internal server error');
+    sendFragmentResponse(res, '#counterDisplay(innerHTML)', renderCounter(clickerCounter));
+  } catch (error) {
+    console.error('Error in incrementCounter:', error);
+    sendServerError(res);
   }
 }
 
@@ -206,19 +198,12 @@ export async function incrementCounter(req, res) {
  * @returns {Promise<void>} A promise that resolves when the response has been completely sent.
  */
 export async function multiFragmentDemoInit(req, res) {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   try {
-    // Write the HTML fragment to update the target element.
-    res.write(renderFragment("#demoCanvas(innerHTML)", render(multiFragmentDemo())));
-    // End the response to finalize the transmission.
-    res.end();
-  } catch (err) {
-    console.error('Error in multiFragmentDemoInit:', err);
-    if (!res.headersSent) {
-      res.status(500).send('Internal server error');
-    } else {
-      res.end();
-    }
+    writeFragmentResponse(res, '#demoCanvas(innerHTML)', render(multiFragmentDemo()));
+    endResponse(res);
+  } catch (error) {
+    console.error('Error in multiFragmentDemoInit:', error);
+    endServerError(res);
   }
 }
 
@@ -231,20 +216,27 @@ export async function multiFragmentDemoInit(req, res) {
  * @returns {Promise<void>}
  */
 export async function multiFragment(req, res) {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   try {
-    const fragment1 = renderFragment(
+    const primaryContent = render(
+      div({ class: 'surface p-3 small' }, 'Primary Content Loaded')
+    );
+    const appendContent = render(
+      div({ class: 'surface-muted mt-2 p-3 small' }, 'Additional Content Appended')
+    );
+    writeFragmentResponse(
+      res,
       '#multiUpdate1(innerHTML)',
-      render(div({ class: 'surface p-3 small' }, 'Primary Content Loaded'))
+      primaryContent
     );
-    const fragment2 = renderFragment(
+    writeFragmentResponse(
+      res,
       '#multiUpdate2(append)',
-      render(div({ class: 'surface-muted mt-2 p-3 small' }, 'Additional Content Appended'))
+      appendContent
     );
-    res.send(fragment1 + fragment2);
-  } catch (err) {
-    console.error('Error in multiFragment:', err);
-    if (!res.headersSent) res.status(500).send('Internal server error');
+    endResponse(res);
+  } catch (error) {
+    console.error('Error in multiFragment:', error);
+    endServerError(res);
   }
 }
 
@@ -262,16 +254,13 @@ export async function multiFragment(req, res) {
  * @returns {Promise<void>} A promise that resolves when the response has been fully sent.
  */
 export async function sequentialDemoInit(req, res) {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   try {
-    res.write(renderFragment("#demoCanvas(innerHTML)", SequentialDemo()));
-  } catch (err) {
-    console.error('Error in sequentialDemoInit:', err);
-    if (!res.headersSent) {
-      res.status(500).send('Internal server error');
-    }
+    writeFragmentResponse(res, '#demoCanvas(innerHTML)', SequentialDemo());
+  } catch (error) {
+    console.error('Error in sequentialDemoInit:', error);
+    endServerError(res);
   } finally {
-    res.end();
+    endResponse(res);
   }
 }
 
@@ -285,20 +274,19 @@ export async function sequentialDemoInit(req, res) {
  * @returns {Promise<void>}
  */
 export async function sequentialNext(req, res) {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   try {
     await new Promise(resolve => setTimeout(resolve, responseDelay(1000)));
     const timestamp = new Date().toISOString();
     const contentNode = div({}, timestamp);
     const htmlContent = render(contentNode);
-    res.write(renderFragment('#sequentialOutput(append)', htmlContent));
-  } catch (err) {
-    console.error('Error in sequentialNext:', err);
+    writeFragmentResponse(res, '#sequentialOutput(append)', htmlContent);
+  } catch (error) {
+    console.error('Error in sequentialNext:', error);
     if (!res.headersSent) {
       res.status(500).write('Internal server error');
     }
   } finally {
-    res.end();
+    endResponse(res);
   }
 }
 
@@ -316,14 +304,11 @@ export async function sequentialNext(req, res) {
 function processStep(step, res) {
   setTimeout(() => {
     try {
-      res.setHeader('Content-Type', 'text/html; charset=utf-8');
       const message = `Step ${step}: Data received at ${new Date().toLocaleTimeString()}`;
-      res.send(renderFragment(`#chainOutput(${step === 1 ? "innerHTML" : "append"})`, render(div({}, message))));
-    } catch (err) {
-      console.error(`Error in processStep${step}:`, err);
-      if (!res.headersSent) {
-        res.status(500).send('Internal server error');
-      }
+      sendFragmentResponse(res, `#chainOutput(${step === 1 ? 'innerHTML' : 'append'})`, render(div({}, message)));
+    } catch (error) {
+      console.error(`Error in processStep${step}:`, error);
+      sendServerError(res);
     }
   }, responseDelay(1000));
 }
@@ -340,19 +325,12 @@ function processStep(step, res) {
  * @param {import('express').Response} res - The Express response object.
  */
 export function processInit(req, res) {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   try {
-    // Write the HTML fragment to update the "#demoCanvas" element.
-    res.write(renderFragment("#demoCanvas(innerHTML)", render(SignalChainingDemo())));
-    // End the response to finalize the transmission.
-    res.end();
-  } catch (err) {
-    console.error('Error in processInit:', err);
-    if (!res.headersSent) {
-      res.status(500).send('Internal server error');
-    } else {
-      res.end();
-    }
+    writeFragmentResponse(res, '#demoCanvas(innerHTML)', render(SignalChainingDemo()));
+    endResponse(res);
+  } catch (error) {
+    console.error('Error in processInit:', error);
+    endServerError(res);
   }
 }
 
@@ -399,7 +377,6 @@ export function processStep4(req, res) {
  */
 export function processStep5(req, res) {
   processStep(5, res);
-
 }
 
 /**
@@ -416,17 +393,12 @@ export function processStep5(req, res) {
  * @returns {Promise<void>} A promise that resolves when the response has been fully sent.
  */
 export async function demoInit(req, res) {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   try {
-    res.write(renderFragment("#demoCanvas(innerHTML)", render(loadingStateDemo())));
-    res.end();
-  } catch (err) {
-    console.error('Error in demoInit:', err);
-    if (!res.headersSent) {
-      res.status(500).end();
-    } else {
-      res.end();
-    }
+    writeFragmentResponse(res, '#demoCanvas(innerHTML)', render(loadingStateDemo()));
+    endResponse(res);
+  } catch (error) {
+    console.error('Error in demoInit:', error);
+    endServerError(res);
   }
 }
 
@@ -444,36 +416,30 @@ export async function demoInit(req, res) {
  * @returns {Promise<void>} Resolves when the response has been fully sent.
  */
 export async function demoLoading(req, res) {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   try {
-    // Create a virtual node for the loading state.
     const loadingNode = div(
       {},
       span({ class: 'spinner' }),
       'Loading, wait 5000ms'
     );
 
-    // Write the loading fragment.
-    res.write(renderFragment('#loadingDemoOutput(innerHTML)', render(loadingNode)));
+    writeFragmentResponse(res, '#loadingDemoOutput(innerHTML)', render(loadingNode));
 
     setTimeout(() => {
       try {
-        // Create a virtual node for the final payload.
         const payloadNode = div(
           { class: 'alert alert-info mb-0' },
           'Payload received after 5000ms'
         );
-        // Write the payload fragment.
-        res.write(renderFragment('#loadingDemoOutput(innerHTML)', render(payloadNode)));
-      } catch (innerErr) {
-        console.error('Error writing demo loading payload:', innerErr);
+        writeFragmentResponse(res, '#loadingDemoOutput(innerHTML)', render(payloadNode));
+      } catch (writeError) {
+        console.error('Error writing demo loading payload:', writeError);
       }
-      res.end();
+      endResponse(res);
     }, responseDelay(5000));
-  } catch (err) {
-    console.error('Error in demoLoading:', err);
-    if (!res.headersSent) res.status(500).end();
-    else res.end();
+  } catch (error) {
+    console.error('Error in demoLoading:', error);
+    endServerError(res);
   }
 }
 
@@ -492,13 +458,11 @@ export async function demoLoading(req, res) {
  */
 export async function sseDemoInit(req, res) {
   try {
-    res.write(renderFragment("#demoCanvas(innerHTML)", render(SSESubscribersDemo())));
-    res.end();
-  } catch (err) {
-    console.error('Error in sseDemoInit:', err);
-    if (!res.headersSent) {
-      res.status(500).send('');
-    }
+    writeFragmentResponse(res, '#demoCanvas(innerHTML)', render(SSESubscribersDemo()));
+    endResponse(res);
+  } catch (error) {
+    console.error('Error in sseDemoInit:', error);
+    endServerError(res);
   }
 }
 
@@ -514,9 +478,9 @@ export async function sseSubscribe(req, res) {
   try {
     res.setHeader('Emit', 'sseUpdate');
     res.send('');
-  } catch (err) {
-    console.error('Error in sseSubscribe:', err);
-    if (!res.headersSent) res.status(500).send('');
+  } catch (error) {
+    console.error('Error in sseSubscribe:', error);
+    sendServerError(res, '');
   }
 }
 
@@ -535,14 +499,11 @@ export async function sseSubscribe(req, res) {
  */
 export async function sseSubscribeMessage(req, res) {
   try {
-    const message = render(`SSE action performed`);
-    const fragment = renderFragment('this(innerHTML)', message);
-    res.send(fragment);
-  } catch (err) {
-    console.error('Error in sseSubscribeMessage:', err);
-    if (!res.headersSent) {
-      res.status(500).send('Internal server error');
-    }
+    const message = render('SSE action performed');
+    sendFragmentResponse(res, 'this(innerHTML)', message);
+  } catch (error) {
+    console.error('Error in sseSubscribeMessage:', error);
+    sendServerError(res);
   }
 }
 
@@ -561,66 +522,58 @@ export async function sseSubscribeMessage(req, res) {
  */
 export async function chatDemoInit(req, res) {
   try {
-    res.write(renderFragment('#demoCanvas(innerHTML)', render(ChatInterfaceDemo())));
-    res.end();
-  } catch (err) {
-    console.error('Error in chatDemoInit:', err);
-    if (!res.headersSent) {
-      res.status(500).send('Internal server error');
-    }
+    writeFragmentResponse(res, '#demoCanvas(innerHTML)', render(ChatInterfaceDemo()));
+    endResponse(res);
+  } catch (error) {
+    console.error('Error in chatDemoInit:', error);
+    endServerError(res);
   }
 }
 
 export async function webSocketUpdatesDemoInit(req, res) {
   try {
-    res.write(renderFragment('#demoCanvas(innerHTML)', render(WebSocketUpdatesDemo())));
-    res.end();
-  } catch (err) {
-    console.error('Error in webSocketUpdatesDemoInit:', err);
-    if (!res.headersSent) {
-      res.status(500).send('Internal server error');
-    }
+    writeFragmentResponse(res, '#demoCanvas(innerHTML)', render(WebSocketUpdatesDemo()));
+    endResponse(res);
+  } catch (error) {
+    console.error('Error in webSocketUpdatesDemoInit:', error);
+    endServerError(res);
   }
 }
 
 export async function pollingDemoInit(req, res) {
   try {
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment('#demoCanvas(innerHTML)', PollingDemo()));
-  } catch (err) {
-    console.error('Error in pollingDemoInit:', err);
-    if (!res.headersSent) res.status(500).send('Internal server error');
+    sendFragmentResponse(res, '#demoCanvas(innerHTML)', PollingDemo());
+  } catch (error) {
+    console.error('Error in pollingDemoInit:', error);
+    sendServerError(res);
   }
 }
 
 export async function pollingTick(req, res) {
   try {
     const timestamp = new Date().toISOString();
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment('#pollingOutput(innerHTML)', render(div({}, `Polling update at ${timestamp}`))));
-  } catch (err) {
-    console.error('Error in pollingTick:', err);
-    if (!res.headersSent) res.status(500).send('Internal server error');
+    sendFragmentResponse(res, '#pollingOutput(innerHTML)', render(div({}, `Polling update at ${timestamp}`)));
+  } catch (error) {
+    console.error('Error in pollingTick:', error);
+    sendServerError(res);
   }
 }
 
 export async function hoverDemoInit(req, res) {
   try {
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment('#demoCanvas(innerHTML)', HoverTriggerDemo()));
-  } catch (err) {
-    console.error('Error in hoverDemoInit:', err);
-    if (!res.headersSent) res.status(500).send('Internal server error');
+    sendFragmentResponse(res, '#demoCanvas(innerHTML)', HoverTriggerDemo());
+  } catch (error) {
+    console.error('Error in hoverDemoInit:', error);
+    sendServerError(res);
   }
 }
 
 export async function hoverMessage(req, res) {
   try {
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment('#hoverOutput(innerHTML)', render(div({}, 'Hover action loaded'))));
-  } catch (err) {
-    console.error('Error in hoverMessage:', err);
-    if (!res.headersSent) res.status(500).send('Internal server error');
+    sendFragmentResponse(res, '#hoverOutput(innerHTML)', render(div({}, 'Hover action loaded')));
+  } catch (error) {
+    console.error('Error in hoverMessage:', error);
+    sendServerError(res);
   }
 }
 

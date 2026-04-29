@@ -30,12 +30,12 @@ const STRATEGY_BY_LOWERCASE = {
 };
 
 function hasHTMLeXBehavior(node) {
-  return node.nodeType === Node.ELEMENT_NODE && HTMLEX_ATTR_NAMES.some(attr => node.hasAttribute(attr));
+  return node.nodeType === Node.ELEMENT_NODE && HTMLEX_ATTR_NAMES.some(attributeName => node.hasAttribute(attributeName));
 }
 
 function getHTMLeXBehaviorSignature(element) {
   return HTMLEX_ATTR_NAMES
-    .map(attr => `${attr}=${element.getAttribute(attr) ?? ''}`)
+    .map(attributeName => `${attributeName}=${element.getAttribute(attributeName) ?? ''}`)
     .join('|');
 }
 
@@ -82,13 +82,23 @@ export function querySelectorSafe(selector, root = document) {
   }
 }
 
-export function querySelectorAllSafe(selector, root = document) {
+export function querySelectorAllResult(selector, root = document) {
   try {
-    return Array.from(root.querySelectorAll(selector));
+    return {
+      matches: [...root.querySelectorAll(selector)],
+      valid: true,
+    };
   } catch (error) {
     Logger.system.warn(`[DOM] Invalid selector "${selector}"`, error);
-    return [];
+    return {
+      matches: [],
+      valid: false,
+    };
   }
+}
+
+export function querySelectorAllSafe(selector, root = document) {
+  return querySelectorAllResult(selector, root).matches;
 }
 
 /**
@@ -129,20 +139,20 @@ export function diffAndUpdate(existingNode, newNode) {
     const existingAttrs = existingNode.attributes;
     const newAttrs = newNode.attributes;
     for (let i = existingAttrs.length - 1; i >= 0; i--) {
-      const attr = existingAttrs[i];
-      if (!newNode.hasAttribute(attr.name)) {
-        Logger.system.debug(`[DOM] Removing attribute "${attr.name}" from element:`, existingNode);
-        existingNode.removeAttribute(attr.name);
+      const attribute = existingAttrs[i];
+      if (!newNode.hasAttribute(attribute.name)) {
+        Logger.system.debug(`[DOM] Removing attribute "${attribute.name}" from element:`, existingNode);
+        existingNode.removeAttribute(attribute.name);
       }
     }
     for (let i = 0; i < newAttrs.length; i++) {
-      const attr = newAttrs[i];
-      if (existingNode.getAttribute(attr.name) !== attr.value) {
+      const attribute = newAttrs[i];
+      if (existingNode.getAttribute(attribute.name) !== attribute.value) {
         Logger.system.debug(
-          `[DOM] Updating attribute "${attr.name}" to "${attr.value}" on element:`,
+          `[DOM] Updating attribute "${attribute.name}" to "${attribute.value}" on element:`,
           existingNode
         );
-        existingNode.setAttribute(attr.name, attr.value);
+        existingNode.setAttribute(attribute.name, attribute.value);
       }
     }
     diffChildren(existingNode, newNode);
@@ -161,8 +171,8 @@ export function diffChildren(existingParent, newParent) {
     "with new element:",
     newParent
   );
-  const existingChildren = Array.from(existingParent.childNodes);
-  const newChildren = Array.from(newParent.childNodes);
+  const existingChildren = [...existingParent.childNodes];
+  const newChildren = [...newParent.childNodes];
   const max = Math.max(existingChildren.length, newChildren.length);
   for (let i = 0; i < max; i++) {
     const existingChild = existingChildren[i];
@@ -182,12 +192,12 @@ export function diffChildren(existingParent, newParent) {
 
 /**
  * Performs an innerHTML update on an element using a diff algorithm.
- * @param {Element} el - The element to update.
+ * @param {Element} element - The element to update.
  * @param {string} newHTML - The new HTML content.
  */
-export function performInnerHTMLUpdate(el, newHTML) {
-  Logger.system.debug("[DOM] Performing innerHTML update on element:", el);
-  const currentHTML = el.innerHTML.trim();
+export function performInnerHTMLUpdate(element, newHTML) {
+  Logger.system.debug("[DOM] Performing innerHTML update on element:", element);
+  const currentHTML = element.innerHTML.trim();
   const newHTMLTrimmed = newHTML.trim();
   if (currentHTML === newHTMLTrimmed) {
     Logger.system.debug("[DOM] No differences detected in innerHTML; skipping update.");
@@ -195,12 +205,12 @@ export function performInnerHTMLUpdate(el, newHTML) {
   }
   Logger.system.debug("[DOM] Differences detected; performing partial update using diffing algorithm.");
   const range = document.createRange();
-  range.selectNodeContents(el);
+  range.selectNodeContents(element);
   const newFragment = range.createContextualFragment(newHTMLTrimmed);
-  diffChildren(el, newFragment);
-  if (el.innerHTML.trim() !== newHTMLTrimmed) {
+  diffChildren(element, newFragment);
+  if (element.innerHTML.trim() !== newHTMLTrimmed) {
     Logger.system.debug("[DOM] Fallback: innerHTML mismatch after diffing; updating innerHTML directly.");
-    el.innerHTML = newHTMLTrimmed;
+    element.innerHTML = newHTMLTrimmed;
   }
 }
 
@@ -220,25 +230,25 @@ export function updateTarget(target, content, resolvedElement = null) {
   const elements = target.selector.trim().toLowerCase() === 'this' && resolvedElement
     ? [resolvedElement]
     : querySelectorAllSafe(target.selector);
-  elements.forEach(el => {
-    let registrationRoot = el;
+  for (const targetElement of elements) {
+    let registrationRoot = targetElement;
     Logger.system.debug(
       `[DOM] Updating element(s) matching "${target.selector}" using strategy "${target.strategy}"`,
-      el
+      targetElement
     );
     switch (target.strategy) {
       case 'innerHTML':
-        performInnerHTMLUpdate(el, content);
+        performInnerHTMLUpdate(targetElement, content);
         break;
       case 'outerHTML': {
         const range = document.createRange();
-        range.selectNode(el);
+        range.selectNode(targetElement);
         const fragment = range.createContextualFragment(content);
-        const newNodes = Array.from(fragment.childNodes);
+        const newNodes = [...fragment.childNodes];
         if (newNodes.length > 0) {
-          const parent = el.parentElement;
+          const parent = targetElement.parentElement;
           Logger.system.debug("[DOM] Replacing element with outerHTML strategy. New node count:", newNodes.length);
-          el.replaceWith(fragment);
+          targetElement.replaceWith(fragment);
           registrationRoot = parent || newNodes.find(node => node.nodeType === Node.ELEMENT_NODE) || document.body;
         } else {
           Logger.system.warn("[DOM] outerHTML update failed: no new nodes generated from content.");
@@ -246,36 +256,36 @@ export function updateTarget(target, content, resolvedElement = null) {
         break;
       }
       case 'append':
-        Logger.system.debug("[DOM] Appending content to element:", el);
-        el.insertAdjacentHTML('beforeend', content);
+        Logger.system.debug("[DOM] Appending content to element:", targetElement);
+        targetElement.insertAdjacentHTML('beforeend', content);
         break;
       case 'prepend':
-        Logger.system.debug("[DOM] Prepending content to element:", el);
-        el.insertAdjacentHTML('afterbegin', content);
+        Logger.system.debug("[DOM] Prepending content to element:", targetElement);
+        targetElement.insertAdjacentHTML('afterbegin', content);
         break;
       case 'before':
-        Logger.system.debug("[DOM] Inserting content before element:", el);
-        el.insertAdjacentHTML('beforebegin', content);
-        registrationRoot = el.parentElement || document.body;
+        Logger.system.debug("[DOM] Inserting content before element:", targetElement);
+        targetElement.insertAdjacentHTML('beforebegin', content);
+        registrationRoot = targetElement.parentElement || document.body;
         break;
       case 'after':
-        Logger.system.debug("[DOM] Inserting content after element:", el);
-        el.insertAdjacentHTML('afterend', content);
-        registrationRoot = el.parentElement || document.body;
+        Logger.system.debug("[DOM] Inserting content after element:", targetElement);
+        targetElement.insertAdjacentHTML('afterend', content);
+        registrationRoot = targetElement.parentElement || document.body;
         break;
       case 'remove':
-        Logger.system.debug("[DOM] Removing element:", el);
-        el.remove();
+        Logger.system.debug("[DOM] Removing element:", targetElement);
+        targetElement.remove();
         registrationRoot = document.body;
         break;
       default:
-        Logger.system.debug("[DOM] Default update strategy; updating innerHTML of element:", el);
-        el.innerHTML = content;
+        Logger.system.debug("[DOM] Default update strategy; updating innerHTML of element:", targetElement);
+        targetElement.innerHTML = content;
     }
     if (hasHTMLeXMarkup(content)) {
       document.dispatchEvent(new CustomEvent('htmlex:dom-updated', {
         detail: { root: registrationRoot }
       }));
     }
-  });
+  }
 }

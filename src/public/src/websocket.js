@@ -45,7 +45,7 @@ function normalizeSocketPayload(eventName, data) {
 
   try {
     return escapeHtml(JSON.stringify(data));
-  } catch (e) {
+  } catch {
     return escapeHtml(data);
   }
 }
@@ -61,7 +61,7 @@ export function handleWebSocket(element, socketUrl) {
 
   if (!socketUrl) {
     Logger.system.error("[Socket.IO] socketUrl is undefined or empty. Cannot create connection.");
-    return; // Exit if no URL
+    return;
   }
   if (!(element instanceof Element)) {
     Logger.system.error("[Socket.IO] 'element' is not a valid DOM Element:", element);
@@ -70,9 +70,8 @@ export function handleWebSocket(element, socketUrl) {
 
   try {
     Logger.system.debug("[Socket.IO] Attempting to connect to:", socketUrl);
-    // Using the globally available `io` from the CDN.
     const socket = io(socketUrl, {
-      transports: ['websocket'] // Force WebSocket transport
+      transports: ['websocket']
     });
 
     socket.on('connect', () => {
@@ -90,26 +89,26 @@ export function handleWebSocket(element, socketUrl) {
 
       Logger.system.info(`[Socket.IO] Event "${eventName}" received:`, data);
 
-      const messageData = normalizeSocketPayload(eventName, data);
+      const payloadHtml = normalizeSocketPayload(eventName, data);
 
       if (element.hasAttribute('target')) {
         Logger.system.debug("[Socket.IO] Element has 'target' attribute:", element.getAttribute('target'));
         const targets = parseTargets(element.getAttribute('target'));
         Logger.system.debug("[Socket.IO] Parsed targets:", targets);
 
-        targets.forEach(target => {
+        for (const target of targets) {
           Logger.system.debug("[Socket.IO] Scheduling update for target:", target);
           scheduleUpdate(() => {
             if (!document.body.contains(element)) return;
-            Logger.system.debug("[Socket.IO] Inside scheduleUpdate callback. Updating target:", target, "with data:", messageData);
+            Logger.system.debug("[Socket.IO] Inside scheduleUpdate callback. Updating target:", target, "with data:", payloadHtml);
             try {
-              updateTarget(target, messageData, element);
+              updateTarget(target, payloadHtml, element);
               Logger.system.debug("[Socket.IO] Target updated successfully:", target);
             } catch (updateError) {
               Logger.system.error("[Socket.IO] Error updating target:", target, updateError);
             }
           }, isSequential(element));
-        });
+        }
       } else {
         Logger.system.debug("[Socket.IO] Element does not have a 'target' attribute.");
       }
@@ -125,13 +124,10 @@ export function handleWebSocket(element, socketUrl) {
       Logger.system.debug("[Socket.IO] on disconnect event fired.");
     });
 
-    // Save the socket instance on the element for potential later use.
     element._htmlexSocket = socket;
     Logger.system.debug("[Socket.IO] Socket assigned to element._htmlexSocket:", socket);
 
-    // Set up a MutationObserver to clean up the WebSocket when the element is removed.
     const observer = new MutationObserver(() => {
-      // Check if the element is no longer in the document.
       if (!document.body.contains(element)) {
         Logger.system.info("[Socket.IO] Element removed from DOM. Disconnecting socket.");
         if (element._htmlexSocket) {
@@ -143,7 +139,6 @@ export function handleWebSocket(element, socketUrl) {
       }
     });
     observer.observe(document.body, { childList: true, subtree: true });
-    // Save the observer on the element for potential future reference.
     element._htmlexSocketObserver = observer;
 
   } catch (error) {

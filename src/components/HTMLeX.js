@@ -27,7 +27,7 @@
  * @property {number} [throttle] - Minimum interval in ms between API calls.
  * @property {number} [poll] - Interval in ms for automatically triggering API calls.
  * @property {number} [repeat] - Maximum number of poll iterations.
- * @property {string} [socket] - WebSocket URL for real‑time updates.
+ * @property {string} [socket] - WebSocket URL for real-time updates.
  * @property {number} [retry] - Number of retry attempts for failed API calls.
  * @property {number} [timeout] - Maximum wait time in ms for an API call.
  * @property {number} [timer] - Delay in ms before emitting a signal after an API call.
@@ -108,19 +108,12 @@ export const tagNames = [
  *
  * @namespace tags
  */
-export const tags = {};
-
-// Generate a helper function for each tag name.
-tagNames.forEach((tagName) => {
-  /**
-   * Creates a virtual node for a given HTML tag.
-   *
-   * @param {HTMLeXAttrs} [attrs={}] - Attributes for the HTML element.
-   * @param {...(string|Object)} children - Child nodes.
-   * @returns {Object} A virtual node.
-   */
-  tags[tagName] = (attrs = {}, ...children) => tag(tagName, attrs, ...children);
-});
+export const tags = Object.fromEntries(
+  tagNames.map(tagName => [
+    tagName,
+    (attrs = {}, ...children) => tag(tagName, attrs, ...children)
+  ])
+);
 
 /**
  * Commonly used HTML tags for direct import.
@@ -148,13 +141,13 @@ export const render = (node) => {
   }
   if (!node || typeof node !== 'object') return '';
   if (node[RAW_HTML]) return node.html;
-  const { tag: tagName, attrs, children } = node;
-  const attrString = Object.entries(attrs || {})
+  const { tag: tagName, attrs: attributes, children } = node;
+  const attributeHtml = Object.entries(attributes || {})
     .filter(([, value]) => value !== undefined && value !== null && value !== false)
     .map(([key, value]) => value === true ? `${key}` : `${key}="${escapeAttribute(value)}"`)
     .join(' ');
-  const childrenHTML = (children || []).map(render).join('');
-  return `<${tagName}${attrString ? ' ' + attrString : ''}>${childrenHTML}</${tagName}>`;
+  const childHtml = (children || []).map(render).join('');
+  return `<${tagName}${attributeHtml ? ' ' + attributeHtml : ''}>${childHtml}</${tagName}>`;
 };
 
 /* ============================================================================
@@ -194,7 +187,7 @@ export const createFragment = (content, status) => {
  * @returns {Object} A virtual fragment node with a target attribute.
  *
  * @example
- * const frag = generateFragment('#todoList', div({ class: 'loading' }, 'Loading todos...'));
+ * const fragment = generateFragment('#todoList', div({ class: 'loading' }, 'Loading todos...'));
  */
 export const generateFragment = (target, content, status) => {
   const attrs = { target };
@@ -204,25 +197,36 @@ export const generateFragment = (target, content, status) => {
   return tag('fragment', attrs, content);
 };
 
+function normalizeFragmentAttributes(target, fragmentAttributes) {
+  if (!fragmentAttributes) {
+    return { target };
+  }
+
+  if (typeof fragmentAttributes === 'object' && !Array.isArray(fragmentAttributes)) {
+    const attributes = { ...fragmentAttributes };
+    delete attributes.target;
+    return { ...attributes, target };
+  }
+
+  return {
+    target,
+    status: fragmentAttributes
+  };
+}
+
 /**
  * Wraps HTML content into an HTMLeX fragment for progressive updates.
  *
  * @param {string} target - A CSS selector that identifies the target element.
  * @param {string} htmlContent - The HTML content to be injected.
- * @param {string} [status] - Optional status code to include in the fragment.
+ * @param {string|Object} [fragmentAttributes] - Optional fragment attributes or status code.
  * @returns {string} HTML string representing the fragment.
  *
  * @example
- * const fragHtml = renderFragment('#todoList(innerHTML)', '<div>Updated Content</div>');
+ * const fragmentHtml = renderFragment('#todoList(innerHTML)', '<div>Updated Content</div>');
  */
-export function renderFragment(target, htmlContent, status) {
-  // Create attributes for the fragment. Include the target and optional status.
-  const attrs = { target };
-  if (status) {
-    attrs.status = status;
-  }
-  // Create a virtual fragment node using the HTMLeX tag function.
+export function renderFragment(target, htmlContent, fragmentAttributes = {}) {
+  const attrs = normalizeFragmentAttributes(target, fragmentAttributes);
   const fragmentNode = tag('fragment', attrs, rawHtml(htmlContent));
-  // Render the virtual node to an HTML string.
   return render(fragmentNode);
 }

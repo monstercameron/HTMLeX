@@ -2,7 +2,7 @@
 
 import express from 'express';
 import path from 'path';
-import fs from 'fs';
+import { access } from 'fs/promises';
 import https from 'https';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
@@ -38,14 +38,14 @@ const TODO_DELETE_ROUTE = '/todos/:id';
 // Infinite scrolling
 const ITEMS_LOAD_MORE_ROUTE = '/items/loadMore';
 const ITEMS_DEMO_INIT = '/items/init';
-// SSE Notifications
-const NOTIFICATIONS_DEMO_INIT = "/notifications/init"
+// SSE notifications
+const NOTIFICATIONS_DEMO_INIT = '/notifications/init';
 const NOTIFICATIONS_ROUTE = '/notifications';
-// click counter
+// Click counter
 const COUNTER_DEMO_INIT = '/counter/init';
 const COUNTER_INCREMENT_ROUTE = '/counter/increment';
 // Single request, multiple targets
-const MULTI_DEMO_INIT = "/multi/init"
+const MULTI_DEMO_INIT = '/multi/init';
 const MULTI_FRAGMENT_ROUTE = '/multi/fragment';
 // Polling
 const SEQUENTIAL_DEMO_INIT = '/sequential/init';
@@ -61,7 +61,7 @@ const PROCESS_STEP5_ROUTE = '/process/step5';
 const DEMO_DEMO_INIT = '/demo/init';
 const DEMO_LOADING_ROUTE = '/demo/loading';
 // Server Sent Events
-const SSE_DEMO_INIT = "/sse/init"
+const SSE_DEMO_INIT = '/sse/init';
 const SSE_SUBSCRIBE_ROUTE = '/sse/subscribe';
 const SSE_SUBSCRIBE_MESSAGE_ROUTE = '/sse/subscribe/message';
 
@@ -80,8 +80,8 @@ const SOCKET_NS_CHAT = '/chat';
 const SOCKET_NS_UPDATES = '/updates';
 
 // Global error handling
-process.on('uncaughtException', (err) => {
-  console.error('UNCAUGHT EXCEPTION:', err);
+process.on('uncaughtException', (error) => {
+  console.error('UNCAUGHT EXCEPTION:', error);
   process.exit(1);
 });
 process.on('unhandledRejection', (reason, promise) => {
@@ -102,9 +102,9 @@ app.use(express.static(path.join(__dirname, PUBLIC_DIR)));
 app.get('/', async (req, res) => {
   const indexPath = path.join(__dirname, PUBLIC_DIR, INDEX_FILE);
   try {
-    await fs.promises.access(indexPath);
+    await access(indexPath);
     return res.sendFile(indexPath);
-  } catch (err) {
+  } catch {
     return res.send(renderDefaultIndexPage());
   }
 });
@@ -112,8 +112,8 @@ app.get('/', async (req, res) => {
 // Configure multer for form data processing.
 const upload = multer();
 
-// Demo management code load demo menu
-app.get('/demos', loadAndRenderDemos)
+// Demo management route.
+app.get('/demos', loadAndRenderDemos);
 
 // ------------------------------
 // Todo API Endpoints (Async)
@@ -132,7 +132,7 @@ app.delete(TODO_DELETE_ROUTE, todos.deleteTodo);
 app.get(ITEMS_DEMO_INIT, streaming.infiniteScrollDemoInit);
 app.get(ITEMS_LOAD_MORE_ROUTE, streaming.loadMoreItems);
 
-// SS notifications
+// Server-sent notifications
 app.get(NOTIFICATIONS_DEMO_INIT, streaming.notificationsDemoInit);
 app.get(NOTIFICATIONS_ROUTE, streaming.fetchNotification);
 
@@ -156,11 +156,11 @@ app.get(PROCESS_STEP3_ROUTE, streaming.processStep3);
 app.get(PROCESS_STEP4_ROUTE, streaming.processStep4);
 app.get(PROCESS_STEP5_ROUTE, streaming.processStep5);
 
-// Hanlding loading state
+// Handling loading state.
 app.get(DEMO_DEMO_INIT, streaming.demoInit);
 app.get(DEMO_LOADING_ROUTE, streaming.demoLoading);
 
-// Server Sent events
+// Server-sent events
 app.get(SSE_DEMO_INIT, streaming.sseDemoInit);
 app.get(SSE_SUBSCRIBE_ROUTE, streaming.sseSubscribe);
 app.get(SSE_SUBSCRIBE_MESSAGE_ROUTE, streaming.sseSubscribeMessage);
@@ -171,12 +171,12 @@ app.get(HOVER_DEMO_INIT, streaming.hoverDemoInit);
 app.get(HOVER_MESSAGE_ROUTE, streaming.hoverMessage);
 
 // ------------------------------
-// Chat Endpoint
+// Chat endpoints
 // ------------------------------
-let io; // Socket.IO instance will be assigned later.
-app.get(CHAT_DEMO_INIT, streaming.chatDemoInit)
+let socketServer;
+app.get(CHAT_DEMO_INIT, streaming.chatDemoInit);
 app.post(CHAT_SEND_ROUTE, upload.none(), async (req, res) => {
-  await chat.sendChatMessage(req, res, io.of(SOCKET_NS_CHAT));
+  await chat.sendChatMessage(req, res, socketServer.of(SOCKET_NS_CHAT));
 });
 
 // ------------------------------
@@ -190,25 +190,23 @@ const server = https.createServer(httpsOptions, app);
 // ------------------------------
 // Socket.IO Setup
 // ------------------------------
-io = new SocketIOServer(server, {
-  // Optional Socket.IO options
-});
-setupSocketNamespaces(io, chat.getChatHistory);
+socketServer = new SocketIOServer(server);
+setupSocketNamespaces(socketServer, chat.getChatHistory);
 
 // ------------------------------
 // Start Server
 // ------------------------------
-server.on('error', (err) => {
-  console.error('Server error:', err);
+server.on('error', (error) => {
+  console.error('Server error:', error);
 });
 
-server.on('clientError', (err, socket) => {
-  if (err?.code === 'ERR_SSL_SSL/TLS_ALERT_CERTIFICATE_UNKNOWN' || err?.code === 'ECONNRESET') {
+server.on('clientError', (error, socket) => {
+  if (error?.code === 'ERR_SSL_SSL/TLS_ALERT_CERTIFICATE_UNKNOWN' || error?.code === 'ECONNRESET') {
     if (socket && !socket.destroyed) socket.destroy();
     return;
   }
 
-  console.error('Client connection error:', err);
+  console.error('Client connection error:', error);
   if (socket && socket.writable && !socket.destroyed) {
     socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
   } else if (socket && !socket.destroyed) {
@@ -226,9 +224,9 @@ export function startServer(port = PORT) {
   }
 
   return new Promise((resolve, reject) => {
-    const onError = (err) => {
-      console.error('Failed to start server:', err);
-      reject(err);
+    const onError = (error) => {
+      console.error('Failed to start server:', error);
+      reject(error);
     };
 
     server.once('error', onError);
@@ -264,8 +262,8 @@ process.on('SIGINT', () => {
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  startServer().catch(err => {
-    console.error('Failed to start server:', err);
+  startServer().catch(error => {
+    console.error('Failed to start server:', error);
     process.exit(1);
   });
 }

@@ -12,14 +12,19 @@ const updateQueue = [];
 /** @type {boolean} */
 let processingQueue = false;
 
+/** @type {number} */
+let updateQueueCursor = 0;
+
 /**
  * Processes the update queue.
  * @private
  */
 function processUpdateQueue() {
-  if (updateQueue.length > 0) {
-    Logger.system.debug("[UTILS] Processing update from queue. Remaining updates:", updateQueue.length);
-    const updateFn = updateQueue.shift();
+  if (updateQueueCursor < updateQueue.length) {
+    Logger.system.debug("[UTILS] Processing update from queue. Remaining updates:", updateQueue.length - updateQueueCursor);
+    const updateFn = updateQueue[updateQueueCursor];
+    updateQueueCursor += 1;
+
     try {
       updateFn();
       Logger.system.debug("[UTILS] Update function executed successfully.");
@@ -28,6 +33,8 @@ function processUpdateQueue() {
     }
     requestAnimationFrame(processUpdateQueue);
   } else {
+    updateQueue.length = 0;
+    updateQueueCursor = 0;
     processingQueue = false;
     Logger.system.debug("[UTILS] Update queue empty. Stopping processing.");
   }
