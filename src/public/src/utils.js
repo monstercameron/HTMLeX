@@ -59,7 +59,7 @@ export function scheduleUpdate(updateFn, sequential) {
  * @returns {boolean} True if the element has sequential updates enabled.
  */
 export function isSequential(element) {
-  const sequential = element.hasAttribute('sequential') && element.getAttribute('sequential') !== 'false';
+  const sequential = element.hasAttribute('sequential') && element.getAttribute('sequential')?.trim().toLowerCase() !== 'false';
   Logger.system.debug("[UTILS] Element", element, "sequential update:", sequential);
   return sequential;
 }

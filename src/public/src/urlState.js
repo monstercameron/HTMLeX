@@ -6,6 +6,16 @@
 
 import { Logger } from './logger.js';
 
+function parseKeyValueList(value) {
+  return String(value ?? '').split(/\s+/).filter(Boolean).map(pair => {
+    const separatorIndex = pair.indexOf('=');
+    return {
+      key: separatorIndex >= 0 ? pair.slice(0, separatorIndex) : pair,
+      value: separatorIndex >= 0 ? pair.slice(separatorIndex + 1) : ''
+    };
+  }).filter(({ key }) => key);
+}
+
 /**
  * Updates the URL state using attributes such as push, pull, and path.
  * @param {Element} element - The element with URL state attributes.
@@ -18,9 +28,7 @@ export function handleURLState(element) {
   if (element.hasAttribute('push')) {
     const pushValue = element.getAttribute('push');
     Logger.system.debug("[URLState] Found 'push' attribute with value:", pushValue);
-    const pairs = pushValue.split(/\s+/);
-    pairs.forEach(pair => {
-      const [key, value] = pair.split('=');
+    parseKeyValueList(pushValue).forEach(({ key, value }) => {
       Logger.system.debug(`[URLState] Setting search parameter: ${key}=${value}`);
       newUrl.searchParams.set(key, value);
     });
@@ -29,7 +37,7 @@ export function handleURLState(element) {
   if (element.hasAttribute('pull')) {
     const pullValue = element.getAttribute('pull');
     Logger.system.debug("[URLState] Found 'pull' attribute with value:", pullValue);
-    const keys = pullValue.split(/\s+/);
+    const keys = String(pullValue ?? '').split(/\s+/).filter(Boolean);
     keys.forEach(key => {
       Logger.system.debug(`[URLState] Removing search parameter: ${key}`);
       newUrl.searchParams.delete(key);
@@ -43,9 +51,11 @@ export function handleURLState(element) {
   }
 
   if (element.hasAttribute('push') || element.hasAttribute('pull') || element.hasAttribute('path')) {
-    const historyMethod = element.getAttribute('history') || 'replace';
+    const historyMethod = (element.getAttribute('history') || 'replace').toLowerCase();
     Logger.system.debug("[URLState] History method set to:", historyMethod);
-    if (historyMethod === 'push') {
+    if (historyMethod === 'none') {
+      Logger.system.info(`[URLState] History update skipped for ${newUrl.toString()}`);
+    } else if (historyMethod === 'push') {
       history.pushState(null, '', newUrl.toString());
       Logger.system.info(`[URLState] Pushed new URL state: ${newUrl.toString()}`);
     } else {

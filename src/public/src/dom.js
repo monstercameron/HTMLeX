@@ -9,7 +9,39 @@
  */
 
 import { Logger } from './logger.js';
-import { scheduleUpdate } from './utils.js';
+const TARGET_STRATEGIES = 'innerHTML|outerHTML|append|prepend|before|after|remove';
+const HTMLEX_ATTR_NAMES = [
+  'get', 'post', 'put', 'delete', 'patch',
+  'auto', 'poll', 'socket', 'subscribe', 'publish',
+  'trigger', 'debounce', 'throttle', 'retry', 'timeout',
+  'cache', 'timer', 'sequential', 'repeat', 'source', 'target',
+  'loading', 'onerror', 'extras', 'push', 'pull', 'path',
+  'history', 'onbefore', 'onbeforeswap', 'onafterswap', 'onafter'
+];
+const HTMLEX_MARKUP_PATTERN = /\s(?:get|post|put|delete|patch|socket|publish|timer)\b/i;
+const STRATEGY_BY_LOWERCASE = {
+  innerhtml: 'innerHTML',
+  outerhtml: 'outerHTML',
+  append: 'append',
+  prepend: 'prepend',
+  before: 'before',
+  after: 'after',
+  remove: 'remove'
+};
+
+function hasHTMLeXBehavior(node) {
+  return node.nodeType === Node.ELEMENT_NODE && HTMLEX_ATTR_NAMES.some(attr => node.hasAttribute(attr));
+}
+
+function getHTMLeXBehaviorSignature(element) {
+  return HTMLEX_ATTR_NAMES
+    .map(attr => `${attr}=${element.getAttribute(attr) ?? ''}`)
+    .join('|');
+}
+
+export function hasHTMLeXMarkup(content) {
+  return HTMLEX_MARKUP_PATTERN.test(String(content ?? ''));
+}
 
 /**
  * Parses the target attribute into an array of target instructions.
@@ -18,15 +50,45 @@ import { scheduleUpdate } from './utils.js';
  */
 export function parseTargets(targetAttr) {
   Logger.system.debug("[DOM] Parsing target attribute:", targetAttr);
-  const targets = targetAttr.split(/\s+/).map(instruction => {
-    const match = instruction.match(/^(.+?)\((.+?)\)$/);
-    if (match) {
-      return { selector: match[1].trim(), strategy: match[2].trim() };
-    }
-    return { selector: instruction, strategy: 'innerHTML' };
-  });
+  const input = String(targetAttr ?? '').trim();
+  if (!input) {
+    return [];
+  }
+
+  const targets = [];
+  const targetPattern = new RegExp(`(.+?)\\((${TARGET_STRATEGIES})\\)(?:\\s+|$)`, 'gi');
+  let match;
+  while ((match = targetPattern.exec(input)) !== null) {
+    const rawStrategy = match[2].trim();
+    targets.push({
+      selector: match[1].trim(),
+      strategy: STRATEGY_BY_LOWERCASE[rawStrategy.toLowerCase()] || rawStrategy
+    });
+  }
+
+  if (!targets.length) {
+    targets.push({ selector: input, strategy: 'innerHTML' });
+  }
   Logger.system.debug("[DOM] Parsed target instructions:", targets);
   return targets;
+}
+
+export function querySelectorSafe(selector, root = document) {
+  try {
+    return root.querySelector(selector);
+  } catch (error) {
+    Logger.system.warn(`[DOM] Invalid selector "${selector}"`, error);
+    return null;
+  }
+}
+
+export function querySelectorAllSafe(selector, root = document) {
+  try {
+    return Array.from(root.querySelectorAll(selector));
+  } catch (error) {
+    Logger.system.warn(`[DOM] Invalid selector "${selector}"`, error);
+    return [];
+  }
 }
 
 /**
@@ -41,6 +103,15 @@ export function diffAndUpdate(existingNode, newNode) {
     (existingNode.nodeType === Node.ELEMENT_NODE && existingNode.nodeName !== newNode.nodeName)
   ) {
     Logger.system.debug("[DOM] Nodes differ in type or tag; replacing node.");
+    existingNode.replaceWith(newNode.cloneNode(true));
+    return;
+  }
+  if (
+    existingNode.nodeType === Node.ELEMENT_NODE &&
+    (hasHTMLeXBehavior(existingNode) || hasHTMLeXBehavior(newNode)) &&
+    getHTMLeXBehaviorSignature(existingNode) !== getHTMLeXBehaviorSignature(newNode)
+  ) {
+    Logger.system.debug("[DOM] HTMLeX behavior attributes changed; replacing node so it can be re-registered.");
     existingNode.replaceWith(newNode.cloneNode(true));
     return;
   }
@@ -123,9 +194,9 @@ export function performInnerHTMLUpdate(el, newHTML) {
     return;
   }
   Logger.system.debug("[DOM] Differences detected; performing partial update using diffing algorithm.");
-  const template = document.createElement('template');
-  template.innerHTML = newHTMLTrimmed;
-  const newFragment = template.content;
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const newFragment = range.createContextualFragment(newHTMLTrimmed);
   diffChildren(el, newFragment);
   if (el.innerHTML.trim() !== newHTMLTrimmed) {
     Logger.system.debug("[DOM] Fallback: innerHTML mismatch after diffing; updating innerHTML directly.");
@@ -137,16 +208,20 @@ export function performInnerHTMLUpdate(el, newHTML) {
  * Updates target elements with new content based on the update strategy.
  * @param {TargetInstruction} target - The target instruction.
  * @param {string} content - The HTML content to update.
+ * @param {Element|null} [resolvedElement=null] - Explicit element used for `this(...)` targets.
  */
-export function updateTarget(target, content) {
+export function updateTarget(target, content, resolvedElement = null) {
   Logger.system.debug(
     "[DOM] Updating target with instruction:",
     target,
     "and content length:",
     content.length
   );
-  const elements = document.querySelectorAll(target.selector);
+  const elements = target.selector.trim().toLowerCase() === 'this' && resolvedElement
+    ? [resolvedElement]
+    : querySelectorAllSafe(target.selector);
   elements.forEach(el => {
+    let registrationRoot = el;
     Logger.system.debug(
       `[DOM] Updating element(s) matching "${target.selector}" using strategy "${target.strategy}"`,
       el
@@ -156,14 +231,17 @@ export function updateTarget(target, content) {
         performInnerHTMLUpdate(el, content);
         break;
       case 'outerHTML': {
-        const template = document.createElement('template');
-        template.innerHTML = content;
-        const newNode = template.content.firstChild;
-        if (newNode) {
-          Logger.system.debug("[DOM] Replacing element with outerHTML strategy. New node:", newNode);
-          el.replaceWith(newNode);
+        const range = document.createRange();
+        range.selectNode(el);
+        const fragment = range.createContextualFragment(content);
+        const newNodes = Array.from(fragment.childNodes);
+        if (newNodes.length > 0) {
+          const parent = el.parentElement;
+          Logger.system.debug("[DOM] Replacing element with outerHTML strategy. New node count:", newNodes.length);
+          el.replaceWith(fragment);
+          registrationRoot = parent || newNodes.find(node => node.nodeType === Node.ELEMENT_NODE) || document.body;
         } else {
-          Logger.system.warn("[DOM] outerHTML update failed: no new node generated from content.");
+          Logger.system.warn("[DOM] outerHTML update failed: no new nodes generated from content.");
         }
         break;
       }
@@ -178,19 +256,26 @@ export function updateTarget(target, content) {
       case 'before':
         Logger.system.debug("[DOM] Inserting content before element:", el);
         el.insertAdjacentHTML('beforebegin', content);
+        registrationRoot = el.parentElement || document.body;
         break;
       case 'after':
         Logger.system.debug("[DOM] Inserting content after element:", el);
         el.insertAdjacentHTML('afterend', content);
+        registrationRoot = el.parentElement || document.body;
         break;
       case 'remove':
         Logger.system.debug("[DOM] Removing element:", el);
         el.remove();
+        registrationRoot = document.body;
         break;
       default:
         Logger.system.debug("[DOM] Default update strategy; updating innerHTML of element:", el);
         el.innerHTML = content;
     }
-    // Optionally, reinitialize HTMLeX here if new content introduces HTMLeX-enabled elements.
+    if (hasHTMLeXMarkup(content)) {
+      document.dispatchEvent(new CustomEvent('htmlex:dom-updated', {
+        detail: { root: registrationRoot }
+      }));
+    }
   });
 }

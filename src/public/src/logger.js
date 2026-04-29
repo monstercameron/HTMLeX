@@ -15,12 +15,28 @@ export const LogLevel = {
   ERROR: 'error'
 };
 
+function getInitialLogLevel() {
+  try {
+    const configured = typeof window !== 'undefined'
+      ? window.localStorage?.getItem('HTMLEX_LOG_LEVEL')
+      : null;
+    if (Object.values(LogLevel).includes(configured)) return configured;
+
+    const params = new URLSearchParams(typeof window !== 'undefined' ? window.location?.search || '' : '');
+    if (params.get('htmlexDebug') === '1') return LogLevel.DEBUG;
+  } catch (error) {
+    // Logging configuration should never block app startup.
+  }
+
+  return LogLevel.WARN;
+}
+
 export const Logger = {
   // Global flag to completely enable/disable logging.
   enabled: true,
 
   // The current log level.
-  logLevel: LogLevel.DEBUG,
+  logLevel: getInitialLogLevel(),
 
   // Namespace flags – you can add more namespaces if needed.
   namespaces: {

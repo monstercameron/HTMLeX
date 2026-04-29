@@ -8,6 +8,48 @@ import { Logger } from './logger.js';
 import { scheduleUpdate, isSequential } from './utils.js';
 import { parseTargets, updateTarget } from './dom.js';
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function renderChatMessage(message) {
+  return `
+    <div class="surface-muted p-3 small mb-2">
+      <strong class="me-2 text-primary">${escapeHtml(message.username || 'Anonymous')}</strong>
+      <span>${escapeHtml(message.text || '')}</span>
+    </div>
+  `;
+}
+
+function normalizeSocketPayload(eventName, data) {
+  if (eventName === 'chatMessage') {
+    return renderChatMessage(data || {});
+  }
+
+  if (eventName === 'chatHistory') {
+    const history = Array.isArray(data?.history) ? data.history : [];
+    if (!history.length) {
+      return '<p class="text-center small text-subtle mb-0">Waiting for messages...</p>';
+    }
+    return history.map(renderChatMessage).join('');
+  }
+
+  if (typeof data === 'string') {
+    return data;
+  }
+
+  try {
+    return escapeHtml(JSON.stringify(data));
+  } catch (e) {
+    return escapeHtml(data);
+  }
+}
+
 /**
  * Establishes a Socket.IO connection for the given element.
  * Automatically cleans up the connection if the element is removed from the DOM.
@@ -40,15 +82,15 @@ export function handleWebSocket(element, socketUrl) {
 
     // Listen for all events and handle them uniformly.
     socket.onAny((eventName, data) => {
+      if (!document.body.contains(element)) {
+        Logger.system.info("[Socket.IO] Ignoring event for removed element.");
+        socket.disconnect();
+        return;
+      }
+
       Logger.system.info(`[Socket.IO] Event "${eventName}" received:`, data);
 
-      // Normalize data into a string.
-      let messageData;
-      try {
-        messageData = typeof data === 'string' ? data : JSON.stringify(data);
-      } catch (e) {
-        messageData = data;
-      }
+      const messageData = normalizeSocketPayload(eventName, data);
 
       if (element.hasAttribute('target')) {
         Logger.system.debug("[Socket.IO] Element has 'target' attribute:", element.getAttribute('target'));
@@ -58,9 +100,10 @@ export function handleWebSocket(element, socketUrl) {
         targets.forEach(target => {
           Logger.system.debug("[Socket.IO] Scheduling update for target:", target);
           scheduleUpdate(() => {
+            if (!document.body.contains(element)) return;
             Logger.system.debug("[Socket.IO] Inside scheduleUpdate callback. Updating target:", target, "with data:", messageData);
             try {
-              updateTarget(target, messageData);
+              updateTarget(target, messageData, element);
               Logger.system.debug("[Socket.IO] Target updated successfully:", target);
             } catch (updateError) {
               Logger.system.error("[Socket.IO] Error updating target:", target, updateError);

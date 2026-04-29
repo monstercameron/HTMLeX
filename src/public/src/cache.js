@@ -12,6 +12,21 @@ import { Logger } from './logger.js';
 
 /** @type {Map<string, CacheEntry>} */
 const cacheStore = new Map();
+const MAX_CACHE_ENTRIES = 100;
+
+function pruneCache() {
+  const now = Date.now();
+  for (const [key, { expireAt }] of cacheStore) {
+    if (Number.isFinite(expireAt) && now >= expireAt) {
+      cacheStore.delete(key);
+    }
+  }
+
+  while (cacheStore.size > MAX_CACHE_ENTRIES) {
+    const oldestKey = cacheStore.keys().next().value;
+    cacheStore.delete(oldestKey);
+  }
+}
 
 /**
  * Caches a response.
@@ -20,8 +35,13 @@ const cacheStore = new Map();
  * @param {number} ttl - Time to live (milliseconds).
  */
 export function setCache(key, response, ttl) {
-  const expireAt = Date.now() + ttl;
+  pruneCache();
+  const ttlMs = Number(ttl);
+  const expireAt = Number.isFinite(ttlMs) && ttlMs > 0
+    ? Date.now() + ttlMs
+    : Infinity;
   cacheStore.set(key, { response, expireAt });
+  pruneCache();
   Logger.system.debug("[CACHE] Cached response for key:", key, "TTL:", ttl, "Expires at:", expireAt);
 }
 
@@ -31,6 +51,7 @@ export function setCache(key, response, ttl) {
  * @returns {string|null} The cached response or null if not found/expired.
  */
 export function getCache(key) {
+  pruneCache();
   if (cacheStore.has(key)) {
     const { response, expireAt } = cacheStore.get(key);
     if (Date.now() < expireAt) {
