@@ -9,11 +9,13 @@ process.env.HTMLEX_LOG_LEVEL = 'silent';
 
 let originalKeyPath;
 let originalCertPath;
+let originalCertDir;
 let tempDirs;
 
 beforeEach(() => {
   originalKeyPath = process.env.TLS_KEY_PATH;
   originalCertPath = process.env.TLS_CERT_PATH;
+  originalCertDir = process.env.HTMLEX_CERT_DIR;
   tempDirs = [];
 });
 
@@ -28,6 +30,12 @@ afterEach(async () => {
     delete process.env.TLS_CERT_PATH;
   } else {
     process.env.TLS_CERT_PATH = originalCertPath;
+  }
+
+  if (originalCertDir === undefined) {
+    delete process.env.HTMLEX_CERT_DIR;
+  } else {
+    process.env.HTMLEX_CERT_DIR = originalCertDir;
   }
 
   for (const directory of tempDirs) {
@@ -68,4 +76,19 @@ test('getHttpsOptions rejects incomplete explicit TLS configuration', async () =
     () => getHttpsOptions(directory),
     /Both TLS_KEY_PATH and TLS_CERT_PATH/
   );
+});
+
+test('getHttpsOptions reads existing generated localhost certificate files', async () => {
+  const directory = await createTempDir();
+  await writeFile(path.join(directory, 'localhost-key.pem'), 'generated-key');
+  await writeFile(path.join(directory, 'localhost.pem'), 'generated-cert');
+  delete process.env.TLS_KEY_PATH;
+  delete process.env.TLS_CERT_PATH;
+  process.env.HTMLEX_CERT_DIR = directory;
+
+  const options = await getHttpsOptions(path.dirname(directory));
+
+  assert.equal(options.key.toString('utf8'), 'generated-key');
+  assert.equal(options.cert.toString('utf8'), 'generated-cert');
+  assert.equal(options.allowHTTP1, true);
 });

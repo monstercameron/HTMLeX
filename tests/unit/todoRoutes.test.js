@@ -166,3 +166,19 @@ test('loadTodos fails closed to an empty list for invalid JSON', async () => {
 
   assert.deepEqual(await loadTodos(), []);
 });
+
+test('todo widget and list handlers reject non-array persistence data', async () => {
+  await writeFile(dataPath, JSON.stringify({ todos: fixtureTodos }, null, 2));
+
+  const widgetResponse = createResponse();
+  await getToDoWidget(createRequest(), widgetResponse);
+
+  assert.equal(widgetResponse.statusCode, 500);
+  assert.equal(widgetResponse.body, 'Internal server error: Invalid todo data');
+
+  const listResponse = createResponse();
+  await listTodos(createRequest(), listResponse);
+
+  assert.equal(listResponse.statusCode, 500);
+  assert.equal(listResponse.body, 'Internal server error: Invalid todo data');
+});

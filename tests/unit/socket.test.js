@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { setupChatNamespace, setupSocketNamespaces } from '../../src/features/socket.js';
+import {
+  setupChatNamespace,
+  setupCounterNamespace,
+  setupSocketNamespaces,
+  setupUpdatesNamespace,
+} from '../../src/features/socket.js';
 
 process.env.HTMLEX_LOG_LEVEL = 'silent';
 
@@ -87,4 +92,87 @@ test('setupSocketNamespaces registers all expected namespaces', () => {
   assert.equal(typeof server.of('/counter').handlers.get('connection'), 'function');
   assert.equal(typeof server.of('/chat').handlers.get('connection'), 'function');
   assert.equal(typeof server.of('/updates').handlers.get('connection'), 'function');
+});
+
+test('counter namespace emits increments and clears its interval on disconnect', () => {
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  const originalFastMode = process.env.HTMLEX_TEST_FAST;
+  const intervals = [];
+  globalThis.setInterval = (callback, intervalMs) => {
+    intervals.push({ callback, intervalMs, cleared: false });
+    return intervals.length - 1;
+  };
+  globalThis.clearInterval = (intervalId) => {
+    intervals[intervalId].cleared = true;
+  };
+  process.env.HTMLEX_TEST_FAST = '1';
+
+  try {
+    const server = new FakeSocketServer();
+    setupCounterNamespace(server);
+    const socket = new FakeSocket();
+    server.of('/counter').handlers.get('connection')(socket);
+
+    assert.equal(intervals[0].intervalMs, 25);
+
+    intervals[0].callback();
+    intervals[0].callback();
+
+    assert.deepEqual(socket.emitted, [
+      { eventName: 'counter', payload: 1 },
+      { eventName: 'counter', payload: 2 },
+    ]);
+
+    socket.handlers.get('disconnect')();
+    assert.equal(intervals[0].cleared, true);
+  } finally {
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+    if (originalFastMode === undefined) {
+      delete process.env.HTMLEX_TEST_FAST;
+    } else {
+      process.env.HTMLEX_TEST_FAST = originalFastMode;
+    }
+  }
+});
+
+test('updates namespace emits live-update HTML and clears its interval on disconnect', () => {
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  const originalFastMode = process.env.HTMLEX_TEST_FAST;
+  const intervals = [];
+  globalThis.setInterval = (callback, intervalMs) => {
+    intervals.push({ callback, intervalMs, cleared: false });
+    return intervals.length - 1;
+  };
+  globalThis.clearInterval = (intervalId) => {
+    intervals[intervalId].cleared = true;
+  };
+  delete process.env.HTMLEX_TEST_FAST;
+
+  try {
+    const server = new FakeSocketServer();
+    setupUpdatesNamespace(server);
+    const socket = new FakeSocket();
+    server.of('/updates').handlers.get('connection')(socket);
+
+    assert.equal(intervals[0].intervalMs, 3000);
+
+    intervals[0].callback();
+
+    assert.equal(socket.emitted[0].eventName, 'update');
+    assert.match(socket.emitted[0].payload, /Live update at/);
+
+    socket.handlers.get('disconnect')();
+    assert.equal(intervals[0].cleared, true);
+  } finally {
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+    if (originalFastMode === undefined) {
+      delete process.env.HTMLEX_TEST_FAST;
+    } else {
+      process.env.HTMLEX_TEST_FAST = originalFastMode;
+    }
+  }
 });

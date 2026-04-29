@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { render } from '../../src/components/HTMLeX.js';
 import {
+  Aside,
+  Canvas,
   DEMO_SNIPPETS,
+  DemoItem,
+  DemoList,
+  Footer,
+  FullHTML,
+  Header,
   ChatInterfaceDemo,
   ClickCounterWidget,
   HoverTriggerDemo,
@@ -16,10 +23,27 @@ import {
   WebSocketUpdatesDemo,
   loadingStateDemo,
   multiFragmentDemo,
+  renderCounter,
+  renderDefaultIndexPage,
   renderEditForm,
+  renderLoadingMessage,
+  renderNotificationMessage,
   renderTodoList,
+  renderTodoItems,
   TodoWidget
 } from '../../src/components/Components.js';
+
+const sampleDemo = {
+  icon: 'T',
+  title: 'Test Demo',
+  subtitle: 'Unit surface',
+  description: 'Exercises component composition',
+  highlights: ['GET', 'Fragments'],
+  launchButtonText: 'Launch',
+  learnMoreText: 'Docs',
+  learnMoreHref: 'https://example.test/docs',
+  initDemoHref: '/test/init',
+};
 
 test('todo list escapes persisted todo text', () => {
   const html = render(renderTodoList([
@@ -59,6 +83,51 @@ test('todo widget includes the feature HTML snippet inside the demo area', () =>
 
   assert.match(html, /snippet-panel/);
   assert.match(html, /&lt;input id=&quot;todoInput&quot;/);
+});
+
+test('layout components compose the Bootstrap shell and catalog actions', () => {
+  const html = render([
+    Header({ title: 'HTMLeX', subtitle: 'Server UI', className: 'unit-header' }),
+    DemoItem(sampleDemo),
+    DemoList([sampleDemo]),
+    Aside({ demos: [sampleDemo], asideClass: 'unit-aside' }),
+    Canvas({ headerText: 'Canvas', clickCount: 7, sectionClass: 'unit-canvas' }),
+    Footer({
+      year: 2026,
+      copyText: 'HTMLeX',
+      projectLinks: [{ href: '/source', icon: '#', text: 'Source' }],
+      footerClass: 'unit-footer',
+    }),
+  ]);
+
+  assert.match(html, /unit-header/);
+  assert.match(html, /GET="\/test\/init"/);
+  assert.match(html, /catalog-list/);
+  assert.match(html, /unit-aside/);
+  assert.match(html, /id="clickCount"[^>]*>7</);
+  assert.match(html, /Copyright 2026 HTMLeX/);
+});
+
+test('full document and utility renderers expose expected HTML contracts', () => {
+  const documentHtml = render(FullHTML({
+    headerProps: { title: 'HTMLeX', subtitle: 'Testing' },
+    demos: [sampleDemo],
+    canvasProps: { headerText: 'Workspace' },
+    footerProps: {
+      year: 2026,
+      copyText: 'HTMLeX',
+      projectLinks: [{ href: '/docs', icon: '?', text: 'Docs' }],
+    },
+  }));
+
+  assert.match(documentHtml, /^<html lang="en" data-bs-theme="dark">/);
+  assert.match(documentHtml, /bootstrap@5\.3\.8/);
+  assert.match(documentHtml, /\/socket\.io\/socket\.io\.js/);
+  assert.equal(renderCounter(3), 'Counter: 3');
+  assert.match(renderLoadingMessage('Loading'), /aria-hidden="true"/);
+  assert.match(renderNotificationMessage('Done'), /target="this\(remove\)"/);
+  assert.match(renderDefaultIndexPage(), /default-index-page/);
+  assert.match(renderTodoItems([{ id: 9, text: 'Nine' }]), /todo-9/);
 });
 
 test('demo widgets expose their expected HTMLeX declarative attributes', () => {

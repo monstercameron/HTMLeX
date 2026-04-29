@@ -10,7 +10,7 @@ import {
   updateTarget,
 } from '../../src/public/src/dom.js';
 import { fetchWithTimeout } from '../../src/public/src/fetchHelper.js';
-import { Logger, LogLevel } from '../../src/public/src/logger.js';
+import { installRuntimeErrorBoundary, Logger, LogLevel } from '../../src/public/src/logger.js';
 import {
   __getSignalListenerCount,
   emitSignal,
@@ -28,6 +28,7 @@ let originalCustomEvent;
 let originalIo;
 let originalMutationObserver;
 let originalRequestAnimationFrame;
+let originalError;
 let originalWarn;
 let originalWindow;
 let originalLoggerEnabled;
@@ -42,6 +43,7 @@ beforeEach(() => {
   originalIo = globalThis.io;
   originalMutationObserver = globalThis.MutationObserver;
   originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+  originalError = console.error;
   originalWarn = console.warn;
   originalWindow = globalThis.window;
   originalLoggerEnabled = Logger.enabled;
@@ -98,6 +100,7 @@ afterEach(() => {
     globalThis.requestAnimationFrame = originalRequestAnimationFrame;
   }
 
+  console.error = originalError;
   console.warn = originalWarn;
 
   if (originalWindow === undefined) {
@@ -284,6 +287,26 @@ test('fetchWithTimeout passes through successful fetches and converts timeouts',
   );
 });
 
+test('fetchWithTimeout forwards upstream abort signals and cleans listeners', async () => {
+  const upstreamController = new AbortController();
+  let removedListener = false;
+  const originalRemoveEventListener = upstreamController.signal.removeEventListener.bind(upstreamController.signal);
+  upstreamController.signal.removeEventListener = (...args) => {
+    removedListener = true;
+    return originalRemoveEventListener(...args);
+  };
+  globalThis.fetch = async (_url, options = {}) => {
+    upstreamController.abort(new Error('caller aborted'));
+    throw options.signal.reason;
+  };
+
+  await assert.rejects(
+    () => fetchWithTimeout('/abort', { signal: upstreamController.signal }, 0),
+    /caller aborted/
+  );
+  assert.equal(removedListener, true);
+});
+
 test('cache entries expire after their TTL', async () => {
   const key = `cache-expiry-${Date.now()}`;
 
@@ -350,6 +373,47 @@ test('browser logger records diagnostics entries and dispatches log events', () 
   });
   assert.equal(dispatchedEvents.length, 1);
   assert.equal(dispatchedEvents[0].type, Logger.diagnostics.eventName);
+});
+
+test('runtime error boundary records uncaught browser errors and rejected promises', () => {
+  const listeners = new Map();
+  const dispatchedEvents = [];
+  globalThis.window = {
+    addEventListener(eventName, callback) {
+      listeners.set(eventName, callback);
+    },
+    dispatchEvent(event) {
+      dispatchedEvents.push(event);
+    }
+  };
+  globalThis.CustomEvent = class CustomEvent {
+    constructor(type, init = {}) {
+      this.type = type;
+      this.detail = init.detail;
+    }
+  };
+  console.error = () => {};
+  Logger.enabled = true;
+  Logger.logLevel = LogLevel.ERROR;
+  Logger.diagnostics.clear();
+
+  installRuntimeErrorBoundary();
+
+  listeners.get('error')({
+    message: 'runtime failed',
+    filename: 'app.js',
+    lineno: 12,
+    colno: 3,
+    error: new Error('runtime failed'),
+  });
+  listeners.get('unhandledrejection')({
+    reason: 'promise failed',
+  });
+
+  assert.equal(dispatchedEvents.length, 2);
+  assert.equal(Logger.diagnostics.entries.length, 2);
+  assert.equal(Logger.diagnostics.entries[0].message, '[Runtime] Unhandled browser error:');
+  assert.equal(Logger.diagnostics.last(LogLevel.ERROR).args[0], 'promise failed');
 });
 
 test('handleWebSocket connects, stores the socket, and disconnects removed elements', () => {

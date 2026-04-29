@@ -82,3 +82,9 @@ Todo and demo unit coverage expansion:
 - Added unit coverage for todo route handlers, including widget/list rendering, create/update/delete validation, 404 paths, persistence writes, and invalid JSON recovery.
 - Added unit coverage for demo catalog rendering and demo component declarative attributes across notifications, chat, sockets, signals, polling, hover, sequential, and loading examples.
 - Added direct DOM update unit coverage for append/remove target strategies and `htmlex:dom-updated` event dispatch.
+
+Full-surface unit coverage pass:
+
+- Expanded unit coverage from 53 to 96 tests across action handling, registration, DOM diffing, fragment parsing, browser Socket.IO payload normalization, runtime error boundaries, cache TTL behavior, rate-limit event snapshots, and renderer contracts.
+- Added direct unit coverage for streaming route handlers, process steps, socket namespace timers, certificate fallback reads, server logger helper output, and non-array todo persistence handling.
+- Re-ran the complete quality suite: syntax check, modern JavaScript gate, 96 unit tests, and 86 Playwright e2e tests.

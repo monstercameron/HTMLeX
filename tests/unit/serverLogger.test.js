@@ -4,8 +4,13 @@ import {
   createLogRecord,
   formatLogRecord,
   getRequestContext,
+  logFeatureError,
+  logFeatureWarning,
+  logRequestError,
+  logRequestWarning,
   normalizeError,
   normalizeLogValue,
+  serverLogger,
 } from '../../src/serverLogger.js';
 
 test('normalizeError preserves useful Error diagnostics', () => {
@@ -108,4 +113,85 @@ test('formatLogRecord protects JSON formatting even for unsafe raw records', () 
   record.self = record;
 
   assert.equal(JSON.parse(formatLogRecord(record, 'json')).self, '[Circular]');
+});
+
+test('logger helpers honor log levels and route output by severity', () => {
+  const originalLevel = process.env.HTMLEX_LOG_LEVEL;
+  const originalInfo = console.info;
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  const lines = {
+    info: [],
+    warn: [],
+    error: [],
+  };
+  console.info = line => lines.info.push(line);
+  console.warn = line => lines.warn.push(line);
+  console.error = line => lines.error.push(line);
+  process.env.HTMLEX_LOG_LEVEL = 'warn';
+
+  try {
+    serverLogger.info('unit', 'hidden');
+    serverLogger.warn('unit', 'visible warning', { flag: true });
+    serverLogger.error('unit', 'visible error', new Error('bad'));
+
+    assert.equal(lines.info.length, 0);
+    assert.equal(lines.warn.length, 1);
+    assert.match(lines.warn[0], /visible warning/);
+    assert.equal(lines.error.length, 1);
+    assert.match(lines.error[0], /visible error/);
+    assert.match(lines.error[0], /bad/);
+  } finally {
+    console.info = originalInfo;
+    console.warn = originalWarn;
+    console.error = originalError;
+    if (originalLevel === undefined) {
+      delete process.env.HTMLEX_LOG_LEVEL;
+    } else {
+      process.env.HTMLEX_LOG_LEVEL = originalLevel;
+    }
+  }
+});
+
+test('request and feature log helpers mark handled requests and normalize details', () => {
+  const originalLevel = process.env.HTMLEX_LOG_LEVEL;
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  const warnings = [];
+  const errors = [];
+  console.warn = line => warnings.push(line);
+  console.error = line => errors.push(line);
+  process.env.HTMLEX_LOG_LEVEL = 'warn';
+
+  const request = {
+    requestId: 'req-log',
+    method: 'GET',
+    url: '/unit',
+    get() {
+      return 'unit-agent';
+    },
+  };
+
+  try {
+    logRequestWarning(request, 'warned request', { payload: { value: 1n } });
+    logRequestError(request, 'errored request', new Error('failed'), { statusCode: 500 });
+    logFeatureWarning('feature.unit', 'feature warning', { items: [1, 2] });
+    logFeatureError('feature.unit', 'feature error', 'non-error');
+
+    assert.equal(request._htmlexIssueLogged, true);
+    assert.equal(warnings.length, 2);
+    assert.match(warnings.join('\n'), /warned request/);
+    assert.match(warnings.join('\n'), /feature warning/);
+    assert.equal(errors.length, 2);
+    assert.match(errors.join('\n'), /errored request/);
+    assert.match(errors.join('\n'), /feature error/);
+  } finally {
+    console.warn = originalWarn;
+    console.error = originalError;
+    if (originalLevel === undefined) {
+      delete process.env.HTMLEX_LOG_LEVEL;
+    } else {
+      process.env.HTMLEX_LOG_LEVEL = originalLevel;
+    }
+  }
 });

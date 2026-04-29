@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { render, renderFragment, tags } from '../../src/components/HTMLeX.js';
+import {
+  createFragment,
+  escapeAttribute,
+  escapeHtml,
+  generateFragment,
+  rawHtml,
+  render,
+  renderFragment,
+  tags,
+} from '../../src/components/HTMLeX.js';
 
 test('render escapes text nodes by default', () => {
   const html = render(tags.span({}, '<img src=x onerror="globalThis.__xss=1">'));
@@ -43,5 +52,42 @@ test('renderFragment supports fragment attributes without overriding the target'
   assert.equal(
     html,
     '<fragment timer="5000" target="#target(innerHTML)"><div class="ok">Ready</div></fragment>'
+  );
+});
+
+test('escape helpers cover text and attribute-only edge cases', () => {
+  assert.equal(
+    escapeHtml(`Tom & "Jerry" <tag> 'ok'`),
+    'Tom &amp; &quot;Jerry&quot; &lt;tag&gt; &#39;ok&#39;'
+  );
+  assert.equal(escapeAttribute('`template`'), '&#96;template&#96;');
+});
+
+test('render handles arrays, raw HTML, booleans, and omitted attributes', () => {
+  const html = render([
+    tags.input({
+      disabled: true,
+      value: 'ready',
+      hidden: false,
+      title: null,
+      placeholder: undefined,
+    }),
+    rawHtml('<span data-owned="server">Trusted</span>'),
+  ]);
+
+  assert.equal(
+    html,
+    '<input disabled value="ready"></input><span data-owned="server">Trusted</span>'
+  );
+});
+
+test('fragment helpers render status and target attributes consistently', () => {
+  assert.equal(
+    render(createFragment('Missing', '404')),
+    '<fragment status="404">Missing</fragment>'
+  );
+  assert.equal(
+    render(generateFragment('#panel(append)', tags.div({}, 'Ready'), '202')),
+    '<fragment target="#panel(append)" status="202"><div>Ready</div></fragment>'
   );
 });
