@@ -39,3 +39,11 @@ Diagnostics serialization hardening:
 - Made browser diagnostics entries safe and bounded for circular payloads, `BigInt`, DOM elements, events, deep objects, and oversized arrays/objects.
 - Added `Logger.diagnostics.snapshot()` and `Logger.diagnostics.last(level)` helpers for easier DevTools and test inspection.
 - Hardened timer callbacks so stale timers skip work when their `timer` attribute has changed or been removed before the callback runs.
+
+ESNext modernization pass:
+
+- Replaced legacy ES module path shims with `import.meta.dirname` and `import.meta.filename`.
+- Converted Node runtime imports to explicit `node:` specifiers and modernized parsing calls to `Number.parseInt`.
+- Moved TLS certificate loading and generation off synchronous filesystem/process APIs.
+- Updated server entry points and the syntax checker to use top-level `await` with explicit startup error handling.
+- Added a Node engine floor for the ES module runtime APIs used by the app.

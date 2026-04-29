@@ -4,6 +4,9 @@
   "type": "module",
   "description": "Server-driven UI playground and HTMLeX demo app",
   "main": "src/server.js",
+  "engines": {
+    "node": ">=20.11"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon --ignore src/persistence/* src/server.js",
