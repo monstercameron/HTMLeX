@@ -2,12 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { app } from '../../src/app.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const demosPath = path.resolve(__dirname, '../../src/persistence/demos.json');
+const demosPath = path.resolve(import.meta.dirname, '../../src/persistence/demos.json');
 
 function getRegisteredGetRoutes() {
   return app._router.stack

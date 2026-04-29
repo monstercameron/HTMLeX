@@ -1,12 +1,9 @@
 import { expect, test } from '@playwright/test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const dataPath = path.resolve(__dirname, '../../src/persistence/data.json');
-const demosPath = path.resolve(__dirname, '../../src/persistence/demos.json');
+const dataPath = path.resolve(import.meta.dirname, '../../src/persistence/data.json');
+const demosPath = path.resolve(import.meta.dirname, '../../src/persistence/demos.json');
 const appPort = 5600;
 const responseFailures = new WeakMap();
 
