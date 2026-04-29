@@ -109,16 +109,16 @@ export function throttle(callback, limit) {
         timeoutId = null;
         Logger.system.debug("[THROTTLE] Throttle period ended; ready for next call.");
       }, limit);
-      return Promise.resolve()
-        .then(() => callback.apply(context, invocationArgs))
-        .then(result => {
+      return (async () => {
+        try {
+          const result = await callback.apply(context, invocationArgs);
           Logger.system.debug("[THROTTLE] Function executed successfully.");
           return result;
-        })
-        .catch(error => {
+        } catch (error) {
           Logger.system.error("[THROTTLE] Error executing throttled function:", error);
           return undefined;
-        });
+        }
+      })();
     } else {
       Logger.system.warn("[THROTTLE] Function call throttled. Arguments:", args);
       return Promise.resolve(undefined);

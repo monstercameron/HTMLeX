@@ -388,7 +388,7 @@ function registerTimer(element, registrationToken, cleanupFns) {
     return;
   }
 
-  const timerDelayMs = parseInt(element.getAttribute('timer'), 10);
+  const timerDelayMs = Number.parseInt(element.getAttribute('timer'), 10);
   if (!Number.isFinite(timerDelayMs) || timerDelayMs < 0) {
     Logger.system.warn(`[HTMLeX Warning] Ignoring invalid timer delay "${element.getAttribute('timer')}".`);
     return;
@@ -527,7 +527,7 @@ export function registerElement(element) {
     if (methodAttribute) {
       if (triggerEvent === 'submit') event.preventDefault();
       if (isSequentialEnabled(element)) {
-        const sequentialDelay = parseInt(element.getAttribute('sequential'), 10) || 0;
+        const sequentialDelay = Number.parseInt(element.getAttribute('sequential'), 10) || 0;
         element._htmlexSequentialMode = true;
         if (!element._htmlexSequentialQueue) {
           element._htmlexSequentialQueue = [];
@@ -575,16 +575,17 @@ export function registerElement(element) {
         Logger.system.debug("[HTMLeX] Created new AbortController for non-sequential API call for endpoint:", element.getAttribute(methodAttribute));
         element._htmlexPendingCall = setTimeout(() => {
           Logger.system.debug("[HTMLeX] Executing non-sequential API call for endpoint:", element.getAttribute(methodAttribute));
-          handleAction(element, methodAttribute.toUpperCase(), element.getAttribute(methodAttribute), {
-            signal: element._htmlexAbortController.signal,
-            htmlexEvent
-          })
-            .then(() => {
+          (async () => {
+            try {
+              await handleAction(element, methodAttribute.toUpperCase(), element.getAttribute(methodAttribute), {
+                signal: element._htmlexAbortController.signal,
+                htmlexEvent
+              });
               Logger.system.debug("[HTMLeX] Non-sequential API call completed for endpoint:", element.getAttribute(methodAttribute));
-            })
-            .catch(error => {
+            } catch (error) {
               Logger.system.debug("[HTMLeX] Non-sequential API call aborted or errored for endpoint:", element.getAttribute(methodAttribute), error);
-            });
+            }
+          })();
           element._htmlexPendingCall = null;
         }, 0);
       }
@@ -598,14 +599,14 @@ export function registerElement(element) {
   // Apply debounce/throttle if defined.
   let handler = wrappedHandler;
   const rateLimitCleanups = [];
-  const debounceMs = parseInt(element.getAttribute('debounce') || '0', 10);
+  const debounceMs = Number.parseInt(element.getAttribute('debounce') || '0', 10);
   if (debounceMs > 0) {
     const debouncedHandler = debounce(handler, debounceMs);
     rateLimitCleanups.push(() => debouncedHandler.cancel?.());
     handler = debouncedHandler;
     Logger.system.debug(`[HTMLeX] Applied debounce of ${debounceMs}ms`);
   }
-  const throttleMs = parseInt(element.getAttribute('throttle') || '0', 10);
+  const throttleMs = Number.parseInt(element.getAttribute('throttle') || '0', 10);
   if (throttleMs > 0) {
     const throttledHandler = throttle(handler, throttleMs);
     rateLimitCleanups.push(() => throttledHandler.cancel?.());
@@ -632,12 +633,12 @@ export function registerElement(element) {
 
   // Revised polling code to respect the "repeat" attribute.
   if (element.hasAttribute('poll')) {
-    const rawPollInterval = parseInt(element.getAttribute('poll'), 10);
+    const rawPollInterval = Number.parseInt(element.getAttribute('poll'), 10);
     const pollInterval = Number.isFinite(rawPollInterval) && rawPollInterval > 0
       ? Math.max(rawPollInterval, 100)
       : 0;
     if (pollInterval > 0) {
-      const repeatLimit = parseInt(element.getAttribute('repeat') || '0', 10);
+      const repeatLimit = Number.parseInt(element.getAttribute('repeat') || '0', 10);
       let pollIterationCount = 0;
       let pollRemovalObserver = null;
       const clearPolling = () => {
@@ -725,11 +726,16 @@ export function registerElement(element) {
         Logger.system.info("[HTMLeX INFO] Set up lazy auto firing for element.");
       }
     } else if (autoMode === 'prefetch') {
-      Promise.resolve(handler(new Event(triggerEvent))).then(() => {
-        Logger.system.info("[HTMLeX INFO] Prefetch completed for element:", element);
-      });
+      (async () => {
+        try {
+          await handler(new Event(triggerEvent));
+          Logger.system.info("[HTMLeX INFO] Prefetch completed for element:", element);
+        } catch (error) {
+          Logger.system.error("[HTMLeX ERROR] Prefetch failed for element:", element, error);
+        }
+      })();
     } else {
-      const delay = parseInt(autoValue, 10) || 0;
+      const delay = Number.parseInt(autoValue, 10) || 0;
       const autoTimerId = setTimeout(() => {
         if (!document.body.contains(element)) return;
         Logger.system.debug("[HTMLeX] Auto firing action for element after delay:", delay, "ms", element);

@@ -256,7 +256,7 @@ function emitHeaderSignal(element, response) {
 
   for (const param of headerParts.slice(1)) {
     if (param.startsWith('delay=')) {
-      const parsedDelay = parseInt(param.split('=')[1], 10);
+      const parsedDelay = Number.parseInt(param.split('=')[1], 10);
       delayMs = Number.isFinite(parsedDelay) && parsedDelay > 0 ? parsedDelay : 0;
     }
   }
@@ -273,7 +273,7 @@ function emitPublishSignal(element) {
 
   if (!element.hasAttribute('timer')) return;
 
-  const delay = parseInt(element.getAttribute('timer'), 10);
+  const delay = Number.parseInt(element.getAttribute('timer'), 10);
   if (!Number.isFinite(delay) || delay < 0) {
     Logger.system.warn(`[HTMLeX Warning] Ignoring invalid delayed publish timer "${element.getAttribute('timer')}".`);
     return;
@@ -471,8 +471,8 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
     }
   }
 
-  const timeoutMs = parseInt(element.getAttribute('timeout') || '0', 10);
-  const rawRetryCount = parseInt(element.getAttribute('retry') || '0', 10);
+  const timeoutMs = Number.parseInt(element.getAttribute('timeout') || '0', 10);
+  const rawRetryCount = Number.parseInt(element.getAttribute('retry') || '0', 10);
   const retryCount = Number.isFinite(rawRetryCount) && rawRetryCount > 0 ? rawRetryCount : 0;
   let responseText = null;
   let response = null;
@@ -544,7 +544,7 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
   runSuccessSideEffects(element, response);
 
   if (element.hasAttribute('cache')) {
-    const cacheTtl = parseInt(element.getAttribute('cache'), 10);
+    const cacheTtl = Number.parseInt(element.getAttribute('cache'), 10);
     setCache(cacheKey, responseText, cacheTtl);
     Logger.system.debug("Response cached with TTL:", cacheTtl);
   }
