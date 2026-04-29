@@ -96,7 +96,7 @@ export function throttle(callback, limit) {
   let timeoutId = null;
   Logger.system.debug("[THROTTLE] Creating throttled function with limit:", limit, "ms");
 
-  const throttled = function(...args) {
+  const throttled = async function(...args) {
     const context = this;
     Logger.system.debug("[THROTTLE] Throttled function invoked with arguments:", args, "and context:", context);
 
@@ -109,19 +109,17 @@ export function throttle(callback, limit) {
         timeoutId = null;
         Logger.system.debug("[THROTTLE] Throttle period ended; ready for next call.");
       }, limit);
-      return (async () => {
-        try {
-          const result = await callback.apply(context, invocationArgs);
-          Logger.system.debug("[THROTTLE] Function executed successfully.");
-          return result;
-        } catch (error) {
-          Logger.system.error("[THROTTLE] Error executing throttled function:", error);
-          return undefined;
-        }
-      })();
+      try {
+        const result = await callback.apply(context, invocationArgs);
+        Logger.system.debug("[THROTTLE] Function executed successfully.");
+        return result;
+      } catch (error) {
+        Logger.system.error("[THROTTLE] Error executing throttled function:", error);
+        return undefined;
+      }
     } else {
       Logger.system.warn("[THROTTLE] Function call throttled. Arguments:", args);
-      return Promise.resolve(undefined);
+      return undefined;
     }
   };
 

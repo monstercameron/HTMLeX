@@ -295,9 +295,9 @@ server.on('clientError', (error, socket) => {
   }
 });
 
-export function startServer(port = PORT) {
+export async function startServer(port = PORT) {
   if (server.listening) {
-    return Promise.resolve(server);
+    return server;
   }
 
   return new Promise((resolve, reject) => {

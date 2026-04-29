@@ -66,3 +66,8 @@ Modern JavaScript quality gate:
 
 - Added a repo-wide modern JavaScript check to block CommonJS syntax, legacy ESM path shims, sync Node filesystem/process APIs, bare builtin imports, raw `parseInt`, `var` declarations, and Node-side promise-wrapped timer delays.
 - Wired the modernization gate into `npm run quality`.
+
+Modern async cleanup:
+
+- Converted remaining runtime `Promise.resolve` flows to direct `async` returns.
+- Extended the modern JavaScript gate to block `Promise.resolve` and `Promise.reject` helper usage.

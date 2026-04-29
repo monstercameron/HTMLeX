@@ -368,14 +368,14 @@ test('failed response streams clear streaming state', async ({ page }) => {
     <div id="brokenStreamError"></div>
   `);
   await page.evaluate(() => {
-    window.fetch = () => {
+    window.fetch = async () => {
       const encoder = new TextEncoder();
-      return Promise.resolve(new Response(new ReadableStream({
+      return new Response(new ReadableStream({
         start(controller) {
           controller.enqueue(encoder.encode('<fragment target="#brokenStreamOut(innerHTML)">partial stream</fragment>'));
           setTimeout(() => controller.error(new Error('stream exploded')), 0);
         }
-      })));
+      }));
     };
   });
 

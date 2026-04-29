@@ -44,6 +44,7 @@ const SYNC_API_PATTERN = [
   'readdir',
   'stat'
 ].map(name => `${name}Sync`).join('|');
+const PROMISE_STATIC_SETTLERS = ['resolve', 'reject'].join('|');
 
 const LEGACY_PATTERNS = [
   {
@@ -70,6 +71,11 @@ const LEGACY_PATTERNS = [
     label: 'raw parseInt',
     pattern: /(^|[^.\w$])parseInt\s*\(/,
     message: 'Use Number.parseInt for explicit namespaced parsing.'
+  },
+  {
+    label: 'manual promise settlement helper',
+    pattern: new RegExp(`\\bPromise\\.(?:${PROMISE_STATIC_SETTLERS})\\s*\\(`, 'u'),
+    message: 'Use async functions and direct returns/throws instead of Promise.resolve or Promise.reject.'
   },
   {
     label: 'legacy variable declaration',
