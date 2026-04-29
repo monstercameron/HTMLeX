@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getRequestContext, normalizeError } from '../../src/serverLogger.js';
+import {
+  createLogRecord,
+  formatLogRecord,
+  getRequestContext,
+  normalizeError,
+} from '../../src/serverLogger.js';
 
 test('normalizeError preserves useful Error diagnostics', () => {
   const error = new TypeError('Bad input');
@@ -44,4 +49,18 @@ test('getRequestContext extracts request diagnostics without requiring Express i
     userAgent: 'unit-test-agent',
     statusCode: 400,
   });
+});
+
+test('formatLogRecord supports readable text and machine-parseable JSON', () => {
+  const record = createLogRecord('warn', 'http', 'Request completed with HTTP 404.', {
+    requestId: 'req-404',
+    statusCode: 404,
+  });
+
+  assert.match(
+    formatLogRecord(record, 'text'),
+    /^\[[^\]]+\] \[WARN\] \[http\] Request completed with HTTP 404\. \{ requestId: 'req-404', statusCode: 404 \}$/
+  );
+
+  assert.deepEqual(JSON.parse(formatLogRecord(record, 'json')), record);
 });

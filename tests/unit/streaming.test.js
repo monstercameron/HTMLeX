@@ -5,6 +5,8 @@ import { after, before, test } from 'node:test';
 let server;
 let port;
 
+process.env.HTMLEX_LOG_LEVEL = 'silent';
+
 function get(pathname, timeout = 2000, headers = {}) {
   return new Promise((resolve, reject) => {
     const req = https.request(

@@ -8,6 +8,8 @@ import {
   writeFragmentResponse,
 } from '../../src/features/responses.js';
 
+process.env.HTMLEX_LOG_LEVEL = 'silent';
+
 function createResponse({ headersSent = false, writableEnded = false } = {}) {
   return {
     body: '',

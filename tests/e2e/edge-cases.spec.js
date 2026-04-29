@@ -12,6 +12,54 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
 });
 
+test('browser diagnostics record warnings, errors, and runtime boundary events', async ({ page }) => {
+  const diagnostics = await page.evaluate(async () => {
+    await import('/src/htmlex.js');
+    const { Logger, LogLevel } = await import('/src/logger.js');
+    Logger.logLevel = LogLevel.WARN;
+    Logger.diagnostics.clear();
+
+    const events = [];
+    window.addEventListener(Logger.diagnostics.eventName, event => events.push(event.detail));
+
+    Logger.system.warn('Inspectable warning', { feature: 'diagnostics' });
+    Logger.system.error('Inspectable error', new Error('diagnostic failure'));
+    window.dispatchEvent(new ErrorEvent('error', {
+      message: 'Runtime boundary failure',
+      filename: 'diagnostics-fixture.js',
+      lineno: 7,
+      colno: 13,
+      error: new Error('Runtime boundary failure')
+    }));
+
+    return {
+      entries: Logger.diagnostics.entries,
+      events,
+      globalEntries: window[Logger.diagnostics.globalName].entries,
+    };
+  });
+
+  expect(diagnostics.entries).toHaveLength(3);
+  expect(diagnostics.events).toHaveLength(3);
+  expect(diagnostics.globalEntries).toHaveLength(3);
+  expect(diagnostics.entries.map(entry => entry.level)).toEqual(['warn', 'error', 'error']);
+  expect(diagnostics.entries[0]).toMatchObject({
+    scope: '[HTMLeX SYSTEM WARN]',
+    message: 'Inspectable warning',
+  });
+  expect(diagnostics.entries[1].args[0]).toMatchObject({
+    name: 'Error',
+    message: 'diagnostic failure',
+  });
+  expect(diagnostics.entries[2].message).toBe('[Runtime] Unhandled browser error:');
+  expect(diagnostics.entries[2].args[0]).toMatchObject({
+    message: 'Runtime boundary failure',
+    source: 'diagnostics-fixture.js',
+    line: 7,
+    column: 13,
+  });
+});
+
 test('handles descendant target selectors and multiple target instructions', async ({ page }) => {
   await page.route('**/edge/targets', route => route.fulfill({
     contentType: 'text/html',
