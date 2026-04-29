@@ -1,5 +1,9 @@
 import { tags, tag, render } from '../components/HTMLeX.js';
 
+function socketDelay(ms) {
+  return process.env.HTMLEX_TEST_FAST === '1' ? Math.min(ms, 25) : ms;
+}
+
 
 /**
  * @fileoverview Domain logic for Socket.IO namespaces.
@@ -15,12 +19,11 @@ import { tags, tag, render } from '../components/HTMLeX.js';
 export function setupCounterNamespace(io) {
     const counterNamespace = io.of('/counter');
     counterNamespace.on('connection', (socket) => {
-      console.log("New Socket.IO connection on /counter");
       let count = 0;
       const interval = setInterval(() => {
         count++;
         socket.emit('counter', count);
-      }, 1000);
+      }, socketDelay(1000));
       socket.on('disconnect', () => clearInterval(interval));
     });
   }
@@ -34,13 +37,17 @@ export function setupCounterNamespace(io) {
   export function setupChatNamespace(io, getChatHistory) {
     const chatNamespace = io.of('/chat');
     chatNamespace.on('connection', (socket) => {
-      console.log("New Socket.IO connection on /chat");
       // Send existing chat history to the client.
       socket.emit('chatHistory', { history: getChatHistory() });
       // Listen for new chat messages from clients.
       socket.on('chatMessage', (msg) => {
-        // The broadcasting is handled by domain logic in chat module.
-        chatNamespace.emit('chatMessage', msg);
+        const text = String(msg?.text ?? msg?.message ?? '').trim().slice(0, 1000);
+        if (!text) return;
+        chatNamespace.emit('chatMessage', {
+          id: Date.now(),
+          username: String(msg?.username ?? 'Anonymous').trim().slice(0, 50) || 'Anonymous',
+          text
+        });
       });
     });
   }
@@ -52,11 +59,10 @@ export function setupCounterNamespace(io) {
   export function setupUpdatesNamespace(io) {
     const updatesNamespace = io.of('/updates');
     updatesNamespace.on('connection', (socket) => {
-      console.log("New Socket.IO connection on /updates");
       const interval = setInterval(() => {
-        const updateMsg = `<div class="p-2 bg-gray-700 rounded-md text-gray-100">Live update at ${new Date().toLocaleTimeString()}</div>`;
+        const updateMsg = `<div class="surface-muted p-3 small mb-2">Live update at ${new Date().toLocaleTimeString()}</div>`;
         socket.emit('update', updateMsg);
-      }, 3000);
+      }, socketDelay(3000));
       socket.on('disconnect', () => clearInterval(interval));
     });
   }

@@ -10,6 +10,13 @@
  * @type {Array<Object>}
  */
 let chatMessages = [];
+const MAX_CHAT_MESSAGES = 100;
+const MAX_USERNAME_LENGTH = 50;
+const MAX_MESSAGE_LENGTH = 1000;
+
+function normalizeText(value, maxLength) {
+  return String(value ?? '').trim().slice(0, maxLength);
+}
 
 /**
  * Handles sending a chat message.
@@ -22,7 +29,7 @@ let chatMessages = [];
  */
 export async function sendChatMessage(req, res, chatNamespace) {
   try {
-    const message = req.body.message;
+    const message = normalizeText(req.body.message, MAX_MESSAGE_LENGTH);
     if (!message) {
       if (!res.headersSent) {
         res.status(400).send('Missing chat message');
@@ -31,10 +38,11 @@ export async function sendChatMessage(req, res, chatNamespace) {
     }
     const newMessage = {
       id: Date.now(),
-      username: req.body.username || 'Anonymous',
+      username: normalizeText(req.body.username, MAX_USERNAME_LENGTH) || 'Anonymous',
       text: message
     };
     chatMessages.push(newMessage);
+    chatMessages = chatMessages.slice(-MAX_CHAT_MESSAGES);
     // Broadcast the new message via the provided Socket.IO namespace.
     chatNamespace.emit('chatMessage', newMessage);
     res.status(204).end();

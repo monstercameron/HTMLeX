@@ -16,7 +16,7 @@ import {
   TodoWidget,
 
 } from '../components/Components.js';
-import { renderFragment } from "../components/HTMLeX.js"
+import { render, renderFragment } from "../components/HTMLeX.js"
 
 // Determine the directory name of this module.
 const __filename = fileURLToPath(import.meta.url);
@@ -49,7 +49,6 @@ export async function loadTodos() {
   await ensureDataFile();
   try {
     const data = await fs.promises.readFile(dataPath, 'utf8');
-    console.log('Loaded todos data:', data);
     return JSON.parse(data);
   } catch (err) {
     console.error('Error loading todos:', err);
@@ -98,7 +97,6 @@ export async function getToDoWidget(req, res) {
 export async function writeTodos(todos) {
   try {
     await fs.promises.writeFile(dataPath, JSON.stringify(todos, null, 2));
-    console.log('Successfully wrote todos to file');
   } catch (err) {
     console.error('Error writing todos:', err);
     throw err;
@@ -118,19 +116,20 @@ export async function createTodo(req, res) {
   try {
     const todos = await loadTodos();
     const newText = Array.isArray(req.body.todo) ? req.body.todo[0] : req.body.todo;
-    if (!newText) {
+    const normalizedText = String(newText ?? '').trim();
+    if (!normalizedText) {
       console.error('Missing todo text in request');
       if (!res.headersSent) {
         res.status(400).send('Missing todo text');
       }
       return;
     }
-    const newTodo = { id: Date.now(), text: newText };
+    const newTodo = { id: Date.now(), text: normalizedText };
     todos.push(newTodo);
     await writeTodos(todos);
-    const htmlSnippet = renderTodoList(todos);
+    const htmlSnippet = render(renderTodoList(todos));
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment('#todoList(innerHTML)', htmlSnippet));
+    res.send(renderFragment('#todoList(outerHTML)', htmlSnippet));
   } catch (err) {
     console.error('Error in createTodo:', err);
     if (!res.headersSent) res.status(500).send('Internal server error');
@@ -154,9 +153,9 @@ export async function listTodos(req, res) {
         return res.status(500).send('Internal server error: Invalid todo data');
       return;
     }
-    const htmlSnippet = renderTodoList(todos);
+    const htmlSnippet = render(renderTodoList(todos));
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment('#todoList(innerHTML)', htmlSnippet));
+    res.send(renderFragment('#todoList(outerHTML)', htmlSnippet));
   } catch (err) {
     console.error('Error in listTodos:', err);
     if (!res.headersSent) res.status(500).send('Internal server error');
@@ -180,7 +179,7 @@ export async function getTodoItem(req, res) {
       if (!res.headersSent) return res.status(404).send('Todo not found');
       return;
     }
-    const htmlSnippet = renderTodoItem(todo);
+    const htmlSnippet = render(renderTodoItem(todo));
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(renderFragment(`#editForm-${id}(outerHTML)`, htmlSnippet));
   } catch (err) {
@@ -234,14 +233,15 @@ export async function updateTodo(req, res) {
       return;
     }
     const newText = Array.isArray(req.body.todo) ? req.body.todo[0] : req.body.todo;
-    if (!newText) {
+    const normalizedText = String(newText ?? '').trim();
+    if (!normalizedText) {
       console.error('Missing updated todo text');
       if (!res.headersSent) return res.status(400).send('Missing updated todo text');
       return;
     }
-    todos[index].text = newText;
+    todos[index].text = normalizedText;
     await writeTodos(todos);
-    const updatedTodoItem = renderTodoItem(todos[index]);
+    const updatedTodoItem = render(renderTodoItem(todos[index]));
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(renderFragment(`#editForm-${id}(outerHTML)`, updatedTodoItem));
   } catch (err) {
@@ -270,9 +270,9 @@ export async function deleteTodo(req, res) {
     }
     todos.splice(index, 1);
     await writeTodos(todos);
-    const updatedList = renderTodoList(todos);
+    const updatedList = render(renderTodoList(todos));
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderFragment('#todoList(innerHTML)', updatedList));
+    res.send(renderFragment('#todoList(outerHTML)', updatedList));
   } catch (err) {
     console.error('Error in deleteTodo:', err);
     if (!res.headersSent) res.status(500).send('Internal server error');

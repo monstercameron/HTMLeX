@@ -1,10 +1,8 @@
 /**
- * @fileoverview Components for HTMLeX responses built entirely using the HTMLeX JavaScript API.
- * This file composes virtual nodes using functions imported from HTMLeX.js.
+ * @fileoverview Components for HTMLeX responses built with the HTMLeX JavaScript API.
  */
 
-import { debounce } from '../public/src/rateLimit.js';
-import { tags, tag, render, renderFragment } from './HTMLeX.js';
+import { tags, render } from './HTMLeX.js';
 
 const {
   html,
@@ -12,12 +10,13 @@ const {
   meta,
   title,
   script,
-  style,
   body,
   div,
+  main,
   header,
   h1,
   h2,
+  h3,
   p,
   aside,
   ul,
@@ -30,32 +29,110 @@ const {
   input,
   label,
   form,
-  br
+  pre,
+  code,
+  small
 } = tags;
+
+const APP_BG = 'app-root';
+const PANE = 'app-pane';
+const WIDGET = 'widget';
+const WIDGET_TITLE = 'widget-title';
+const MUTED_TEXT = 'muted-copy';
+const FIELD = 'form-control';
+const PRIMARY_BUTTON = 'btn btn-primary';
+const SECONDARY_BUTTON = 'btn btn-outline-light';
+const DANGER_BUTTON = 'btn btn-outline-danger';
+
+export const DEMO_SNIPPETS = {
+  todo: `<form POST="/todos/create" target="#todoList(outerHTML)" publish="todoCreated" sequential="150">
+  <input id="todoInput" name="todo" required>
+  <button type="submit">Add Todo</button>
+</form>
+<div id="todoList"></div>`,
+  infiniteScroll: `<div id="infiniteList">
+  <button GET="/items/loadMore" target="#infiniteList(append)">
+    Load More
+  </button>
+</div>`,
+  notifications: `<button GET="/notifications" target="#notificationArea(innerHTML)">
+  Get Notification
+</button>
+<div id="notificationArea" timer="5000"></div>`,
+  clickCounter: `<div id="counterDisplay">0</div>
+<button GET="/counter/increment" trigger="click" target="#counterDisplay(innerHTML)">
+  Click Me
+</button>`,
+  chat: `<div id="chatMessages" socket="/chat" target="#chatMessages(innerHTML)"></div>
+<form POST="/chat/send" target="#chatMessages(innerHTML)" extras="username=DemoUser">
+  <input name="message" required>
+  <button type="submit">Send</button>
+</form>`,
+  multiFragment: `<button GET="/multi/fragment" target="#multiUpdate1(innerHTML) #multiUpdate2(append)">
+  Load Multi-Fragment Update
+</button>
+<div id="multiUpdate1"></div>
+<div id="multiUpdate2"></div>`,
+  signalChaining: `<button publish="chain1">Start Process</button>
+<div subscribe="chain1" trigger="signal" GET="/process/step1" target="#chainOutput(append)" publish="chain2"></div>
+<div subscribe="chain2" trigger="signal" GET="/process/step2" target="#chainOutput(append)"></div>`,
+  sse: `<button GET="/sse/subscribe">Get SSE Signal</button>
+<div subscribe="sseUpdate" GET="/sse/subscribe/message" target="this(innerHTML)">
+  SSE updates will appear here...
+</div>`,
+  websocketUpdates: `<div id="liveFeed" socket="/updates" target="#liveFeed(innerHTML)">
+  Connecting to live feed...
+</div>`,
+  sequential: `<button GET="/sequential/next" target="#sequentialOutput(append)" sequential="2500">
+  Run Sequential
+</button>
+<div id="sequentialOutput"></div>`,
+  loading: `<button GET="/demo/loading" target="#loadingDemoOutput(innerHTML)">
+  Load Payload
+</button>
+<div id="loadingDemoOutput"></div>`,
+  polling: `<div id="pollingOutput" GET="/polling/tick" target="#pollingOutput(innerHTML)" poll="1000" repeat="3" auto="true">
+  Waiting for polling update...
+</div>`,
+  hover: `<button GET="/hover/message" trigger="mouseenter" target="#hoverOutput(innerHTML)" debounce="250">
+  Hover Action
+</button>
+<div id="hoverOutput"></div>`
+};
+
+export function HtmlSnippet({ title: snippetTitle = 'HTML pattern', snippet }) {
+  return div(
+    { class: 'snippet-panel mt-4 p-3' },
+    div(
+      { class: 'd-flex align-items-center justify-content-between gap-3 mb-3' },
+      h3({ class: 'h6 mb-0' }, snippetTitle),
+      span({ class: 'badge rounded-pill text-bg-secondary' }, 'HTML')
+    ),
+    pre({}, code({}, snippet.trim()))
+  );
+}
 
 /* ===========================
    Header Component
    =========================== */
 
-/**
- * Renders the header component.
- *
- * @param {Object} params
- * @param {string} params.title - Main title text.
- * @param {string} [params.subtitle] - Optional subtitle text.
- * @param {string} [params.className] - Additional CSS classes.
- * @returns {Object} A virtual node representing the header.
- */
 export function Header({ title, subtitle = '', className = '' } = {}) {
   return header(
-    { class: `bg-blue-600 dark:bg-blue-800 shadow-md ${className}` },
+    { class: `app-header border-bottom ${className}` },
     div(
-      { class: 'container mx-auto px-4 py-4' },
-      h1(
-        { class: 'text-3xl font-bold text-white animate-fadeIn' },
-        title
+      { class: 'container-fluid d-flex flex-wrap align-items-center justify-content-between gap-3 py-3' },
+      div(
+        {},
+        p({ class: 'small fw-semibold text-uppercase text-primary mb-1' }, 'Server-driven UI lab'),
+        h1({ class: 'h4 mb-0' }, title),
+        ...(subtitle ? [p({ class: `small ${MUTED_TEXT} mt-1 mb-0` }, subtitle)] : [])
       ),
-      ...(subtitle ? [p({ class: 'text-white' }, subtitle)] : [])
+      div(
+        { class: 'd-none d-sm-flex align-items-center gap-2 small text-subtle' },
+        span({ class: 'demo-chip' }, 'HTTPS'),
+        span({ class: 'demo-chip' }, 'Fragments'),
+        span({ class: 'demo-chip' }, 'Socket.IO')
+      )
     )
   );
 }
@@ -64,103 +141,51 @@ export function Header({ title, subtitle = '', className = '' } = {}) {
    Demo Atomic Components
    =========================== */
 
-/**
- * Renders the decorative background shapes for a demo item.
- *
- * @param {Object} params
- * @param {string} params.bgShape1 - CSS classes for the first background shape.
- * @param {string} params.bgShape2 - CSS classes for the second background shape.
- * @returns {Object[]} An array of virtual nodes.
- */
-export function DemoBackground({ bgShape1, bgShape2 }) {
-  return [
-    div({
-      class: `absolute -top-8 -left-8 w-32 h-32 ${bgShape1} rounded-full mix-blend-multiply filter blur-3xl opacity-50`,
-    }),
-    div({
-      class: `absolute -bottom-8 -right-8 w-40 h-40 ${bgShape2} rounded-full mix-blend-multiply filter blur-3xl opacity-50`,
-    }),
-  ];
+export function DemoBackground() {
+  return [];
 }
 
-/**
- * Renders the header section of a demo item.
- *
- * @param {Object} params
- * @param {string} params.icon - Demo icon.
- * @param {string} params.title - Demo title.
- * @param {string} params.subtitle - Demo subtitle.
- * @returns {Object} A virtual node for the demo header.
- */
-export function DemoHeader({ icon, title, subtitle }) {
+export function DemoHeader({ icon, title: demoTitle, subtitle }) {
   return div(
-    { class: 'flex items-center' },
+    { class: 'd-flex align-items-start gap-3' },
     div(
-      { class: 'w-12 h-12 flex items-center justify-center bg-white dark:bg-gray-800 rounded-full shadow-lg mr-4' },
-      span({ class: 'text-2xl' }, icon)
+      { class: 'demo-icon d-flex align-items-center justify-content-center flex-shrink-0' },
+      icon
     ),
     div(
-      {},
-      h2({ class: 'text-2xl font-extrabold text-gray-800 dark:text-gray-100' }, title),
-      span({ class: 'text-sm text-gray-600 dark:text-gray-400' }, subtitle)
+      { class: 'min-w-0' },
+      h2({ class: 'h6 mb-1' }, demoTitle),
+      small({ class: 'text-subtle' }, subtitle)
     )
   );
 }
 
-/**
- * Renders the description of a demo item.
- *
- * @param {string} description - Demo description.
- * @returns {Object} A virtual node for the description.
- */
 export function DemoDescription(description) {
-  return p({ class: 'text-gray-700 dark:text-gray-300' }, description);
+  return p({ class: `small ${MUTED_TEXT} mb-0` }, description);
 }
 
-/**
- * Renders the highlights section of a demo item.
- *
- * @param {string} highlights - Demo highlights text.
- * @returns {Object} A virtual node for the highlights.
- */
 export function DemoHighlights(highlights) {
   return div(
-    { class: 'p-3 bg-white dark:bg-gray-800 rounded-xl shadow-md' },
-    p(
-      { class: 'text-sm text-gray-600 dark:text-gray-400' },
-      span({}, 'Highlights:'), "<br />",
-      ' ',
-      highlights.join("<br />")
-    )
+    { class: 'd-flex flex-wrap gap-2' },
+    ...highlights.map(highlight => span({ class: 'demo-chip' }, highlight))
   );
 }
 
-/**
- * Renders the action buttons for a demo item.
- *
- * @param {Object} params
- * @param {string} params.launchButtonText - Text for the launch button.
- * @param {string} params.learnMoreText - Text for the learn more link.
- * @param {string} params.learnMoreHref - URL for the learn more link.
- * @param {Object} gradients
- * @param {string} gradients.buttonGradient - CSS classes for the button.
- * @param {string} gradients.linkColor - CSS classes for the link.
- * @returns {Object} A virtual node for the actions.
- */
 export function DemoActions(
   { launchButtonText, learnMoreText, learnMoreHref, initDemoHref },
-  { buttonGradient, linkColor }
+  _gradients = {}
 ) {
   return div(
-    { class: 'flex items-center justify-between' },
+    { class: 'd-flex align-items-center justify-content-between gap-3 pt-1' },
     button(
       {
-        class: `px-6 py-2 ${buttonGradient} text-white font-semibold rounded-full shadow-md hover:transition transform hover:scale-105`, "GET": initDemoHref
+        class: `${PRIMARY_BUTTON} btn-sm`,
+        GET: initDemoHref
       },
       launchButtonText
     ),
     a(
-      { href: learnMoreHref, class: `text-sm font-medium ${linkColor} hover:underline` },
+      { href: learnMoreHref, class: 'small text-subtle text-decoration-none' },
       learnMoreText
     )
   );
@@ -170,27 +195,15 @@ export function DemoActions(
    Composite Demo Components
    =========================== */
 
-/**
- * Composes a single demo item from atomic components.
- *
- * @param {Object} demo - Demo data.
- * @returns {Object} A virtual node representing the demo item.
- */
 export function DemoItem(demo) {
   return li(
-    {
-      class: `relative p-4 ${demo.gradients.container} rounded-2xl shadow-2xl overflow-hidden transform transition duration-300 hover:scale-105 hover:shadow-3xl`,
-    },
-    ...DemoBackground({
-      bgShape1: demo.gradients.bgShape1,
-      bgShape2: demo.gradients.bgShape2,
-    }),
+    { class: 'demo-card' },
     div(
-      { class: 'relative z-10 flex flex-col space-y-4' },
+      { class: 'd-grid gap-3' },
       DemoHeader({
         icon: demo.icon,
         title: demo.title,
-        subtitle: demo.subtitle,
+        subtitle: demo.subtitle
       }),
       DemoDescription(demo.description),
       DemoHighlights(demo.highlights),
@@ -199,42 +212,30 @@ export function DemoItem(demo) {
           launchButtonText: demo.launchButtonText,
           learnMoreText: demo.learnMoreText,
           learnMoreHref: demo.learnMoreHref,
-          initDemoHref: demo.initDemoHref,
+          initDemoHref: demo.initDemoHref
         },
-        {
-          buttonGradient: demo.gradients.buttonGradient,
-          linkColor: demo.gradients.linkColor,
-        }
+        demo.gradients
       )
     )
   );
 }
 
-/**
- * Renders a list of demo items.
- *
- * @param {Object[]} demos - Array of demo data objects.
- * @returns {Object} A virtual node for the demo list.
- */
 export function DemoList(demos) {
   const items = demos.map((demo) => DemoItem(demo));
-  return ul({ class: 'space-y-6 p-4' }, ...items);
+  return ul({ class: 'catalog-list list-unstyled mb-0 d-grid gap-3' }, ...items);
 }
 
-/**
- * Renders the aside component containing demos.
- *
- * @param {Object} params
- * @param {Object[]} params.demos - Array of demo data objects.
- * @param {string} [params.asideClass] - Additional CSS classes.
- * @returns {Object} A virtual node representing the aside.
- */
 export function Aside({ demos, asideClass = '' } = {}) {
   return aside(
-    { class: `lg:w-1/3 bg-white dark:bg-gray-800 rounded-lg shadow-md h-[70vh] overflow-y-auto ${asideClass}` },
+    { class: `catalog-pane ${PANE} ${asideClass}` },
     div(
-      { class: 'p-4 border-b border-gray-200 dark:border-gray-700' },
-      h2({ class: 'text-xl font-semibold' }, 'Demos')
+      { class: 'pane-header d-flex align-items-end justify-content-between gap-3' },
+      div(
+        {},
+        p({ class: 'small text-uppercase text-subtle mb-1' }, 'Catalog'),
+        h2({ class: 'h6 mb-0' }, 'Demos')
+      ),
+      span({ class: 'badge rounded-pill text-bg-primary' }, 'Live')
     ),
     DemoList(demos)
   );
@@ -244,32 +245,28 @@ export function Aside({ demos, asideClass = '' } = {}) {
    Canvas Component
    =========================== */
 
-/**
- * Renders the canvas component.
- *
- * @param {Object} params
- * @param {string} params.headerText - Header text for the canvas.
- * @param {number|string} [params.clickCount=0] - Initial click count.
- * @param {string} [params.sectionClass] - Additional CSS classes.
- * @returns {Object} A virtual node representing the canvas.
- */
 export function Canvas({ headerText, clickCount = 0, sectionClass = '' } = {}) {
   return section(
-    { class: `lg:w-2/3 bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 h-[70vh] flex flex-col ${sectionClass}` },
-    h2(
-      { class: 'text-2xl font-semibold mb-4 flex-shrink-0' },
-      headerText
+    { class: `workspace-pane ${PANE} ${sectionClass}` },
+    div(
+      { class: 'pane-header d-flex flex-wrap align-items-center justify-content-between gap-3' },
+      div(
+        {},
+        p({ class: 'small text-uppercase text-subtle mb-1' }, 'Workspace'),
+        h2({ class: 'h6 mb-0' }, headerText)
+      ),
+      span({ class: 'small text-subtle' }, 'Interactive canvas')
     ),
     div(
-      { class: 'flex-grow flex items-center justify-center' },
+      { class: 'workspace-scroll' },
       div(
-        { id: 'clicker', class: 'flex flex-col items-center justify-center' },
+        { id: 'clicker', class: 'workspace-empty d-flex flex-column align-items-center justify-content-center text-center p-4' },
         p(
-          { id: 'clickCount', class: 'text-3xl font-bold text-gray-800 dark:text-gray-100 mb-4' },
+          { id: 'clickCount', class: 'display-4 fw-semibold mb-4' },
           String(clickCount)
         ),
         button(
-          { id: 'clickButton', class: 'px-6 py-3 bg-blue-500 text-white rounded-full shadow-md hover:bg-blue-600 transition transform hover:scale-105' },
+          { id: 'clickButton', class: PRIMARY_BUTTON },
           'Click me!'
         )
       )
@@ -281,31 +278,21 @@ export function Canvas({ headerText, clickCount = 0, sectionClass = '' } = {}) {
    Footer Component
    =========================== */
 
-/**
- * Renders the footer component.
- *
- * @param {Object} params
- * @param {number|string} params.year - Year to display.
- * @param {string} params.copyText - Copyright text.
- * @param {Object[]} params.projectLinks - Array of project link objects.
- * @param {string} [params.footerClass] - Additional CSS classes.
- * @returns {Object} A virtual node representing the footer.
- */
 export function Footer({ year, copyText, projectLinks, footerClass = '' } = {}) {
-  const links = projectLinks.map((link) =>
+  const links = projectLinks.map((projectLink) =>
     a(
-      { href: link.href, class: 'flex items-center text-blue-600 dark:text-blue-400 hover:underline' },
-      span({ class: 'mr-1' }, link.icon),
-      ' ',
-      link.text
+      { href: projectLink.href, class: 'd-inline-flex align-items-center text-decoration-none' },
+      span({ class: 'me-1' }, projectLink.icon),
+      projectLink.text
     )
   );
+
   return footer(
-    { class: `bg-gray-200 dark:bg-gray-800 border-t border-gray-300 dark:border-gray-700 ${footerClass}` },
+    { class: `app-footer border-top ${footerClass}` },
     div(
-      { class: 'container mx-auto px-4 py-4 flex flex-col lg:flex-row justify-between items-center' },
-      p({ class: 'text-sm' }, `© ${year} ${copyText}`),
-      div({ class: 'flex space-x-4 mt-2 lg:mt-0' }, ...links)
+      { class: 'container-fluid d-flex flex-column flex-sm-row align-items-sm-center justify-content-between gap-2 py-3 small text-subtle' },
+      p({ class: 'mb-0' }, `Copyright ${year} ${copyText}`),
+      div({ class: 'd-flex gap-3' }, ...links)
     )
   );
 }
@@ -314,259 +301,163 @@ export function Footer({ year, copyText, projectLinks, footerClass = '' } = {}) 
    Full HTML Document Composition
    =========================== */
 
-/**
- * Composes the full HTML document using HTMLeX components.
- *
- * @param {Object} params
- * @param {Object} params.headerProps - Properties for the header.
- * @param {Object[]} params.demos - Array of demo data objects.
- * @param {Object} params.canvasProps - Properties for the canvas.
- * @param {Object} params.footerProps - Properties for the footer.
- * @returns {Object} A virtual node representing the full HTML document.
- */
 export function FullHTML({ headerProps, demos, canvasProps, footerProps }) {
   return html(
-    { lang: 'en', class: 'dark' },
+    { lang: 'en', 'data-bs-theme': 'dark' },
     head(
       {},
       meta({ charset: 'UTF-8' }),
       meta({ name: 'viewport', content: 'width=device-width, initial-scale=1.0' }),
       title({}, 'HTMLeX playgrounds'),
-      script({ src: 'https://cdn.tailwindcss.com' }),
-      style(
-        {},
-        `
-        /* Hide scrollbar for Chrome, Safari and Opera */
-        .hide-scrollbar::-webkit-scrollbar { display: none; }
-        /* Hide scrollbar for IE, Edge and Firefox */
-        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        `
-      )
+      tags.link({
+        href: 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css',
+        rel: 'stylesheet',
+        integrity: 'sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB',
+        crossorigin: 'anonymous'
+      }),
+      tags.link({ href: './styles.css', rel: 'stylesheet' }),
+      script({ src: '/socket.io/socket.io.js' })
     ),
     body(
-      { class: 'bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 font-sans antialiased min-h-screen flex flex-col' },
+      { class: APP_BG },
       Header(headerProps),
-      div(
-        { class: 'container mx-auto px-4 py-6 flex-1 flex flex-col lg:flex-row gap-6' },
+      main(
+        { class: 'app-shell container-fluid' },
         Aside({ demos }),
         Canvas(canvasProps)
       ),
-      Footer(footerProps)
+      Footer(footerProps),
+      script({
+        src: 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js',
+        integrity: 'sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI',
+        crossorigin: 'anonymous'
+      })
     )
   );
 }
 
-/**
- * Creates a virtual DOM node representing an individual todo item using HTMLeX virtual nodes.
- * The node includes action buttons for editing and deleting, styled for dark mode.
- *
- * @param {Object} todo - A todo object.
- * @param {number} todo.id - The unique identifier of the todo.
- * @param {string} todo.text - The text description of the todo.
- * @returns {VNode} A virtual DOM node representing the todo item.
- *
- * @example
- * const todoNode = renderTodoItem({ id: 123, text: 'Buy milk' });
- */
+/* ===========================
+   Todo Components
+   =========================== */
+
 export function renderTodoItem(todo) {
-  // Create an edit button that performs a GET request to the edit endpoint.
   const editButton = button(
     {
       GET: `/todos/edit/${todo.id}`,
-      class: 'edit-button bg-blue-600 hover:bg-blue-500 text-gray-100 py-1 px-3 rounded'
+      class: `edit-button ${SECONDARY_BUTTON} btn-sm`
     },
     'Edit'
   );
 
-  // Create a delete button that performs a DELETE request to the todo endpoint.
   const deleteButton = button(
     {
       DELETE: `/todos/${todo.id}`,
-      class: 'delete-button bg-red-600 hover:bg-red-500 text-gray-100 py-1 px-3 rounded'
+      class: `delete-button ${DANGER_BUTTON} btn-sm`
     },
     'Delete'
   );
 
-  // Wrap the buttons in a container with spacing.
   const actionsDiv = div(
-    { class: 'todo-actions flex space-x-2 mt-2' },
+    { class: 'todo-actions d-flex flex-wrap gap-2' },
     editButton,
     deleteButton
   );
 
-  // Create a span for the todo text with dark mode–friendly styling.
   const todoText = span(
-    { class: 'todo-text text-lg font-medium text-gray-200' },
+    { class: 'todo-text flex-grow-1 fw-medium' },
     todo.text
   );
 
-  // Return the virtual DOM node for the todo item.
   return div(
     {
       id: `todo-${todo.id}`,
-      class: 'todo-item p-4 border rounded-lg shadow my-2 bg-gray-800 border-gray-700'
+      class: 'todo-item surface-muted d-flex align-items-center justify-content-between gap-3 p-3 mb-2'
     },
     todoText,
     actionsDiv
   );
 }
 
-/**
- * Creates a virtual DOM structure representing a list of todo items with dark mode styling.
- * Instead of rendering to HTML immediately, it returns a virtual DOM node with the individual
- * todo nodes spread as children.
- *
- * @param {Array<Object>} todos - An array of todo objects.
- * @returns {VNode} A virtual DOM node representing the todo list.
- *
- * @example
- * const todoListNode = renderTodoList([{ id: 123, text: 'Buy milk' }]);
- * // Later, todoListNode can be rendered to HTML.
- */
 export function renderTodoList(todos) {
   if (!todos.length) {
     return div(
-      { class: 'no-todos text-gray-400 p-4 bg-gray-800 rounded-lg' },
+      { id: 'todoList', class: 'no-todos workspace-empty d-flex align-items-center justify-content-center text-center p-4 small text-subtle' },
       'No todos available.'
     );
   }
 
-  // Create an array of virtual DOM nodes for each todo.
   const todoNodes = todos.map(todo => renderTodoItem(todo));
 
-  // Return the container virtual DOM node with the todo nodes spread as children.
   return div(
-    { id: 'todoList', class: 'todo-list space-y-4 bg-gray-900 p-4 rounded-lg shadow' },
+    { id: 'todoList', class: 'todo-list surface p-3' },
     ...todoNodes
   );
 }
 
-/**
- * Renders an edit form for a given todo item using custom HTMLeX attributes.
- *
- * The form submits a PUT request to update the todo at the endpoint `/todos/{id}`
- * and targets the DOM element with id `todo-{id}` to update its inner HTML.
- * The cancel button uses a GET request to reload the original todo item.
- *
- * @param {Object} todo - A todo object.
- * @param {number} todo.id - The unique identifier of the todo.
- * @param {string} todo.text - The current text of the todo.
- * @returns {string} HTML string representing the edit form.
- *
- * @example
- * const formHtml = renderEditForm({ id: 123, text: 'Buy milk' });
- */
+export function renderTodoItems(todos) {
+  return todos.map(todo => render(renderTodoItem(todo))).join('');
+}
+
 export function renderEditForm(todo) {
-  // Input field for editing the todo text.
   const inputField = input({
     type: 'text',
     name: 'todo',
     value: todo.text,
     required: 'true',
-    class: 'edit-input bg-gray-700 text-gray-200 border border-gray-600 rounded px-3 py-2'
+    class: `edit-input ${FIELD}`
   });
 
-  // Save button: form submission will trigger the PUT request.
   const saveButton = button(
-    { type: 'submit', class: 'mr-2 save-button bg-green-600 hover:bg-green-500 text-gray-100 py-1 px-3 rounded' },
+    { type: 'submit', class: `save-button ${PRIMARY_BUTTON} btn-sm` },
     'Save'
   );
 
-  // Cancel button: triggers a GET request to reload the original todo item.
   const cancelButton = button(
-    { GET: `/todos/item/${todo.id}`, class: 'cancel-button bg-red-600 hover:bg-red-500 text-gray-100 py-1 px-3 rounded', target: `#editForm-${todo.id}(outerHTML)`, type: "button" },
+    {
+      GET: `/todos/item/${todo.id}`,
+      class: `cancel-button ${DANGER_BUTTON} btn-sm`,
+      target: `#editForm-${todo.id}(outerHTML)`,
+      type: 'button'
+    },
     'Cancel'
   );
 
-  // The edit form:
-  // - PUT attribute sends the update to `/todos/{id}`
-  // - target attribute specifies where the updated HTML should be injected.
   const editForm = form(
     {
       id: `editForm-${todo.id}`,
-      class: 'edit-form bg-gray-800 p-4 rounded-lg shadow border border-gray-700',
+      class: 'edit-form surface p-3',
       PUT: `/todos/${todo.id}`,
       target: `#todo-${todo.id}(innerHTML)`
     },
-    inputField,
-    br(),
-    saveButton,
-    cancelButton
+    div({ class: 'mb-3' }, inputField),
+    div({ class: 'd-flex flex-wrap gap-2' }, saveButton, cancelButton)
   );
 
   return render(editForm);
 }
 
-/**
- * Renders a complete Todo Widget.
- *
- * This function component takes an array of todo objects and returns a virtual node
- * representing the entire todo widget, including a header and a list of todos.
- *
- * Each todo object should have the following properties:
- * @typedef {Object} Todo
- * @property {number|string} id - A unique identifier for the todo.
- * @property {string} text - The todo text.
- * @property {boolean} completed - Flag indicating whether the todo is completed.
- *
- * @param {Object} params - The parameters for the TodoWidget.
- * @param {Todo[]} params.todos - Array of todo objects.
- * @returns {Object} A virtual node representing the todo widget.
- *
- * @example
- * const todos = [
- *   { id: 1, text: 'Buy milk', completed: false },
- *   { id: 2, text: 'Walk the dog', completed: true }
- * ];
- * const todoWidget = TodoWidget({ todos });
- * // Use render(todoWidget) to produce an HTML string.
- */
-/**
- * Renders the complete Todo App widget using the HTMLeX API.
- *
- * This function returns the rendered HTML string for a Todo App, which includes
- * a form for adding new todos and a container for displaying the todo list.
- *
- * @param {Object} params
- * @param {Object[]} [params.todos=[]] - Array of todo objects.
- *        Each todo object should have:
- *          - {number|string} id - Unique identifier.
- *          - {string} text - The todo text.
- *          - {boolean} completed - Completion status.
- * @returns {string} The HTML string representing the Todo App widget.
- *
- * @example
- * const todos = [
- *   { id: 1, text: 'Buy milk', completed: false },
- *   { id: 2, text: 'Walk the dog', completed: true }
- * ];
- * const htmlString = TodoWidget({ todos });
- */
 export function TodoWidget(todos) {
   return render(
     section(
-      { id: 'todoApp', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
-      h2(
-        { class: 'text-2xl font-semibold mb-4 text-white' },
-        'Todo App with Lifecycle Hooks'
-      ),
+      { id: 'todoApp', class: WIDGET },
+      h2({ class: WIDGET_TITLE }, 'Todo App with Lifecycle Hooks'),
       form(
         {
           POST: '/todos/create',
-          target: '#todoList(innerHTML)',
+          target: '#todoList(outerHTML)',
           extras: 'locale=en_US',
           publish: 'todoCreated',
           sequential: '150',
-          onbefore: "console.log('Before Todo Create', event)",
-          onafter: "console.log('After Todo Create', event)",
-          onbeforeSwap: "console.log('Before DOM Swap', event)",
-          onafterSwap: "console.log('After DOM Swap', event)",
-          class: 'space-y-4',
+          onbefore: "window.__htmlexLifecycle='beforeTodoCreate'",
+          onafter: "window.__htmlexLifecycle='afterTodoCreate'",
+          onbeforeSwap: "window.__htmlexLifecycle='beforeTodoSwap'",
+          onafterSwap: "window.__htmlexLifecycle='afterTodoSwap'",
+          class: 'mb-4'
         },
         div(
-          {},
+          { class: 'mb-3' },
           label(
-            { for: 'todoInput', class: 'block text-sm font-medium text-gray-300' },
+            { for: 'todoInput', class: 'form-label small fw-semibold text-uppercase text-subtle' },
             'New Todo'
           ),
           input({
@@ -574,90 +465,49 @@ export function TodoWidget(todos) {
             id: 'todoInput',
             name: 'todo',
             required: 'true',
-            class:
-              'mt-2 block w-full bg-gray-700 border border-gray-600 rounded-md p-3 text-gray-100 placeholder-gray-400',
-            placeholder: 'Enter your task',
+            class: FIELD,
+            placeholder: 'Enter your task'
           })
         ),
         button(
           {
             type: 'submit',
-            class:
-              'w-full btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-md',
+            class: `w-100 ${PRIMARY_BUTTON}`
           },
           'Add Todo'
         )
-      ), renderTodoList(todos)
+      ),
+      renderTodoList(todos),
+      HtmlSnippet({ snippet: DEMO_SNIPPETS.todo })
     )
   );
 }
 
-/**
- * Renders a counter display.
- *
- * @param {number} counter - The current counter value.
- * @returns {string} HTML string representing the counter display.
- *
- * @example
- * const counterHtml = renderCounter(5);
- */
+/* ===========================
+   Utility Renderers
+   =========================== */
+
 export function renderCounter(counter) {
-  return render(
-    div(
-      { id: 'counterDisplay', class: 'counter-display' },
-      `Counter: ${counter}`
-    )
-  );
+  return `Counter: ${counter}`;
 }
 
-/**
- * Renders a loading message with an optional spinner.
- *
- * @param {string} message - The loading message to display.
- * @returns {string} HTML string representing the loading message.
- *
- * @example
- * const loadingHtml = renderLoadingMessage("Loading, please wait...");
- */
 export function renderLoadingMessage(message) {
   return render(
     div(
       { class: 'loading-message' },
-      span({ class: 'spinner' }, ''), // You can style this span as a spinner in CSS.
-      ' ',
+      span({ class: 'spinner', 'aria-hidden': 'true' }),
       message
     )
   );
 }
 
-/**
- * Renders a notification message.
- *
- * @param {string} message - The notification message to display.
- * @returns {string} HTML string representing the notification message.
- *
- * @example
- * const notificationHtml = renderNotificationMessage("You have a new notification!");
- */
 export function renderNotificationMessage(message) {
   return render(
-    div({ class: 'notification-message', timer: "5000", target: "this(remove)" }, message)
+    div({ class: 'notification-message', timer: '5000', target: 'this(remove)' }, message)
   );
 }
 
-/**
- * Renders a default index page.
- *
- * This page is returned when no custom index.html is found.
- *
- * @returns {string} HTML string representing the default index page.
- *
- * @example
- * const indexHtml = renderDefaultIndexPage();
- */
 export function renderDefaultIndexPage() {
-  // Destructure additional tags from HTMLeX if needed
-  const { div, h1, p } = tags;
   return render(
     div(
       { class: 'default-index-page' },
@@ -667,55 +517,37 @@ export function renderDefaultIndexPage() {
   );
 }
 
-/**
- * Returns a virtual node representing the Notifications Demo widget.
- * This node uses custom HTMLeX attributes for API calls and timer removal.
- *
- * @returns {Object} A virtual node for the notifications demo.
- *
- * @example
- * const notificationsNode = NotificationsDemo();
- */
-export function NotificationsDemo(message = "Waitiing...") {
+/* ===========================
+   Demo Widgets
+   =========================== */
+
+export function NotificationsDemo(message = 'Waiting...') {
   return section(
-    { id: 'notifications', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
-    h2({ class: 'text-2xl font-semibold mb-4' }, 'Notifications'),
+    { id: 'notifications', class: WIDGET },
+    h2({ class: WIDGET_TITLE }, 'Notifications'),
     button(
       {
         GET: '/notifications',
         target: '#notificationArea(innerHTML)',
-        class: 'btn bg-gradient-to-r from-green-500 to-teal-500 hover:from-green-600 hover:to-teal-600 text-white font-bold py-3 px-8 rounded-md shadow-lg'
-      }, "Get Notification"
+        class: PRIMARY_BUTTON
+      },
+      'Get Notification'
     ),
     div(
-      { id: 'notificationArea', class: 'mt-4 p-4 bg-gray-700 rounded-md shadow animate-pulse' },
+      { id: 'notificationArea', class: 'surface mt-4 p-3 small muted-copy' },
       message
-    )
+    ),
+    HtmlSnippet({ snippet: DEMO_SNIPPETS.notifications })
   );
 }
 
-/**
- * Renders the Clicker Counter widget using the HTMLeX API.
- *
- * This function returns the rendered HTML string for a click counter demo,
- * featuring a counter display and a button that triggers an API call to increment the counter.
- *
- * @returns {string} The HTML string representing the Clicker Counter widget.
- *
- * @example
- * const htmlString = ClickCounterWidget();
- * // Use the rendered HTML string in your response.
- */
 export function ClickCounterWidget() {
   return render(
     section(
-      { id: 'clickCounter', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
-      h2(
-        { class: 'text-2xl font-semibold mb-4' },
-        'Clicker Counter'
-      ),
+      { id: 'clickCounter', class: WIDGET },
+      h2({ class: WIDGET_TITLE }, 'Clicker Counter'),
       div(
-        { id: 'counterDisplay', class: 'text-4xl font-bold text-center' },
+        { id: 'counterDisplay', class: 'counter-display surface d-flex align-items-center justify-content-center text-center p-4' },
         '0'
       ),
       div(
@@ -725,161 +557,107 @@ export function ClickCounterWidget() {
             GET: '/counter/increment',
             trigger: 'click',
             target: '#counterDisplay(innerHTML)',
-            class: 'btn bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-md'
+            class: PRIMARY_BUTTON
           },
           'Click Me!'
         )
-      )
+      ),
+      HtmlSnippet({ snippet: DEMO_SNIPPETS.clickCounter })
     )
   );
 }
 
-/**
- * Creates the virtual node structure for the Chat Interface Demo.
- *
- * @returns {Object} A virtual node representing the chat interface demo.
- *
- * @example
- * const chatInterfaceNode = ChatInterfaceDemo();
- */
 export function ChatInterfaceDemo() {
   return section(
-    { id: 'chatInterface', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
-    h2({ class: 'text-2xl font-semibold mb-4' }, 'Chat Interface'),
+    { id: 'chatInterface', class: WIDGET },
+    h2({ class: WIDGET_TITLE }, 'Chat Interface'),
     div(
       {
         id: 'chatMessages',
-        socket: 'wss://localhost:5500/chat',
+        socket: '/chat',
         target: '#chatMessages(innerHTML)',
-        class: 'max-h-64 overflow-y-auto p-4 border border-gray-700 rounded mb-4'
+        class: 'surface scroll-panel mb-4 p-3'
       },
-      p({ class: 'text-center text-gray-500' }, 'Waiting for messages...')
+      p({ class: 'text-center small text-subtle mb-0' }, 'Waiting for messages...')
     ),
     form(
       {
         POST: '/chat/send',
         target: '#chatMessages(innerHTML)',
         extras: 'username=DemoUser',
-        onbefore: "console.log('Sending Chat Message', event)",
-        onafter: "console.log('Chat Message Sent', event)",
-        class: 'flex space-x-2'
+        onbefore: "window.__htmlexLifecycle='beforeChatSend'",
+        onafter: "window.__htmlexLifecycle='afterChatSend'",
+        class: 'd-flex flex-column flex-sm-row gap-2'
       },
       input({
         type: 'text',
         name: 'message',
         required: 'true',
         placeholder: 'Type your message',
-        class: 'flex-1 bg-gray-700 border border-gray-600 rounded-md p-3 text-gray-100 placeholder-gray-400'
+        class: `flex-grow-1 ${FIELD}`
       }),
       button(
-        { type: 'submit', class: 'btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-md' },
+        { type: 'submit', class: PRIMARY_BUTTON },
         'Send'
       )
-    )
+    ),
+    HtmlSnippet({ snippet: DEMO_SNIPPETS.chat })
   );
 }
 
-/**
- * Creates virtual nodes for the Multi‑Fragment Updates Demo.
- *
- * Returns a virtual node tree for:
- * - A section with id "multiFragment" and dark mode styling.
- * - A header (h2) for the demo title.
- * - A button with custom HTMLeX attributes (GET and target) for loading updates.
- * - Two divs (multiUpdate1 and multiUpdate2) where the updates will appear.
- *
- * @returns {Object} A virtual node representing the multi‑fragment demo.
- *
- * @example
- * const multiFragmentDemoNode = multiFragmentDemo();
- * // This node can then be rendered or used as needed.
- */
 export function multiFragmentDemo() {
   return section(
-    { id: 'multiFragment', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
-    h2({ class: 'text-2xl font-semibold mb-4' }, 'Multi‑Fragment Updates'),
+    { id: 'multiFragment', class: WIDGET },
+    h2({ class: WIDGET_TITLE }, 'Multi-Fragment Updates'),
     button(
       {
         GET: '/multi/fragment',
         target: '#multiUpdate1(innerHTML) #multiUpdate2(append)',
-        class: 'btn bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-8 rounded-md'
+        class: PRIMARY_BUTTON
       },
-      'Load Multi‑Fragment Update'
+      'Load Multi-Fragment Update'
     ),
     div(
-      { class: 'mt-4 space-y-4' },
-      div({ id: 'multiUpdate1', class: 'p-4 bg-gray-700 rounded-md' }),
-      div({ id: 'multiUpdate2', class: 'p-4 bg-gray-700 rounded-md' })
-    )
+      { class: 'mt-4 d-grid gap-3' },
+      div({ id: 'multiUpdate1', class: 'surface p-3 small muted-copy' }),
+      div({ id: 'multiUpdate2', class: 'surface p-3 small muted-copy' })
+    ),
+    HtmlSnippet({ snippet: DEMO_SNIPPETS.multiFragment })
   );
 }
 
-/**
- * Creates a virtual node tree representing the Signal Chaining Demo widget.
- *
- * This demo shows a "Start Process" button that publishes the first chain signal,
- * followed by a set of hidden chain elements that subscribe to a signal, call API endpoints,
- * append responses to the output container, and publish the next signal.
- *
- * @returns {Object} A virtual node representing the Signal Chaining Demo.
- *
- * @example
- * const demoNode = SignalChainingDemo();
- * // Pass demoNode to your HTMLeX renderer.
- */
 export function SignalChainingDemo() {
   return section(
-    { id: 'signalChaining', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
-    h2({ class: 'text-2xl font-semibold mb-4' }, 'Signal Chaining'),
+    { id: 'signalChaining', class: WIDGET },
+    h2({ class: WIDGET_TITLE }, 'Signal Chaining'),
     div(
-      { class: 'space-y-4' },
-      // Start Process Button: Publishes the first chain signal.
+      { class: 'd-grid gap-3' },
       button(
-        { publish: 'chain1', class: 'btn bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-3 px-8 rounded-md' },
+        { publish: 'chain1', class: PRIMARY_BUTTON },
         'Start Process'
       ),
-      // Hidden chain elements trigger API calls and publish next signals.
       div(
-        { class: 'hidden' },
-        // Chain 1: Subscribes to "chain1", calls step1, appends response to chainOutput, and publishes "chain2"
+        { class: 'd-none' },
         div({ subscribe: 'chain1', trigger: 'signal', GET: '/process/step1', target: '#chainOutput(append)', publish: 'chain2' }),
-        // Chain 2: Subscribes to "chain2", calls step2, appends response to chainOutput, and publishes "chain3"
         div({ subscribe: 'chain2', trigger: 'signal', GET: '/process/step2', target: '#chainOutput(append)', publish: 'chain3' }),
-        // Chain 3: Subscribes to "chain3", calls step3, appends response to chainOutput, and publishes "chain4"
         div({ subscribe: 'chain3', trigger: 'signal', GET: '/process/step3', target: '#chainOutput(append)', publish: 'chain4' }),
-        // Chain 4: Subscribes to "chain4", calls step4, appends response to chainOutput, and publishes "chain5"
         div({ subscribe: 'chain4', trigger: 'signal', GET: '/process/step4', target: '#chainOutput(append)', publish: 'chain5' }),
-        // Chain 5: Subscribes to "chain5", calls step5, and appends response to chainOutput.
         div({ subscribe: 'chain5', trigger: 'signal', GET: '/process/step5', target: '#chainOutput(append)' })
       ),
-      // Output area where all chain responses are appended.
       div(
-        { id: 'chainOutput', class: 'p-4 bg-gray-700 rounded-md' }
+        { id: 'chainOutput', class: 'surface output-panel p-3 small muted-copy' }
       )
-    )
+    ),
+    HtmlSnippet({ snippet: DEMO_SNIPPETS.signalChaining })
   );
 }
 
-/**
- * Returns a virtual node representing the SSE Subscribers Demo widget.
- *
- * The component includes:
- * - A section with dark mode styling.
- * - A heading.
- * - A button with a GET attribute for subscribing to SSE.
- * - A div configured with subscribe, GET, and target attributes for SSE updates.
- *
- * @returns {Object} Virtual node representing the SSE Subscribers Demo.
- *
- * @example
- * const sseDemoNode = SSESubscribersDemo();
- */
 export function SSESubscribersDemo() {
   return section(
-    { id: 'sseDemo', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
-    h2({ class: 'text-2xl font-semibold mb-4' }, 'SSE Subscriber (Simulated)'),
+    { id: 'sseDemo', class: WIDGET },
+    h2({ class: WIDGET_TITLE }, 'SSE Subscriber (Simulated)'),
     button(
-      { GET: '/sse/subscribe', class: 'btn bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-md' },
+      { GET: '/sse/subscribe', class: PRIMARY_BUTTON },
       'Get SSE Signal'
     ),
     div(
@@ -887,119 +665,152 @@ export function SSESubscribersDemo() {
         subscribe: 'sseUpdate',
         GET: '/sse/subscribe/message',
         target: 'this(innerHTML)',
-        class: 'p-4 bg-gray-700 rounded-md mt-4'
+        class: 'surface mt-4 p-3 small muted-copy'
       },
       'SSE updates will appear here...'
-    )
+    ),
+    HtmlSnippet({ snippet: DEMO_SNIPPETS.sse })
   );
 }
 
-/**
- * Returns a virtual node for the WebSocket Updates Demo.
- *
- * This demo section is styled for dark mode and uses custom HTMLeX attributes
- * (such as `socket` and `target`) to enable live WebSocket updates.
- *
- * @returns {Object} A virtual node representing the WebSocket Updates Demo.
- *
- * @example
- * const demoNode = WebSocketUpdatesDemo();
- * // Use the virtual node as needed (e.g., pass it to render())
- */
 export function WebSocketUpdatesDemo() {
   return section(
-    { id: 'websocketUpdates', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
-    h2(
-      { class: 'text-2xl font-semibold mb-4' },
-      'Live WebSocket Feed'
-    ),
+    { id: 'websocketUpdates', class: WIDGET },
+    h2({ class: WIDGET_TITLE }, 'Live WebSocket Feed'),
     div(
       {
         id: 'liveFeed',
-        socket: 'wss://localhost:5500/updates',
+        socket: '/updates',
         target: '#liveFeed(innerHTML)',
-        class: 'max-h-48 overflow-y-auto p-4 bg-gray-700 rounded-md'
+        class: 'surface scroll-panel p-3 small muted-copy'
       },
       p(
-        { class: 'text-center text-gray-500' },
+        { class: 'text-center text-subtle mb-0' },
         'Connecting to live feed...'
       )
+    ),
+    HtmlSnippet({ snippet: DEMO_SNIPPETS.websocketUpdates })
+  );
+}
+
+export function InfiniteScrollDemo() {
+  return render(
+    section(
+      { id: 'infiniteScrollDemo', class: WIDGET },
+      h2({ class: WIDGET_TITLE }, 'Infinite Scrolling List'),
+      div(
+        { id: 'infiniteList', class: 'surface d-grid gap-2 p-3' },
+        div({ class: 'surface-muted p-3 small' }, 'Initial item')
+      ),
+      button(
+        {
+          GET: '/items/loadMore',
+          target: '#infiniteList(append)',
+          class: `mt-4 ${PRIMARY_BUTTON}`
+        },
+        'Load More'
+      ),
+      HtmlSnippet({ snippet: DEMO_SNIPPETS.infiniteScroll })
     )
   );
 }
 
-/**
- * Renders the Sequential API Calls Demo widget using the HTMLeX API.
- *
- * This widget demonstrates triggering sequential API calls with the "sequential" attribute.
- *
- * @returns {string} The HTML string representing the Sequential API Calls Demo widget.
- *
- * @example
- * const htmlString = SequentialDemo();
- */
+export function PollingDemo() {
+  return render(
+    section(
+      { id: 'pollingDemo', class: WIDGET },
+      h2({ class: WIDGET_TITLE }, 'Polling Demo'),
+      div(
+        {
+          id: 'pollingOutput',
+          GET: '/polling/tick',
+          target: '#pollingOutput(innerHTML)',
+          poll: '1000',
+          repeat: '3',
+          auto: 'true',
+          class: 'surface mt-4 p-3 small muted-copy'
+        },
+        'Waiting for polling update...'
+      ),
+      HtmlSnippet({ snippet: DEMO_SNIPPETS.polling })
+    )
+  );
+}
+
+export function HoverTriggerDemo() {
+  return render(
+    section(
+      { id: 'hoverTriggerDemo', class: WIDGET },
+      h2({ class: WIDGET_TITLE }, 'Hover Trigger Demo'),
+      button(
+        {
+          GET: '/hover/message',
+          trigger: 'mouseenter',
+          target: '#hoverOutput(innerHTML)',
+          debounce: '250',
+          class: PRIMARY_BUTTON
+        },
+        'Hover Action'
+      ),
+      div({ id: 'hoverOutput', class: 'surface mt-4 p-3 small muted-copy' }, 'Waiting for hover...'),
+      HtmlSnippet({ snippet: DEMO_SNIPPETS.hover })
+    )
+  );
+}
+
 export function SequentialDemo() {
   return render(
     section(
-      { id: 'sequentialDemo', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
-      h2({ class: 'text-2xl font-semibold mb-4' }, 'Sequential API Calls'),
-      button(
-        {
-          GET: '/sequential/next',
-          target: '#sequentialOutput(append)',
-          sequential: '2500',
-          class: 'btn bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-md'
-        },
-        'Sequentila, first in First Out'
-      ),
-      button(
-        {
-          GET: '/sequential/next',
-          target: '#sequentialOutput(append)',
-          debounce: '500',
-          class: 'btn bg-red-600 hover:bg-red-700 mt-5 text-white font-bold py-3 px-8 rounded-md'
-        },
-        'Non Sequential Last In Last Out'
+      { id: 'sequentialDemo', class: WIDGET },
+      h2({ class: WIDGET_TITLE }, 'Sequential API Calls'),
+      div(
+        { class: 'd-flex flex-column flex-sm-row gap-2' },
+        button(
+          {
+            GET: '/sequential/next',
+            target: '#sequentialOutput(append)',
+            sequential: '2500',
+            class: PRIMARY_BUTTON
+          },
+          'Sequential, First In First Out'
+        ),
+        button(
+          {
+            GET: '/sequential/next',
+            target: '#sequentialOutput(append)',
+            debounce: '500',
+            class: SECONDARY_BUTTON
+          },
+          'Non Sequential Last In Last Out'
+        )
       ),
       div(
         {
           id: 'sequentialOutput',
-          class: 'mt-4 p-4 bg-gray-700 rounded-md'
+          class: 'surface output-panel mt-4 p-3 small muted-copy'
         },
-        '<!-- Sequential responses will be queued and rendered here -->'
-      )
+        'Sequential responses will be queued and rendered here'
+      ),
+      HtmlSnippet({ snippet: DEMO_SNIPPETS.sequential })
     )
   );
 }
 
-/**
- * Creates a virtual node for the Loading State Demo.
- *
- * The returned node follows these HTMLeX rules:
- * - The <section> is styled for dark mode.
- * - The <button> includes custom HTMLeX attributes for GET, target, and sequential.
- * - The <div> is a placeholder for loading payload content.
- *
- * @returns {Object} A virtual node representing the Loading State Demo.
- *
- * @example
- * const demoNode = loadingStateDemo();
- */
 export function loadingStateDemo() {
   return section(
-    { id: 'loadingDemo', class: 'bg-gray-800 p-6 rounded-lg shadow-lg fade-in' },
-    h2({ class: 'text-2xl font-semibold mb-4' }, 'Loading State Demo'),
+    { id: 'loadingDemo', class: WIDGET },
+    h2({ class: WIDGET_TITLE }, 'Loading State Demo'),
     button(
       {
         GET: '/demo/loading',
         target: '#loadingDemoOutput(innerHTML)',
-        class: 'btn bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-8 rounded-md'
+        class: PRIMARY_BUTTON
       },
       'Load Payload'
     ),
     div(
-      { id: 'loadingDemoOutput', class: 'mt-4 p-4 bg-gray-700 rounded-md' }
-      // The content inside this div will be dynamically replaced after a click.
-    )
+      { id: 'loadingDemoOutput', class: 'surface output-panel mt-4 p-3 small muted-copy' }
+    ),
+    HtmlSnippet({ snippet: DEMO_SNIPPETS.loading })
   );
 }

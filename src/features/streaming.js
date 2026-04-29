@@ -14,12 +14,14 @@ import {
   renderCounter, NotificationsDemo,
   ClickCounterWidget, multiFragmentDemo,
   SSESubscribersDemo, SignalChainingDemo,
-  WebSocketUpdatesDemo, loadingStateDemo,
-  SequentialDemo
+  ChatInterfaceDemo, WebSocketUpdatesDemo, loadingStateDemo,
+  SequentialDemo, InfiniteScrollDemo, PollingDemo, HoverTriggerDemo
 } from '../components/Components.js';
 import { renderFragment } from "../components/HTMLeX.js"
 
-import { write } from 'fs';
+function responseDelay(ms) {
+  return process.env.HTMLEX_TEST_FAST === '1' ? Math.min(ms, 25) : ms;
+}
 
 /**
  * Module-level counter for the clicker demo.
@@ -49,17 +51,28 @@ export async function loadMoreItems(req, res) {
       try {
         let itemsHtml = "";
         for (let i = 0; i < 5; i++) {
-          itemsHtml += render(`<div class="p-2 bg-gray-700 rounded-md text-gray-100">Item ${Date.now() + i}</div>`);
+          itemsHtml += render(div({ class: 'surface-muted p-3 small' }, `Item ${Date.now() + i}`));
         }
         res.write(renderFragment('#infiniteList(append)', itemsHtml));
       } catch (innerErr) {
         console.error('Error while writing items in loadMoreItems:', innerErr);
       }
-      if (!res.headersSent) res.end();
-    }, 2000);
+      res.end();
+    }, responseDelay(2000));
   } catch (err) {
     console.error('Error in loadMoreItems:', err);
     if (!res.headersSent) res.status(500).end();
+    else res.end();
+  }
+}
+
+export async function infiniteScrollDemoInit(req, res) {
+  try {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderFragment('#demoCanvas(innerHTML)', InfiniteScrollDemo()));
+  } catch (err) {
+    console.error('Error in infiniteScrollDemoInit:', err);
+    if (!res.headersSent) res.status(500).send('Internal server error');
   }
 }
 
@@ -80,7 +93,7 @@ export async function notificationsDemoInit(req, res) {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   try {
     // Write the final notification fragment immediately.
-    res.write(renderFragment('#demoCanvas(innerHTML)', NotificationsDemo()));
+    res.write(renderFragment('#demoCanvas(innerHTML)', render(NotificationsDemo())));
     res.end();
   } catch (err) {
     console.error('Error in notificationsDemoInit:', err);
@@ -132,7 +145,7 @@ export async function fetchNotification(req, res) {
         // Ensure the response is closed regardless of errors.
         res.end();
       }
-    }, 2500);
+    }, responseDelay(2500));
   } catch (err) {
     console.error('Error in fetchNotification:', err);
     if (!res.headersSent) {
@@ -196,7 +209,7 @@ export async function multiFragmentDemoInit(req, res) {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   try {
     // Write the HTML fragment to update the target element.
-    res.write(renderFragment("#demoCanvas(innerHTML)", multiFragmentDemo()));
+    res.write(renderFragment("#demoCanvas(innerHTML)", render(multiFragmentDemo())));
     // End the response to finalize the transmission.
     res.end();
   } catch (err) {
@@ -220,8 +233,14 @@ export async function multiFragmentDemoInit(req, res) {
 export async function multiFragment(req, res) {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   try {
-    const fragment1 = renderFragment('#multiUpdate1(innerHTML)', render(`<div class="p-4 bg-blue-700 rounded-md text-white">Primary Content Loaded</div>`));
-    const fragment2 = renderFragment('#multiUpdate2(append)', render(`<div class="p-2 bg-blue-600 rounded-md text-white mt-2">Additional Content Appended</div>`));
+    const fragment1 = renderFragment(
+      '#multiUpdate1(innerHTML)',
+      render(div({ class: 'surface p-3 small' }, 'Primary Content Loaded'))
+    );
+    const fragment2 = renderFragment(
+      '#multiUpdate2(append)',
+      render(div({ class: 'surface-muted mt-2 p-3 small' }, 'Additional Content Appended'))
+    );
     res.send(fragment1 + fragment2);
   } catch (err) {
     console.error('Error in multiFragment:', err);
@@ -268,7 +287,7 @@ export async function sequentialDemoInit(req, res) {
 export async function sequentialNext(req, res) {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   try {
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, responseDelay(1000)));
     const timestamp = new Date().toISOString();
     const contentNode = div({}, timestamp);
     const htmlContent = render(contentNode);
@@ -298,15 +317,15 @@ function processStep(step, res) {
   setTimeout(() => {
     try {
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      const message = `Step ${step}: Data received at ${new Date().toLocaleTimeString()}<br>`;
-      res.send(renderFragment(`#chainOutput(${step === 1 ? "innerHTML" : "append"})`, render(message)));
+      const message = `Step ${step}: Data received at ${new Date().toLocaleTimeString()}`;
+      res.send(renderFragment(`#chainOutput(${step === 1 ? "innerHTML" : "append"})`, render(div({}, message))));
     } catch (err) {
       console.error(`Error in processStep${step}:`, err);
       if (!res.headersSent) {
         res.status(500).send('Internal server error');
       }
     }
-  }, 1000);
+  }, responseDelay(1000));
 }
 
 /**
@@ -324,7 +343,7 @@ export function processInit(req, res) {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   try {
     // Write the HTML fragment to update the "#demoCanvas" element.
-    res.write(renderFragment("#demoCanvas(innerHTML)", SignalChainingDemo()));
+    res.write(renderFragment("#demoCanvas(innerHTML)", render(SignalChainingDemo())));
     // End the response to finalize the transmission.
     res.end();
   } catch (err) {
@@ -399,7 +418,7 @@ export function processStep5(req, res) {
 export async function demoInit(req, res) {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   try {
-    res.write(renderFragment("#demoCanvas(innerHTML)", loadingStateDemo()));
+    res.write(renderFragment("#demoCanvas(innerHTML)", render(loadingStateDemo())));
     res.end();
   } catch (err) {
     console.error('Error in demoInit:', err);
@@ -441,7 +460,7 @@ export async function demoLoading(req, res) {
       try {
         // Create a virtual node for the final payload.
         const payloadNode = div(
-          { class: 'p-4 bg-green-700 rounded-md text-green-100' },
+          { class: 'alert alert-info mb-0' },
           'Payload received after 5000ms'
         );
         // Write the payload fragment.
@@ -449,11 +468,12 @@ export async function demoLoading(req, res) {
       } catch (innerErr) {
         console.error('Error writing demo loading payload:', innerErr);
       }
-      if (!res.headersSent) res.end();
-    }, 5000);
+      res.end();
+    }, responseDelay(5000));
   } catch (err) {
     console.error('Error in demoLoading:', err);
     if (!res.headersSent) res.status(500).end();
+    else res.end();
   }
 }
 
@@ -472,7 +492,7 @@ export async function demoLoading(req, res) {
  */
 export async function sseDemoInit(req, res) {
   try {
-    res.write(renderFragment("#demoCanvas(innerHTML)", SSESubscribersDemo()));
+    res.write(renderFragment("#demoCanvas(innerHTML)", render(SSESubscribersDemo())));
     res.end();
   } catch (err) {
     console.error('Error in sseDemoInit:', err);
@@ -541,13 +561,66 @@ export async function sseSubscribeMessage(req, res) {
  */
 export async function chatDemoInit(req, res) {
   try {
-    res.write(renderFragment('#demoCanvas(innerHTML)', WebSocketUpdatesDemo()));
+    res.write(renderFragment('#demoCanvas(innerHTML)', render(ChatInterfaceDemo())));
     res.end();
   } catch (err) {
     console.error('Error in chatDemoInit:', err);
     if (!res.headersSent) {
       res.status(500).send('Internal server error');
     }
+  }
+}
+
+export async function webSocketUpdatesDemoInit(req, res) {
+  try {
+    res.write(renderFragment('#demoCanvas(innerHTML)', render(WebSocketUpdatesDemo())));
+    res.end();
+  } catch (err) {
+    console.error('Error in webSocketUpdatesDemoInit:', err);
+    if (!res.headersSent) {
+      res.status(500).send('Internal server error');
+    }
+  }
+}
+
+export async function pollingDemoInit(req, res) {
+  try {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderFragment('#demoCanvas(innerHTML)', PollingDemo()));
+  } catch (err) {
+    console.error('Error in pollingDemoInit:', err);
+    if (!res.headersSent) res.status(500).send('Internal server error');
+  }
+}
+
+export async function pollingTick(req, res) {
+  try {
+    const timestamp = new Date().toISOString();
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderFragment('#pollingOutput(innerHTML)', render(div({}, `Polling update at ${timestamp}`))));
+  } catch (err) {
+    console.error('Error in pollingTick:', err);
+    if (!res.headersSent) res.status(500).send('Internal server error');
+  }
+}
+
+export async function hoverDemoInit(req, res) {
+  try {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderFragment('#demoCanvas(innerHTML)', HoverTriggerDemo()));
+  } catch (err) {
+    console.error('Error in hoverDemoInit:', err);
+    if (!res.headersSent) res.status(500).send('Internal server error');
+  }
+}
+
+export async function hoverMessage(req, res) {
+  try {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderFragment('#hoverOutput(innerHTML)', render(div({}, 'Hover action loaded'))));
+  } catch (err) {
+    console.error('Error in hoverMessage:', err);
+    if (!res.headersSent) res.status(500).send('Internal server error');
   }
 }
 

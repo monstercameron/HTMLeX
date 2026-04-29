@@ -1,15 +1,11 @@
 [
   {
     "id": "todoApp",
-    "icon": "📝",
+    "icon": "Todo",
     "title": "Todo App with Lifecycle Hooks",
     "subtitle": "Sequential Updates",
     "description": "Create and manage todos using lifecycle hooks and sequential updates.",
-    "highlights": [
-      "Form submission",
-      "Lifecycle events",
-      "DOM updates"
-    ],
+    "highlights": ["Form submission", "Lifecycle events", "DOM updates"],
     "initDemoHref": "/todos/init",
     "launchButtonText": "Todo Demo",
     "learnMoreText": "Learn More",
@@ -24,14 +20,12 @@
   },
   {
     "id": "infiniteScroll",
-    "icon": "🔄",
+    "icon": "Load",
     "title": "Infinite Scrolling List",
     "subtitle": "Auto Load on Scroll",
     "description": "Automatically load more items as you scroll down the list.",
-    "highlights": [
-      "Lazy loading",
-      "Scroll trigger"
-    ],
+    "highlights": ["Lazy loading", "Scroll trigger"],
+    "initDemoHref": "/items/init",
     "launchButtonText": "Load More",
     "learnMoreText": "Learn More",
     "learnMoreHref": "/infiniteScroll/details",
@@ -45,14 +39,11 @@
   },
   {
     "id": "notifications",
-    "icon": "🔔",
+    "icon": "Note",
     "title": "Notifications",
     "subtitle": "Timer Removal",
     "description": "Receive notifications that automatically disappear after a set time.",
-    "highlights": [
-      "Real-time notifications",
-      "Timer based removal"
-    ],
+    "highlights": ["Real-time notifications", "Timer based removal"],
     "initDemoHref": "/notifications/init",
     "launchButtonText": "Get Notification",
     "learnMoreText": "Learn More",
@@ -67,15 +58,11 @@
   },
   {
     "id": "clickCounter",
-    "icon": "🖱️",
+    "icon": "Click",
     "title": "Clicker Counter",
     "subtitle": "Debounce/Throttle",
     "description": "Increase the counter with every click, optimized with debounce/throttle mechanisms.",
-    "highlights": [
-      "Debounce",
-      "Throttle",
-      "Real-time counter"
-    ],
+    "highlights": ["Debounce", "Throttle", "Real-time counter"],
     "initDemoHref": "/counter/init",
     "launchButtonText": "Click Me!",
     "learnMoreText": "Learn More",
@@ -90,15 +77,12 @@
   },
   {
     "id": "chatInterface",
-    "icon": "💬",
+    "icon": "Chat",
     "title": "Chat Interface",
-    "subtitle": "WebSocket & Lifecycle Hooks",
-    "description": "Engage in real‑time chat with lifecycle hooks and a WebSocket connection.",
-    "highlights": [
-      "WebSocket",
-      "Real‑time chat",
-      "Lifecycle events"
-    ],
+    "subtitle": "WebSocket and Lifecycle Hooks",
+    "description": "Engage in real-time chat with lifecycle hooks and a WebSocket connection.",
+    "highlights": ["WebSocket", "Real-time chat", "Lifecycle events"],
+    "initDemoHref": "/chat/init",
     "launchButtonText": "Send",
     "learnMoreText": "Learn More",
     "learnMoreHref": "/chatInterface/details",
@@ -112,16 +96,13 @@
   },
   {
     "id": "multiFragment",
-    "icon": "🧩",
-    "title": "Multi‑Fragment Updates",
+    "icon": "Multi",
+    "title": "Multi-Fragment Updates",
     "subtitle": "Multiple DOM updates",
     "description": "Load multiple fragments at once and update different parts of the page simultaneously.",
-    "highlights": [
-      "Multiple fragments",
-      "Simultaneous updates"
-    ],
+    "highlights": ["Multiple fragments", "Simultaneous updates"],
     "initDemoHref": "/multi/init",
-    "launchButtonText": "Multi‑Fragment",
+    "launchButtonText": "Multi-Fragment",
     "learnMoreText": "Learn More",
     "learnMoreHref": "/multiFragment/details",
     "gradients": {
@@ -134,14 +115,11 @@
   },
   {
     "id": "signalChaining",
-    "icon": "🔗",
+    "icon": "Signal",
     "title": "Signal Chaining",
     "subtitle": "Chained API calls",
     "description": "Trigger a chain of API calls where each step publishes the next signal.",
-    "highlights": [
-      "Chain signals",
-      "API calls"
-    ],
+    "highlights": ["Chain signals", "API calls"],
     "initDemoHref": "/process/init",
     "launchButtonText": "Start Process",
     "learnMoreText": "Learn More",
@@ -156,14 +134,11 @@
   },
   {
     "id": "sseDemo",
-    "icon": "📡",
+    "icon": "SSE",
     "title": "SSE Subscriber (Simulated)",
-    "subtitle": "Server‑Sent Events",
-    "description": "Simulate Server‑Sent Events (SSE) to receive real‑time updates.",
-    "highlights": [
-      "SSE",
-      "Real‑time updates"
-    ],
+    "subtitle": "Server-Sent Events",
+    "description": "Simulate Server-Sent Events to receive real-time updates.",
+    "highlights": ["SSE", "Real-time updates"],
     "initDemoHref": "/sse/init",
     "launchButtonText": "Get SSE Signal",
     "learnMoreText": "Learn More",
@@ -178,15 +153,12 @@
   },
   {
     "id": "websocketUpdates",
-    "icon": "🌐",
+    "icon": "Live",
     "title": "Live WebSocket Feed",
-    "subtitle": "Real‑time Updates",
+    "subtitle": "Real-time Updates",
     "description": "Stream live updates directly to your page using a WebSocket connection.",
-    "highlights": [
-      "WebSocket",
-      "Live feed"
-    ],
-    "initDemoHref": "/chat/init",
+    "highlights": ["WebSocket", "Live feed"],
+    "initDemoHref": "/updates/init",
     "launchButtonText": "Connect",
     "learnMoreText": "Learn More",
     "learnMoreHref": "/websocketUpdates/details",
@@ -200,14 +172,11 @@
   },
   {
     "id": "sequentialDemo",
-    "icon": "🔢",
+    "icon": "Seq",
     "title": "Sequential API Calls",
     "subtitle": "Ordered Processing",
     "description": "Execute API calls sequentially and render queued responses.",
-    "highlights": [
-      "Sequential calls",
-      "Queued responses"
-    ],
+    "highlights": ["Sequential calls", "Queued responses"],
     "initDemoHref": "/sequential/init",
     "launchButtonText": "Run Sequential",
     "learnMoreText": "Learn More",
@@ -222,14 +191,11 @@
   },
   {
     "id": "loadingDemo",
-    "icon": "⏳",
+    "icon": "Load",
     "title": "Loading State Demo",
     "subtitle": "Spinner Loading",
     "description": "Show a loading spinner before the payload is rendered.",
-    "highlights": [
-      "Loading state",
-      "Spinner"
-    ],
+    "highlights": ["Loading state", "Spinner"],
     "initDemoHref": "/demo/init",
     "launchButtonText": "Load Payload",
     "learnMoreText": "Learn More",
@@ -244,14 +210,11 @@
   },
   {
     "id": "pollingDemo",
-    "icon": "⏲️",
+    "icon": "Poll",
     "title": "Polling Demo",
     "subtitle": "Scheduled Updates",
     "description": "Poll the server at regular intervals to receive updates.",
-    "highlights": [
-      "Polling",
-      "Scheduled updates"
-    ],
+    "highlights": ["Polling", "Scheduled updates"],
     "initDemoHref": "/polling/init",
     "launchButtonText": "Start Polling",
     "learnMoreText": "Learn More",
@@ -266,14 +229,11 @@
   },
   {
     "id": "hoverTriggerDemo",
-    "icon": "👆",
+    "icon": "Hover",
     "title": "Hover Trigger Demo",
     "subtitle": "Debounced Hover Actions",
     "description": "Trigger actions on hover with configurable debounce settings.",
-    "highlights": [
-      "Hover actions",
-      "Debounce"
-    ],
+    "highlights": ["Hover actions", "Debounce"],
     "initDemoHref": "/hover/init",
     "launchButtonText": "Hover Action",
     "learnMoreText": "Learn More",

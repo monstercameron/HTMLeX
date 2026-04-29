@@ -19,12 +19,14 @@
  * @property {string} [onerror] - UI update displayed if an API call fails.
  * @property {string} [auto] - Automatically fires an API call on DOM insertion (can include a delay in ms).
  * @property {string|number} [cache] - Cache API response for a TTL (in ms) or as a flag.
- * @property {string} [signal] - Emits a signal upon completion. Format: "@signalName".
- * @property {string} [listen] - Signals to wait for before triggering the API call.
+ * @property {string} [extras] - Space-separated key=value pairs appended to the request body or query string.
+ * @property {string} [publish] - Emits a signal when the action succeeds.
+ * @property {string} [subscribe] - Signals that trigger an element's API action.
  * @property {string} [trigger] - Overrides the default event triggering the API call (e.g., "click", "submit").
  * @property {number} [debounce] - Delay in ms to prevent rapid successive API calls.
  * @property {number} [throttle] - Minimum interval in ms between API calls.
  * @property {number} [poll] - Interval in ms for automatically triggering API calls.
+ * @property {number} [repeat] - Maximum number of poll iterations.
  * @property {string} [socket] - WebSocket URL for real‑time updates.
  * @property {number} [retry] - Number of retry attempts for failed API calls.
  * @property {number} [timeout] - Maximum wait time in ms for an API call.
@@ -35,6 +37,40 @@
  * @property {string} [path] - Sets the URL path.
  * @property {string} [history] - History behavior: "push" or "replace".
  */
+
+const RAW_HTML = Symbol('HTMLeX.rawHTML');
+
+/**
+ * Escapes text inserted into an HTML text node.
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+/**
+ * Escapes text inserted into an HTML attribute.
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function escapeAttribute(value) {
+  return escapeHtml(value).replaceAll('`', '&#96;');
+}
+
+/**
+ * Marks server-owned HTML as intentionally raw. Do not wrap user input with this.
+ * @param {string} html
+ * @returns {Object}
+ */
+export function rawHtml(html) {
+  return { [RAW_HTML]: true, html: String(html ?? '') };
+}
 
 /**
  * Creates a virtual node representing an HTML element.
@@ -106,11 +142,16 @@ export const { div, button, span, p, a } = tags;
  * @returns {string} The resulting HTML string.
  */
 export const render = (node) => {
-  if (typeof node === 'string') return node;
+  if (Array.isArray(node)) return node.map(render).join('');
+  if (typeof node === 'string' || typeof node === 'number' || typeof node === 'boolean') {
+    return escapeHtml(node);
+  }
   if (!node || typeof node !== 'object') return '';
+  if (node[RAW_HTML]) return node.html;
   const { tag: tagName, attrs, children } = node;
   const attrString = Object.entries(attrs || {})
-    .map(([key, value]) => `${key}="${value}"`)
+    .filter(([, value]) => value !== undefined && value !== null && value !== false)
+    .map(([key, value]) => value === true ? `${key}` : `${key}="${escapeAttribute(value)}"`)
     .join(' ');
   const childrenHTML = (children || []).map(render).join('');
   return `<${tagName}${attrString ? ' ' + attrString : ''}>${childrenHTML}</${tagName}>`;
@@ -181,7 +222,7 @@ export function renderFragment(target, htmlContent, status) {
     attrs.status = status;
   }
   // Create a virtual fragment node using the HTMLeX tag function.
-  const fragmentNode = tag('fragment', attrs, htmlContent);
+  const fragmentNode = tag('fragment', attrs, rawHtml(htmlContent));
   // Render the virtual node to an HTML string.
   return render(fragmentNode);
 }

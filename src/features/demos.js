@@ -13,6 +13,23 @@ const __dirname = path.dirname(__filename);
 
 // Path to the demos JSON file.
 const DEMOS_FILE = path.join(__dirname, '..', 'persistence', 'demos.json');
+let cachedDemosMtimeMs = 0;
+let cachedDemosHtml = '';
+
+async function getRenderedDemosHtml() {
+  const { mtimeMs } = await fs.stat(DEMOS_FILE);
+  if (cachedDemosHtml && cachedDemosMtimeMs === mtimeMs) {
+    return cachedDemosHtml;
+  }
+
+  const data = await fs.readFile(DEMOS_FILE, 'utf8');
+  const demos = JSON.parse(data);
+  const html = demos.map((demo) => render(DemoItem(demo))).join('');
+
+  cachedDemosMtimeMs = mtimeMs;
+  cachedDemosHtml = html;
+  return html;
+}
 
 /**
  * Express route handler that loads demos from the JSON file,
@@ -24,19 +41,7 @@ const DEMOS_FILE = path.join(__dirname, '..', 'persistence', 'demos.json');
  */
 export async function loadAndRenderDemos(req, res) {
   try {
-    const data = await fs.readFile(DEMOS_FILE, 'utf8');
-    const demos = JSON.parse(data);
-
-    // For each demo, generate the virtual node using DemoItem,
-    // then render it to an HTML string and wrap it in a fragment.
-    const fragments = demos.map((demo) => {
-      const demoNode = DemoItem(demo);             // Virtual node for the demo
-      const demoHtml = render(demoNode);             // Convert virtual node to HTML string
-      // Wrap the demoHtml in a fragment using renderFragment.
-      // (The target parameter is left empty or can be customized as needed.)
-      return demoHtml;
-    });
-    const html = renderFragment('this(innerHTML)', fragments.join(''))
+    const html = renderFragment('this(innerHTML)', await getRenderedDemosHtml());
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
