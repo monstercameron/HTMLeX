@@ -18,3 +18,11 @@ Follow-up quality pass:
 - Modernized remaining runtime loops and queues, tightened naming, and extracted clearer helpers around target resolution, timer handling, sockets, logging, and fragment responses.
 - Added a dependency-free syntax check to the quality gate and direct unit coverage for shared fragment response helpers.
 - Re-ran the complete quality suite: syntax check, unit tests, and full Playwright e2e coverage.
+
+Diagnostics and error-boundary pass:
+
+- Added structured server logging with timestamps, scopes, request IDs, route names, status codes, durations, and normalized error payloads.
+- Added Express request context, route wrapping, 404 handling, and unhandled route error middleware so failures return debuggable request IDs.
+- Replaced feature-route `console.error` calls with request-aware warnings and errors across todos, demos, streaming, chat, sockets, TLS setup, and shared response helpers.
+- Added a browser runtime error boundary for uncaught errors and unhandled promise rejections through the HTMLeX logger.
+- Added unit coverage for server logger normalization and request-ID diagnostics on missing routes.
