@@ -1,19 +1,12 @@
-// ./src/features/demos.js
-
-import fs from 'fs/promises';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { DemoItem } from '../components/Components.js';
 import { render } from '../components/HTMLeX.js';
 import { logRequestError } from '../serverLogger.js';
 import { sendFragmentResponse } from './responses.js';
 
-// Determine __dirname in ES modules.
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 // Path to the demos JSON file.
-const DEMOS_FILE = path.join(__dirname, '..', 'persistence', 'demos.json');
+const DEMOS_FILE = path.join(import.meta.dirname, '..', 'persistence', 'demos.json');
 let cachedDemosMtimeMs = 0;
 let cachedDemosHtml = '';
 

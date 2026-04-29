@@ -1,11 +1,10 @@
 // ./src/app.js
 
 import express from 'express';
-import path from 'path';
-import { access } from 'fs/promises';
-import https from 'https';
-import { fileURLToPath } from 'url';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
+import { access } from 'node:fs/promises';
+import https from 'node:https';
+import path from 'node:path';
 import multer from 'multer';
 import { renderDefaultIndexPage } from './components/Components.js';
 import { getHttpsOptions } from './certificates.js';
@@ -26,6 +25,7 @@ import { loadAndRenderDemos } from './features/demos.js';
 const PORT = process.env.PORT || 5500;
 const PUBLIC_DIR = 'public';
 const INDEX_FILE = 'index.html';
+const SRC_DIR = import.meta.dirname;
 
 // Todo routes
 const TODO_INIT_DEMO = '/todos/init';
@@ -93,10 +93,6 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Create the Express app.
 const app = express();
-
-// Get __dirname in ES modules.
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 function getRequestId(req) {
   const incomingRequestId = req.get('x-request-id')?.trim();
@@ -171,11 +167,11 @@ function expressErrorBoundary(error, req, res, next) {
 
 // Serve static files from the PUBLIC_DIR directory.
 app.use(requestContext);
-app.use(express.static(path.join(__dirname, PUBLIC_DIR)));
+app.use(express.static(path.join(SRC_DIR, PUBLIC_DIR)));
 
 // Default root route to serve an index page.
 app.get('/', routeBoundary('root.index', async (req, res) => {
-  const indexPath = path.join(__dirname, PUBLIC_DIR, INDEX_FILE);
+  const indexPath = path.join(SRC_DIR, PUBLIC_DIR, INDEX_FILE);
   try {
     await access(indexPath);
     return res.sendFile(indexPath);
@@ -260,8 +256,8 @@ app.use(expressErrorBoundary);
 // ------------------------------
 // Server Setup with TLS
 // ------------------------------
-const projectRoot = path.resolve(__dirname, '..');
-const httpsOptions = getHttpsOptions(projectRoot);
+const projectRoot = path.resolve(SRC_DIR, '..');
+const httpsOptions = await getHttpsOptions(projectRoot);
 
 const server = https.createServer(httpsOptions, app);
 
@@ -344,11 +340,13 @@ process.on('SIGINT', () => {
   });
 });
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  startServer().catch(error => {
+if (process.argv[1] === import.meta.filename) {
+  try {
+    await startServer();
+  } catch (error) {
     serverLogger.fatal('server', 'Failed to start server.', error);
     process.exit(1);
-  });
+  }
 }
 
 export default server;

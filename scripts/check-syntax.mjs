@@ -1,20 +1,20 @@
-import { execFileSync } from 'child_process';
-import { readdirSync, statSync } from 'fs';
-import path from 'path';
+import { spawn } from 'node:child_process';
+import { readdir, stat } from 'node:fs/promises';
+import path from 'node:path';
 
 const ROOT = process.cwd();
 const CHECK_DIRS = ['src', 'tests'];
 const IGNORED_DIRS = new Set(['node_modules', '.git', 'playwright-report', 'test-results']);
 const JAVASCRIPT_EXTENSIONS = new Set(['.js', '.mjs']);
 
-function collectJavaScriptFiles(directory) {
-  const entries = readdirSync(directory, { withFileTypes: true });
+async function collectJavaScriptFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
   const files = [];
 
   for (const entry of entries) {
     if (entry.isDirectory()) {
       if (!IGNORED_DIRS.has(entry.name)) {
-        files.push(...collectJavaScriptFiles(path.join(directory, entry.name)));
+        files.push(...await collectJavaScriptFiles(path.join(directory, entry.name)));
       }
       continue;
     }
@@ -27,13 +27,38 @@ function collectJavaScriptFiles(directory) {
   return files;
 }
 
-const files = CHECK_DIRS
-  .map(directoryName => path.join(ROOT, directoryName))
-  .filter(directory => statSync(directory, { throwIfNoEntry: false })?.isDirectory())
-  .flatMap(collectJavaScriptFiles);
+async function isDirectory(directory) {
+  try {
+    return (await stat(directory)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function checkSyntax(file) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['--check', file], { stdio: 'inherit' });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`Syntax check failed for ${file} with exit code ${code}`));
+    });
+  });
+}
+
+const files = [];
+for (const directoryName of CHECK_DIRS) {
+  const directory = path.join(ROOT, directoryName);
+  if (await isDirectory(directory)) {
+    files.push(...await collectJavaScriptFiles(directory));
+  }
+}
 
 for (const file of files) {
-  execFileSync(process.execPath, ['--check', file], { stdio: 'inherit' });
+  await checkSyntax(file);
 }
 
 console.log(`Syntax check passed for ${files.length} JavaScript files.`);

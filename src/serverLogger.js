@@ -1,4 +1,4 @@
-import { inspect } from 'util';
+import { inspect } from 'node:util';
 
 const LEVEL_PRIORITY = {
   debug: 10,

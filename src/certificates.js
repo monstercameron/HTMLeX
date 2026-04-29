@@ -1,21 +1,25 @@
-import { execFileSync } from 'child_process';
-import fs from 'fs';
-import path from 'path';
+import { execFile } from 'node:child_process';
+import { constants } from 'node:fs';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { promisify } from 'node:util';
 import { logFeatureError, logFeatureWarning } from './serverLogger.js';
 
-function fileExists(filePath) {
+const execFileAsync = promisify(execFile);
+
+async function fileExists(filePath) {
   try {
-    fs.accessSync(filePath, fs.constants.R_OK);
+    await access(filePath, constants.R_OK);
     return true;
   } catch {
     return false;
   }
 }
 
-function generateLocalhostCertificate(keyPath, certPath) {
-  fs.mkdirSync(path.dirname(keyPath), { recursive: true });
+async function generateLocalhostCertificate(keyPath, certPath) {
+  await mkdir(path.dirname(keyPath), { recursive: true });
   const configPath = path.join(path.dirname(keyPath), 'openssl.cnf');
-  fs.writeFileSync(
+  await writeFile(
     configPath,
     [
       '[req]',
@@ -27,7 +31,7 @@ function generateLocalhostCertificate(keyPath, certPath) {
       ''
     ].join('\n')
   );
-  execFileSync(
+  await execFileAsync(
     'openssl',
     [
       'req',
@@ -53,7 +57,7 @@ function generateLocalhostCertificate(keyPath, certPath) {
   );
 }
 
-export function getHttpsOptions(projectRoot) {
+export async function getHttpsOptions(projectRoot) {
   const explicitKeyPath = process.env.TLS_KEY_PATH;
   const explicitCertPath = process.env.TLS_CERT_PATH;
 
@@ -67,8 +71,8 @@ export function getHttpsOptions(projectRoot) {
     }
 
     return {
-      key: fs.readFileSync(path.resolve(explicitKeyPath)),
-      cert: fs.readFileSync(path.resolve(explicitCertPath)),
+      key: await readFile(path.resolve(explicitKeyPath)),
+      cert: await readFile(path.resolve(explicitCertPath)),
       allowHTTP1: true
     };
   }
@@ -79,12 +83,12 @@ export function getHttpsOptions(projectRoot) {
   const keyPath = path.join(certDir, 'localhost-key.pem');
   const certPath = path.join(certDir, 'localhost.pem');
 
-  if (!fileExists(keyPath) || !fileExists(certPath)) {
+  if (!await fileExists(keyPath) || !await fileExists(certPath)) {
     try {
       logFeatureWarning('certificates', 'Local HTTPS certificate is missing. Generating a localhost certificate.', {
         certDir,
       });
-      generateLocalhostCertificate(keyPath, certPath);
+      await generateLocalhostCertificate(keyPath, certPath);
     } catch (error) {
       logFeatureError('certificates', 'Failed to generate local HTTPS certificate.', error, { certDir });
       throw new Error(
@@ -95,8 +99,8 @@ export function getHttpsOptions(projectRoot) {
   }
 
   return {
-    key: fs.readFileSync(keyPath),
-    cert: fs.readFileSync(certPath),
+    key: await readFile(keyPath),
+    cert: await readFile(certPath),
     allowHTTP1: true
   };
 }

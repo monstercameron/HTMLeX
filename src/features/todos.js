@@ -6,9 +6,8 @@
  * @module features/todos
  */
 
-import { access, readFile, writeFile } from 'fs/promises';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { access, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import {
   renderTodoItem,
   renderTodoList,
@@ -19,9 +18,7 @@ import { render } from '../components/HTMLeX.js';
 import { sendFragmentResponse, sendServerError } from './responses.js';
 import { logFeatureError, logRequestError, logRequestWarning } from '../serverLogger.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const TODOS_FILE = path.join(__dirname, '..', 'persistence/data.json');
+const TODOS_FILE = path.join(import.meta.dirname, '..', 'persistence/data.json');
 
 /**
  * Ensures that the data file exists.
@@ -158,7 +155,7 @@ export async function listTodos(req, res) {
 export async function getTodoItem(req, res) {
   try {
     const todos = await loadTodos();
-    const id = parseInt(req.params.id, 10);
+    const id = Number.parseInt(req.params.id, 10);
     const todo = todos.find(t => t.id === id);
     if (!todo) {
       logRequestWarning(req, 'Todo item was not found.', { id, statusCode: 404 });
@@ -182,7 +179,7 @@ export async function getTodoItem(req, res) {
 export async function getEditTodoForm(req, res) {
   try {
     const todos = await loadTodos();
-    const id = parseInt(req.params.id, 10);
+    const id = Number.parseInt(req.params.id, 10);
     const todo = todos.find(t => t.id === id);
     if (!todo) {
       logRequestWarning(req, 'Todo edit target was not found.', { id, statusCode: 404 });
@@ -207,7 +204,7 @@ export async function getEditTodoForm(req, res) {
 export async function updateTodo(req, res) {
   try {
     const todos = await loadTodos();
-    const id = parseInt(req.params.id, 10);
+    const id = Number.parseInt(req.params.id, 10);
     const index = todos.findIndex(todo => todo.id === id);
     if (index === -1) {
       logRequestWarning(req, 'Todo update target was not found.', { id, statusCode: 404 });
@@ -241,7 +238,7 @@ export async function updateTodo(req, res) {
 export async function deleteTodo(req, res) {
   try {
     const todos = await loadTodos();
-    const id = parseInt(req.params.id, 10);
+    const id = Number.parseInt(req.params.id, 10);
     const index = todos.findIndex(todo => todo.id === id);
     if (index === -1) {
       logRequestWarning(req, 'Todo delete target was not found.', { id, statusCode: 404 });
