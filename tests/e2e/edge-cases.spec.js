@@ -31,18 +31,27 @@ test('browser diagnostics record warnings, errors, and runtime boundary events',
       colno: 13,
       error: new Error('Runtime boundary failure')
     }));
+    const circularPayload = {
+      name: 'root',
+      count: 2n,
+    };
+    circularPayload.self = circularPayload;
+    Logger.system.warn('Complex diagnostic payload', circularPayload, document.body);
 
     return {
       entries: Logger.diagnostics.entries,
       events,
       globalEntries: window[Logger.diagnostics.globalName].entries,
+      snapshot: Logger.diagnostics.snapshot(),
+      lastWarning: Logger.diagnostics.last('warn'),
     };
   });
 
-  expect(diagnostics.entries).toHaveLength(3);
-  expect(diagnostics.events).toHaveLength(3);
-  expect(diagnostics.globalEntries).toHaveLength(3);
-  expect(diagnostics.entries.map(entry => entry.level)).toEqual(['warn', 'error', 'error']);
+  expect(diagnostics.entries).toHaveLength(4);
+  expect(diagnostics.events).toHaveLength(4);
+  expect(diagnostics.globalEntries).toHaveLength(4);
+  expect(diagnostics.snapshot).toHaveLength(4);
+  expect(diagnostics.entries.map(entry => entry.level)).toEqual(['warn', 'error', 'error', 'warn']);
   expect(diagnostics.entries[0]).toMatchObject({
     scope: '[HTMLeX SYSTEM WARN]',
     message: 'Inspectable warning',
@@ -57,6 +66,19 @@ test('browser diagnostics record warnings, errors, and runtime boundary events',
     source: 'diagnostics-fixture.js',
     line: 7,
     column: 13,
+  });
+  expect(diagnostics.lastWarning).toMatchObject({
+    message: 'Complex diagnostic payload',
+    args: [
+      {
+        name: 'root',
+        count: '2n',
+        self: '[Circular]',
+      },
+      {
+        element: 'body',
+      },
+    ],
   });
 });
 

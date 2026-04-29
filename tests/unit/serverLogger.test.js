@@ -5,6 +5,7 @@ import {
   formatLogRecord,
   getRequestContext,
   normalizeError,
+  normalizeLogValue,
 } from '../../src/serverLogger.js';
 
 test('normalizeError preserves useful Error diagnostics', () => {
@@ -63,4 +64,48 @@ test('formatLogRecord supports readable text and machine-parseable JSON', () => 
   );
 
   assert.deepEqual(JSON.parse(formatLogRecord(record, 'json')), record);
+});
+
+test('log serialization is safe for circular objects and BigInt values', () => {
+  const circular = {
+    name: 'root',
+    count: 2n,
+  };
+  circular.self = circular;
+  Object.defineProperty(circular, 'volatile', {
+    enumerable: true,
+    get() {
+      throw new Error('getter exploded');
+    },
+  });
+
+  assert.deepEqual(
+    normalizeLogValue(circular),
+    {
+      name: 'root',
+      count: '2n',
+      self: '[Circular]',
+      volatile: '[Unserializable: getter exploded]',
+    }
+  );
+
+  const record = createLogRecord('warn', 'diagnostics', 'Unsafe payload', { circular });
+  assert.deepEqual(JSON.parse(formatLogRecord(record, 'json')).circular, {
+    name: 'root',
+    count: '2n',
+    self: '[Circular]',
+    volatile: '[Unserializable: getter exploded]',
+  });
+});
+
+test('formatLogRecord protects JSON formatting even for unsafe raw records', () => {
+  const record = {
+    timestamp: '2026-04-29T00:00:00.000Z',
+    level: 'warn',
+    scope: 'diagnostics',
+    message: 'Unsafe raw record',
+  };
+  record.self = record;
+
+  assert.equal(JSON.parse(formatLogRecord(record, 'json')).self, '[Circular]');
 });
