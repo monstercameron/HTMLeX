@@ -32,3 +32,10 @@ Diagnostics follow-up:
 - Added an in-browser HTMLeX diagnostics ring buffer and `htmlex:log` event stream so warnings, errors, and runtime-boundary failures can be inspected from DevTools or tests.
 - Added optional JSON server-log formatting via `HTMLEX_LOG_FORMAT=json` and dynamic `HTMLEX_LOG_LEVEL` handling.
 - Added browser e2e coverage for warning/error diagnostics and runtime-boundary logging, plus cleaner unit-test output for expected warning paths.
+
+Diagnostics serialization hardening:
+
+- Made server JSON/text logs safe for circular objects, `BigInt`, buffers, typed arrays, dates, functions, symbols, deep objects, and oversized payloads.
+- Made browser diagnostics entries safe and bounded for circular payloads, `BigInt`, DOM elements, events, deep objects, and oversized arrays/objects.
+- Added `Logger.diagnostics.snapshot()` and `Logger.diagnostics.last(level)` helpers for easier DevTools and test inspection.
+- Hardened timer callbacks so stale timers skip work when their `timer` attribute has changed or been removed before the callback runs.
