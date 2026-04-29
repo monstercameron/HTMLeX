@@ -38,13 +38,15 @@ function responseDelay(ms) {
   return process.env.HTMLEX_TEST_FAST === '1' ? Math.min(ms, 25) : ms;
 }
 
+function waitForResponseDelay(ms) {
+  return new Promise(resolve => setTimeout(resolve, responseDelay(ms)));
+}
+
 function renderLoadMoreItems(count = 5) {
-  let itemsHtml = '';
   const baseTimestamp = Date.now();
-  for (let index = 0; index < count; index += 1) {
-    itemsHtml += render(div({ class: 'surface-muted p-3 small' }, `Item ${baseTimestamp + index}`));
-  }
-  return itemsHtml;
+  return Array.from({ length: count }, (_, index) =>
+    render(div({ class: 'surface-muted p-3 small' }, `Item ${baseTimestamp + index}`))
+  ).join('');
 }
 
 /**
@@ -64,18 +66,15 @@ let clickerCounter = 0;
 export async function loadMoreItems(req, res) {
   try {
     writeFragmentResponse(res, '#infiniteList(append)', renderLoadingMessage('Loading more items...'));
-    setTimeout(() => {
-      try {
-        writeFragmentResponse(res, '#infiniteList(append)', renderLoadMoreItems());
-      } catch (writeError) {
-        logRequestError(req, 'Failed to write streamed load-more items.', writeError);
-      }
-      endResponse(res);
-    }, responseDelay(2000));
+    await waitForResponseDelay(2000);
+    writeFragmentResponse(res, '#infiniteList(append)', renderLoadMoreItems());
   } catch (error) {
     logRequestError(req, 'Failed to stream load-more items.', error);
     endServerError(res);
+    return;
   }
+
+  endResponse(res);
 }
 
 export async function infiniteScrollDemoInit(req, res) {
@@ -131,24 +130,20 @@ export async function fetchNotification(req, res) {
       '#notificationArea(innerHTML)',
       renderLoadingMessage('Fetching notification in 2500ms...')
     );
-    setTimeout(() => {
-      try {
-        writeFragmentResponse(
-          res,
-          '#notificationArea(innerHTML)',
-          renderNotificationMessage('You have a new notification! It will disappear in 5000ms'),
-          { timer: '5000' }
-        );
-      } catch (writeError) {
-        logRequestError(req, 'Failed to write delayed notification fragment.', writeError);
-      } finally {
-        endResponse(res);
-      }
-    }, responseDelay(2500));
+    await waitForResponseDelay(2500);
+    writeFragmentResponse(
+      res,
+      '#notificationArea(innerHTML)',
+      renderNotificationMessage('You have a new notification! It will disappear in 5000ms'),
+      { timer: '5000' }
+    );
   } catch (error) {
     logRequestError(req, 'Failed to fetch notification.', error);
     endServerError(res);
+    return;
   }
+
+  endResponse(res);
 }
 
 /**
@@ -276,7 +271,7 @@ export async function sequentialDemoInit(req, res) {
  */
 export async function sequentialNext(req, res) {
   try {
-    await new Promise(resolve => setTimeout(resolve, responseDelay(1000)));
+    await waitForResponseDelay(1000);
     const timestamp = new Date().toISOString();
     const contentNode = div({}, timestamp);
     const htmlContent = render(contentNode);
@@ -302,16 +297,15 @@ export async function sequentialNext(req, res) {
  * @param {number} step - The current process step number.
  * @param {import('express').Response} res - The Express response object.
  */
-function processStep(step, res) {
-  setTimeout(() => {
-    try {
-      const message = `Step ${step}: Data received at ${new Date().toLocaleTimeString()}`;
-      sendFragmentResponse(res, `#chainOutput(${step === 1 ? 'innerHTML' : 'append'})`, render(div({}, message)));
-    } catch (error) {
-      logRequestError(res.req, `Failed to render process step ${step}.`, error);
-      sendServerError(res);
-    }
-  }, responseDelay(1000));
+async function processStep(step, req, res) {
+  try {
+    await waitForResponseDelay(1000);
+    const message = `Step ${step}: Data received at ${new Date().toLocaleTimeString()}`;
+    sendFragmentResponse(res, `#chainOutput(${step === 1 ? 'innerHTML' : 'append'})`, render(div({}, message)));
+  } catch (error) {
+    logRequestError(req, `Failed to render process step ${step}.`, error);
+    sendServerError(res);
+  }
 }
 
 /**
@@ -340,8 +334,8 @@ export function processInit(req, res) {
  * @param {import('express').Request} req - Express request object.
  * @param {import('express').Response} res - Express response object.
  */
-export function processStep1(req, res) {
-  processStep(1, res);
+export async function processStep1(req, res) {
+  await processStep(1, req, res);
 }
 
 /**
@@ -349,8 +343,8 @@ export function processStep1(req, res) {
  * @param {import('express').Request} req - Express request object.
  * @param {import('express').Response} res - Express response object.
  */
-export function processStep2(req, res) {
-  processStep(2, res);
+export async function processStep2(req, res) {
+  await processStep(2, req, res);
 }
 
 /**
@@ -358,8 +352,8 @@ export function processStep2(req, res) {
  * @param {import('express').Request} req - Express request object.
  * @param {import('express').Response} res - Express response object.
  */
-export function processStep3(req, res) {
-  processStep(3, res);
+export async function processStep3(req, res) {
+  await processStep(3, req, res);
 }
 
 /**
@@ -367,8 +361,8 @@ export function processStep3(req, res) {
  * @param {import('express').Request} req - Express request object.
  * @param {import('express').Response} res - Express response object.
  */
-export function processStep4(req, res) {
-  processStep(4, res);
+export async function processStep4(req, res) {
+  await processStep(4, req, res);
 }
 
 /**
@@ -376,8 +370,8 @@ export function processStep4(req, res) {
  * @param {import('express').Request} req - Express request object.
  * @param {import('express').Response} res - Express response object.
  */
-export function processStep5(req, res) {
-  processStep(5, res);
+export async function processStep5(req, res) {
+  await processStep(5, req, res);
 }
 
 /**
@@ -426,22 +420,19 @@ export async function demoLoading(req, res) {
 
     writeFragmentResponse(res, '#loadingDemoOutput(innerHTML)', render(loadingNode));
 
-    setTimeout(() => {
-      try {
-        const payloadNode = div(
-          { class: 'alert alert-info mb-0' },
-          'Payload received after 5000ms'
-        );
-        writeFragmentResponse(res, '#loadingDemoOutput(innerHTML)', render(payloadNode));
-      } catch (writeError) {
-        logRequestError(req, 'Failed to write delayed loading-demo payload.', writeError);
-      }
-      endResponse(res);
-    }, responseDelay(5000));
+    await waitForResponseDelay(5000);
+    const payloadNode = div(
+      { class: 'alert alert-info mb-0' },
+      'Payload received after 5000ms'
+    );
+    writeFragmentResponse(res, '#loadingDemoOutput(innerHTML)', render(payloadNode));
   } catch (error) {
     logRequestError(req, 'Failed to stream loading demo.', error);
     endServerError(res);
+    return;
   }
+
+  endResponse(res);
 }
 
 /**

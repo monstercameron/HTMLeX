@@ -3,7 +3,7 @@ import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 const ROOT = process.cwd();
-const CHECK_DIRS = ['src', 'tests'];
+const CHECK_DIRS = ['src', 'tests', 'scripts'];
 const IGNORED_DIRS = new Set(['node_modules', '.git', 'playwright-report', 'test-results']);
 const JAVASCRIPT_EXTENSIONS = new Set(['.js', '.mjs']);
 

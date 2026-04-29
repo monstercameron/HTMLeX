@@ -47,3 +47,8 @@ ESNext modernization pass:
 - Moved TLS certificate loading and generation off synchronous filesystem/process APIs.
 - Updated server entry points and the syntax checker to use top-level `await` with explicit startup error handling.
 - Added a Node engine floor for the ES module runtime APIs used by the app.
+
+ESNext modernization follow-up:
+
+- Expanded the syntax gate to include repository scripts.
+- Flattened delayed streaming routes into direct `async`/`await` control flow with a shared response-delay helper.
