@@ -61,3 +61,8 @@ ESNext syntax coverage follow-up:
 ESNext timer modernization follow-up:
 
 - Replaced Node-side promise-wrapped test and streaming delays with `node:timers/promises`.
+
+Modern JavaScript quality gate:
+
+- Added a repo-wide modern JavaScript check to block CommonJS syntax, legacy ESM path shims, sync Node filesystem/process APIs, bare builtin imports, raw `parseInt`, `var` declarations, and Node-side promise-wrapped timer delays.
+- Wired the modernization gate into `npm run quality`.
