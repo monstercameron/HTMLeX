@@ -3,12 +3,20 @@ import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 const ROOT = process.cwd();
-const CHECK_DIRS = ['src', 'tests', 'scripts'];
-const IGNORED_DIRS = new Set(['node_modules', '.git', 'playwright-report', 'test-results']);
-const JAVASCRIPT_EXTENSIONS = new Set(['.js', '.mjs']);
+const CHECK_DIRS = ['.'];
+const IGNORED_DIRS = new Set([
+  '.git',
+  '.playwright',
+  'node_modules',
+  'playwright-report',
+  'test-results',
+  'tmp'
+]);
+const JAVASCRIPT_EXTENSIONS = new Set(['.cjs', '.js', '.mjs']);
 
 async function collectJavaScriptFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
+  entries.sort((left, right) => left.name.localeCompare(right.name));
   const files = [];
 
   for (const entry of entries) {

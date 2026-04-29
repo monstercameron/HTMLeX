@@ -52,3 +52,8 @@ ESNext modernization follow-up:
 
 - Expanded the syntax gate to include repository scripts.
 - Flattened delayed streaming routes into direct `async`/`await` control flow with a shared response-delay helper.
+
+ESNext syntax coverage follow-up:
+
+- Expanded the syntax gate to walk JavaScript from the repository root, including root-level tool configuration.
+- Made syntax-file discovery deterministic and added `.cjs` coverage while ignoring generated and dependency directories.
