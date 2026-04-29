@@ -8,6 +8,9 @@ const LEVEL_PRIORITY = {
   fatal: 50,
   silent: Number.POSITIVE_INFINITY,
 };
+const MAX_SERIALIZE_DEPTH = 5;
+const MAX_ARRAY_ITEMS = 50;
+const MAX_OBJECT_KEYS = 50;
 
 function normalizeLogLevel(level) {
   return Object.hasOwn(LEVEL_PRIORITY, level) ? level : 'info';
@@ -50,6 +53,68 @@ export function normalizeError(error) {
   };
 }
 
+export function normalizeLogValue(value, seen = new WeakSet(), depth = 0) {
+  if (value === null || value === undefined) return value;
+
+  const valueType = typeof value;
+  if (valueType === 'string' || valueType === 'number' || valueType === 'boolean') {
+    return value;
+  }
+  if (valueType === 'bigint') {
+    return `${value.toString()}n`;
+  }
+  if (valueType === 'symbol' || valueType === 'function') {
+    return String(value);
+  }
+  if (value instanceof Error) {
+    return normalizeError(value);
+  }
+  if (Buffer.isBuffer(value)) {
+    return `[Buffer ${value.length} bytes]`;
+  }
+  if (ArrayBuffer.isView(value)) {
+    return `[${value.constructor.name} ${value.byteLength} bytes]`;
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (valueType !== 'object') {
+    return inspectValue(value);
+  }
+  if (seen.has(value)) {
+    return '[Circular]';
+  }
+  if (depth >= MAX_SERIALIZE_DEPTH) {
+    return `[MaxDepth:${value.constructor?.name || 'Object'}]`;
+  }
+
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    const normalized = value
+      .slice(0, MAX_ARRAY_ITEMS)
+      .map(item => normalizeLogValue(item, seen, depth + 1));
+    if (value.length > MAX_ARRAY_ITEMS) {
+      normalized.push(`[${value.length - MAX_ARRAY_ITEMS} more item(s)]`);
+    }
+    return normalized;
+  }
+
+  const keys = Object.keys(value);
+  const normalized = {};
+  for (const key of keys.slice(0, MAX_OBJECT_KEYS)) {
+    try {
+      normalized[key] = normalizeLogValue(value[key], seen, depth + 1);
+    } catch (error) {
+      normalized[key] = `[Unserializable: ${error.message}]`;
+    }
+  }
+  if (keys.length > MAX_OBJECT_KEYS) {
+    normalized.__truncatedKeys = keys.length - MAX_OBJECT_KEYS;
+  }
+  return normalized;
+}
+
 export function getRequestContext(req, extra = {}) {
   return {
     requestId: req?.requestId,
@@ -64,23 +129,25 @@ export function getRequestContext(req, extra = {}) {
 
 function cleanDetails(details = {}) {
   return Object.fromEntries(
-    Object.entries(details).filter(([, value]) => value !== undefined)
+    Object.entries(details)
+      .filter(([, value]) => value !== undefined)
+      .map(([key, value]) => [key, normalizeLogValue(value)])
   );
 }
 
 export function createLogRecord(level, scope, message, details = {}) {
   return {
     timestamp: new Date().toISOString(),
-    level,
-    scope,
-    message,
+    level: String(level),
+    scope: String(scope),
+    message: String(message),
     ...cleanDetails(details),
   };
 }
 
 export function formatLogRecord(record, format = getLogFormat()) {
   if (format === 'json') {
-    return JSON.stringify(record);
+    return JSON.stringify(normalizeLogValue(record));
   }
 
   const { timestamp, level, scope, message, ...details } = record;

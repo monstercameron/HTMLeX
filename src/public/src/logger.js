@@ -14,6 +14,9 @@ export const LogLevel = {
 };
 
 const MAX_LOG_ENTRIES = 250;
+const MAX_DIAGNOSTIC_DEPTH = 4;
+const MAX_DIAGNOSTIC_ARRAY_ITEMS = 50;
+const MAX_DIAGNOSTIC_OBJECT_KEYS = 50;
 const LOG_EVENT_NAME = 'htmlex:log';
 const DIAGNOSTICS_GLOBAL = '__HTMLEX_DIAGNOSTICS__';
 
@@ -50,7 +53,19 @@ function getDiagnosticsStore() {
   return runtimeWindow[DIAGNOSTICS_GLOBAL];
 }
 
-function serializeArg(arg) {
+function serializeArg(arg, seen = new WeakSet(), depth = 0) {
+  if (arg === null || arg === undefined) return arg;
+
+  const argType = typeof arg;
+  if (argType === 'string' || argType === 'number' || argType === 'boolean') {
+    return arg;
+  }
+  if (argType === 'bigint') {
+    return `${arg.toString()}n`;
+  }
+  if (argType === 'symbol' || argType === 'function') {
+    return String(arg);
+  }
   if (arg instanceof Error) {
     return {
       name: arg.name,
@@ -58,16 +73,60 @@ function serializeArg(arg) {
       stack: arg.stack
     };
   }
-
   if (typeof Element !== 'undefined' && arg instanceof Element) {
     return {
       element: arg.tagName.toLowerCase(),
       id: arg.id || undefined,
-      classes: arg.className || undefined,
+      classes: String(arg.className || '') || undefined,
     };
   }
+  if (typeof Event !== 'undefined' && arg instanceof Event) {
+    return {
+      event: arg.type,
+      target: typeof Element !== 'undefined' && arg.target instanceof Element
+        ? serializeArg(arg.target, seen, depth + 1)
+        : undefined,
+    };
+  }
+  if (arg instanceof Date) {
+    return arg.toISOString();
+  }
+  if (argType !== 'object') {
+    return String(arg);
+  }
+  if (seen.has(arg)) {
+    return '[Circular]';
+  }
+  if (depth >= MAX_DIAGNOSTIC_DEPTH) {
+    return `[MaxDepth:${arg.constructor?.name || 'Object'}]`;
+  }
 
-  return arg;
+  seen.add(arg);
+
+  if (Array.isArray(arg)) {
+    const normalized = arg
+      .slice(0, MAX_DIAGNOSTIC_ARRAY_ITEMS)
+      .map(item => serializeArg(item, seen, depth + 1));
+    if (arg.length > MAX_DIAGNOSTIC_ARRAY_ITEMS) {
+      normalized.push(`[${arg.length - MAX_DIAGNOSTIC_ARRAY_ITEMS} more item(s)]`);
+    }
+    return normalized;
+  }
+
+  const keys = Object.keys(arg);
+  const normalized = {};
+  for (const key of keys.slice(0, MAX_DIAGNOSTIC_OBJECT_KEYS)) {
+    try {
+      normalized[key] = serializeArg(arg[key], seen, depth + 1);
+    } catch (error) {
+      normalized[key] = `[Unserializable: ${error.message}]`;
+    }
+  }
+  if (keys.length > MAX_DIAGNOSTIC_OBJECT_KEYS) {
+    normalized.__truncatedKeys = keys.length - MAX_DIAGNOSTIC_OBJECT_KEYS;
+  }
+
+  return normalized;
 }
 
 function recordLog(level, scope, message, args) {
@@ -80,7 +139,7 @@ function recordLog(level, scope, message, args) {
     level,
     scope,
     message,
-    args: args.map(serializeArg),
+    args: args.map(arg => serializeArg(arg)),
   };
 
   store.entries.push(entry);
@@ -147,6 +206,17 @@ export const Logger = {
     globalName: DIAGNOSTICS_GLOBAL,
     get entries() {
       return getDiagnosticsStore()?.entries || [];
+    },
+    snapshot() {
+      return [...(getDiagnosticsStore()?.entries || [])];
+    },
+    last(level = null) {
+      const entries = getDiagnosticsStore()?.entries || [];
+      if (!level) return entries.at(-1) || null;
+      for (let index = entries.length - 1; index >= 0; index -= 1) {
+        if (entries[index].level === level) return entries[index];
+      }
+      return null;
     },
     clear() {
       getDiagnosticsStore()?.clear();

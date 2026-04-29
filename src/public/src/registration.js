@@ -395,10 +395,15 @@ function registerTimer(element, registrationToken, cleanupFns) {
   }
 
   Logger.system.info(`[HTMLeX INFO] Timer set for element with delay ${timerDelayMs}ms.`);
+  const timerAttributeValue = element.getAttribute('timer');
   element.setAttribute('data-timer-set', 'true');
 
   const timerId = setTimeout(() => {
     if (element._htmlexRegistrationToken !== registrationToken || !document.body.contains(element)) return;
+    if (element.getAttribute('timer') !== timerAttributeValue) {
+      Logger.system.debug("[TIMER] Skipping stale timer because its timer attribute changed or was removed:", element);
+      return;
+    }
     Logger.system.debug("[TIMER] Timer callback triggered for element:", element);
     runTimerAction(element);
   }, timerDelayMs);
