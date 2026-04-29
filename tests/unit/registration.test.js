@@ -18,6 +18,9 @@ let originalFetch;
 let originalHistory;
 let originalHTMLInputElement;
 let originalHTMLSelectElement;
+let originalIntersectionObserver;
+let originalSetInterval;
+let originalClearInterval;
 let originalLoggerEnabled;
 let originalMutationObserver;
 let originalNode;
@@ -34,6 +37,9 @@ beforeEach(() => {
   originalHistory = globalThis.history;
   originalHTMLInputElement = globalThis.HTMLInputElement;
   originalHTMLSelectElement = globalThis.HTMLSelectElement;
+  originalIntersectionObserver = globalThis.IntersectionObserver;
+  originalSetInterval = globalThis.setInterval;
+  originalClearInterval = globalThis.clearInterval;
   originalLoggerEnabled = Logger.enabled;
   originalMutationObserver = globalThis.MutationObserver;
   originalNode = globalThis.Node;
@@ -127,6 +133,24 @@ afterEach(() => {
     delete globalThis.HTMLSelectElement;
   } else {
     globalThis.HTMLSelectElement = originalHTMLSelectElement;
+  }
+
+  if (originalIntersectionObserver === undefined) {
+    delete globalThis.IntersectionObserver;
+  } else {
+    globalThis.IntersectionObserver = originalIntersectionObserver;
+  }
+
+  if (originalSetInterval === undefined) {
+    delete globalThis.setInterval;
+  } else {
+    globalThis.setInterval = originalSetInterval;
+  }
+
+  if (originalClearInterval === undefined) {
+    delete globalThis.clearInterval;
+  } else {
+    globalThis.clearInterval = originalClearInterval;
   }
 
   if (originalMutationObserver === undefined) {
@@ -256,6 +280,22 @@ class FakeMutationObserver {
 }
 FakeMutationObserver.instances = [];
 
+class FakeIntersectionObserver {
+  constructor(callback) {
+    this.callback = callback;
+    FakeIntersectionObserver.instances.push(this);
+  }
+
+  observe(element) {
+    this.element = element;
+  }
+
+  disconnect() {
+    this.disconnected = true;
+  }
+}
+FakeIntersectionObserver.instances = [];
+
 test('patchedUpdateTarget updates this targets, appends later defaults, and queues sequential work', () => {
   const element = new FakeElement('section');
 
@@ -351,6 +391,10 @@ test('registerElement emits publish signals and cleans old listeners on re-regis
 test('registerElement timer targets remove this element and cleanup stale timers on re-registration', () => {
   const timers = [];
   globalThis.setTimeout = (callback, delayMs) => {
+    if (!delayMs) {
+      callback();
+      return -1;
+    }
     timers.push({ callback, delayMs, cleared: false });
     return timers.length - 1;
   };
@@ -462,4 +506,138 @@ test('initHTMLeX registers existing controls and DOM-updated descendants', () =>
   assert.equal(FakeMutationObserver.instances.length, 1);
   assert.equal(FakeMutationObserver.instances[0].target, document.body);
   assert.equal(window.__htmlexObserver, FakeMutationObserver.instances[0]);
+});
+
+test('registerElement polling respects repeat limits and clears removal observers', async () => {
+  const output = new FakeElement('section');
+  document.querySelector = selector => selector === '#pollOut' ? output : null;
+  document.querySelectorAll = selector => selector === '#pollOut' ? [output] : [];
+  globalThis.MutationObserver = FakeMutationObserver;
+  const intervals = [];
+  globalThis.setInterval = (callback, intervalMs) => {
+    intervals.push({ callback, intervalMs, cleared: false });
+    return intervals.length - 1;
+  };
+  globalThis.clearInterval = (intervalId) => {
+    intervals[intervalId].cleared = true;
+  };
+  globalThis.setTimeout = (callback) => {
+    callback();
+    return 1;
+  };
+  let fetchCount = 0;
+  globalThis.fetch = async () => {
+    fetchCount += 1;
+    return new Response(`Poll ${fetchCount}`);
+  };
+  const element = new FakeElement('div', {
+    get: '/poll',
+    poll: '1',
+    repeat: '1',
+    target: '#pollOut(append)',
+  });
+
+  registerElement(element);
+
+  assert.equal(intervals[0].intervalMs, 100);
+  intervals[0].callback();
+  await delay(0);
+  intervals[0].callback();
+
+  assert.equal(fetchCount, 1);
+  assert.equal(output.inserted[0].content, 'Poll 1');
+  assert.equal(intervals[0].cleared, true);
+  assert.equal(FakeMutationObserver.instances.at(-1).disconnected, true);
+});
+
+test('registerElement auto modes handle false, delayed, prefetch, and lazy observer flows', async () => {
+  const output = new FakeElement('section');
+  document.querySelector = selector => selector === '#autoOut' ? output : null;
+  document.querySelectorAll = selector => selector === '#autoOut' ? [output] : [];
+  globalThis.MutationObserver = FakeMutationObserver;
+  globalThis.IntersectionObserver = FakeIntersectionObserver;
+  const timers = [];
+  globalThis.setTimeout = (callback, delayMs) => {
+    if (!delayMs) {
+      callback();
+      return -1;
+    }
+    timers.push({ callback, delayMs, cleared: false });
+    return timers.length - 1;
+  };
+  globalThis.clearTimeout = (timerId) => {
+    timers[timerId].cleared = true;
+  };
+  let fetchCount = 0;
+  globalThis.fetch = async () => {
+    fetchCount += 1;
+    return new Response(`Auto ${fetchCount}`);
+  };
+
+  const disabled = new FakeElement('button', {
+    get: '/disabled-auto',
+    auto: 'false',
+    target: '#autoOut(append)',
+  });
+  registerElement(disabled);
+  await delay(0);
+  assert.equal(fetchCount, 0);
+
+  const delayed = new FakeElement('button', {
+    get: '/delayed-auto',
+    auto: '25',
+    target: '#autoOut(append)',
+  });
+  registerElement(delayed);
+  assert.equal(timers.at(-1).delayMs, 25);
+  timers.at(-1).callback();
+  await delay(0);
+
+  const prefetch = new FakeElement('button', {
+    get: '/prefetch-auto',
+    auto: 'prefetch',
+    target: '#autoOut(append)',
+  });
+  registerElement(prefetch);
+  await delay(0);
+
+  FakeIntersectionObserver.instances = [];
+  const lazy = new FakeElement('button', {
+    get: '/lazy-auto',
+    auto: 'lazy',
+    target: '#autoOut(append)',
+  });
+  registerElement(lazy);
+  FakeIntersectionObserver.instances[0].callback([
+    { isIntersecting: true },
+  ], FakeIntersectionObserver.instances[0]);
+  await delay(0);
+
+  assert.equal(fetchCount, 3);
+  assert.deepEqual(output.inserted.map(entry => entry.content), ['Auto 1', 'Auto 2', 'Auto 3']);
+  assert.equal(FakeIntersectionObserver.instances[0].disconnected, true);
+  assert.equal(lazy._htmlexLazyObserver, null);
+});
+
+test('initHTMLeX mutation observer registers child nodes and cleans removed attributes', () => {
+  FakeMutationObserver.instances = [];
+  globalThis.MutationObserver = FakeMutationObserver;
+  const registered = new FakeElement('button', { get: '/existing' });
+  const added = new FakeElement('button', { get: '/added' });
+  const documentListeners = new Map();
+  document.querySelectorAll = () => [registered];
+  document.addEventListener = (eventName, callback) => {
+    documentListeners.set(eventName, callback);
+  };
+  document.removeEventListener = () => {};
+
+  initHTMLeX();
+  const observer = FakeMutationObserver.instances.at(-1);
+
+  observer.callback([{ type: 'childList', addedNodes: [added] }]);
+  registered.removeAttribute('get');
+  observer.callback([{ type: 'attributes', target: registered }]);
+
+  assert.equal(added.getAttribute('data-htmlex-registered'), 'true');
+  assert.equal(registered.hasAttribute('data-htmlex-registered'), false);
 });

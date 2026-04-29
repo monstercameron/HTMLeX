@@ -5,10 +5,12 @@ import { Logger } from '../../src/public/src/logger.js';
 
 let originalDocument;
 let originalFetch;
+let originalFile;
 let originalFormData;
 let originalHTMLInputElement;
 let originalHTMLSelectElement;
 let originalRequestAnimationFrame;
+let originalSetTimeout;
 let originalWindow;
 let originalHistory;
 let originalLoggerEnabled;
@@ -16,10 +18,12 @@ let originalLoggerEnabled;
 beforeEach(() => {
   originalDocument = globalThis.document;
   originalFetch = globalThis.fetch;
+  originalFile = globalThis.File;
   originalFormData = globalThis.FormData;
   originalHTMLInputElement = globalThis.HTMLInputElement;
   originalHTMLSelectElement = globalThis.HTMLSelectElement;
   originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+  originalSetTimeout = globalThis.setTimeout;
   originalWindow = globalThis.window;
   originalHistory = globalThis.history;
   originalLoggerEnabled = Logger.enabled;
@@ -30,6 +34,15 @@ beforeEach(() => {
   };
   globalThis.HTMLInputElement = FakeInput;
   globalThis.HTMLSelectElement = FakeSelect;
+  globalThis.window = {
+    location: {
+      href: 'https://example.test/',
+    },
+  };
+  globalThis.history = {
+    pushState() {},
+    replaceState() {},
+  };
 });
 
 afterEach(() => {
@@ -43,6 +56,12 @@ afterEach(() => {
     delete globalThis.fetch;
   } else {
     globalThis.fetch = originalFetch;
+  }
+
+  if (originalFile === undefined) {
+    delete globalThis.File;
+  } else {
+    globalThis.File = originalFile;
   }
 
   if (originalFormData === undefined) {
@@ -69,6 +88,12 @@ afterEach(() => {
     globalThis.requestAnimationFrame = originalRequestAnimationFrame;
   }
 
+  if (originalSetTimeout === undefined) {
+    delete globalThis.setTimeout;
+  } else {
+    globalThis.setTimeout = originalSetTimeout;
+  }
+
   if (originalWindow === undefined) {
     delete globalThis.window;
   } else {
@@ -82,20 +107,31 @@ afterEach(() => {
   }
 
   delete globalThis.__actionHooks;
+  delete globalThis.__actionSignals;
   Logger.enabled = originalLoggerEnabled;
 });
 
 class FakeInput {
-  constructor({ name, value = '', type = 'text', checked = true, disabled = false } = {}) {
+  constructor({ name, value = '', type = 'text', checked = true, disabled = false, files = [] } = {}) {
     this.name = name;
     this.value = value;
     this.type = type;
     this.checked = checked;
     this.disabled = disabled;
+    this.files = files;
   }
 }
 
-class FakeSelect {}
+class FakeSelect {
+  constructor({ name, multiple = false, selectedOptions = [], value = '', disabled = false } = {}) {
+    this.name = name;
+    this.multiple = multiple;
+    this.selectedOptions = selectedOptions;
+    this.value = value;
+    this.disabled = disabled;
+    this.type = 'select-one';
+  }
+}
 
 class FakeElement {
   constructor({ tagName = 'button', attributes = {}, controls = [] } = {}) {
@@ -313,4 +349,148 @@ test('handleAction exits cleanly for disabled polling and abort errors', async (
 
   assert.equal(fetchCount, 1);
   assert.equal(abortElement._htmlexRequestPending, false);
+});
+
+test('handleAction serializes POST controls, multi-selects, files, form sources, and cache keys', async () => {
+  class FakeFile {
+    constructor(name, size, type, lastModified) {
+      this.name = name;
+      this.size = size;
+      this.type = type;
+      this.lastModified = lastModified;
+    }
+  }
+  class FakeFormData {
+    constructor(form = null) {
+      this.values = [];
+      if (form?.formEntries) {
+        for (const [key, value] of form.formEntries) {
+          this.append(key, value);
+        }
+      }
+    }
+
+    append(key, value) {
+      this.values.push([key, value]);
+    }
+
+    entries() {
+      return this.values[Symbol.iterator]();
+    }
+
+    [Symbol.iterator]() {
+      return this.entries();
+    }
+  }
+  globalThis.File = FakeFile;
+  globalThis.FormData = FakeFormData;
+
+  const uploadedFile = new FakeFile('report.txt', 12, 'text/plain', 123);
+  const output = new FakeElement();
+  const sourceForm = new FakeElement({
+    tagName: 'form',
+  });
+  sourceForm.formEntries = [['fromForm', 'source-form']];
+  const sourceFallback = new FakeElement({
+    controls: [new FakeInput({ name: 'fromFallback', value: 'split-source' })],
+  });
+  const element = new FakeElement({
+    attributes: {
+      source: '#sourceForm #fallback',
+      extras: 'extraOnly',
+      target: '#out(append)',
+      cache: '500',
+    },
+    controls: [
+      new FakeInput({ name: 'title', value: 'Post title' }),
+      new FakeInput({ name: 'ignoredRadio', value: 'no', type: 'radio', checked: false }),
+      new FakeInput({ name: 'attachment', type: 'file', files: [uploadedFile] }),
+      new FakeSelect({
+        name: 'choice',
+        multiple: true,
+        selectedOptions: [{ value: 'a' }, { value: 'b' }],
+      }),
+    ],
+  });
+  installDocument({
+    '#out': output,
+    '#sourceForm': sourceForm,
+    '#fallback': sourceFallback,
+  });
+  const originalQuerySelectorAll = document.querySelectorAll;
+  document.querySelectorAll = (selector) => {
+    if (selector === '#sourceForm #fallback') {
+      throw new Error('compound selector intentionally unsupported');
+    }
+    return originalQuerySelectorAll(selector);
+  };
+
+  const fetchCalls = [];
+  globalThis.fetch = async (url, options) => {
+    fetchCalls.push({ url, options, bodyEntries: [...options.body.entries()] });
+    return new Response('Posted response');
+  };
+
+  await handleAction(element, 'POST', '/post-action');
+  await handleAction(element, 'POST', '/post-action');
+
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls[0].url, '/post-action');
+  assert.equal(fetchCalls[0].options.method, 'POST');
+  assert.deepEqual(fetchCalls[0].bodyEntries, [
+    ['title', 'Post title'],
+    ['attachment', uploadedFile],
+    ['choice', 'a'],
+    ['choice', 'b'],
+    ['fromForm', 'source-form'],
+    ['fromFallback', 'split-source'],
+    ['extraOnly', ''],
+  ]);
+  assert.equal(output.inserted.filter(entry => entry.content === 'Posted response').length, 2);
+});
+
+test('handleAction emits header and publish signals immediately or through guarded timers', async () => {
+  const timers = [];
+  globalThis.setTimeout = (callback, delayMs) => {
+    timers.push({ callback, delayMs });
+    return timers.length - 1;
+  };
+  globalThis.__actionSignals = [];
+  const { registerSignalListener } = await import('../../src/public/src/signals.js');
+  const cleanupHeader = registerSignalListener('headerSignal', () => globalThis.__actionSignals.push('header'));
+  const cleanupPublish = registerSignalListener('publishSignal', () => globalThis.__actionSignals.push('publish'));
+
+  try {
+    installDocument();
+    globalThis.fetch = async () => new Response('', {
+      headers: {
+        Emit: 'headerSignal; delay=25',
+      },
+    });
+    const element = new FakeElement({
+      attributes: {
+        publish: 'publishSignal',
+        timer: '15',
+      },
+    });
+    element._htmlexRegistrationToken = Symbol('registration');
+
+    await handleAction(element, 'GET', '/signals');
+
+    assert.deepEqual(globalThis.__actionSignals, ['publish']);
+    assert.deepEqual(timers.map(timer => timer.delayMs), [25, 15]);
+
+    timers[0].callback();
+    timers[1].callback();
+
+    assert.deepEqual(globalThis.__actionSignals, ['publish', 'header', 'publish']);
+
+    element._htmlexRegistrationToken = Symbol('stale');
+    timers[0].callback();
+
+    assert.deepEqual(globalThis.__actionSignals, ['publish', 'header', 'publish']);
+  } finally {
+    cleanupHeader();
+    cleanupPublish();
+  }
 });

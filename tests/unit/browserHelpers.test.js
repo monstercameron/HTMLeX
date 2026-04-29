@@ -24,10 +24,13 @@ let originalFetch;
 let originalHistory;
 let originalDocument;
 let originalElement;
+let originalHTMLElement;
 let originalCustomEvent;
 let originalIo;
 let originalMutationObserver;
 let originalRequestAnimationFrame;
+let originalDebug;
+let originalInfo;
 let originalError;
 let originalWarn;
 let originalWindow;
@@ -39,10 +42,13 @@ beforeEach(() => {
   originalHistory = globalThis.history;
   originalDocument = globalThis.document;
   originalElement = globalThis.Element;
+  originalHTMLElement = globalThis.HTMLElement;
   originalCustomEvent = globalThis.CustomEvent;
   originalIo = globalThis.io;
   originalMutationObserver = globalThis.MutationObserver;
   originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+  originalDebug = console.debug;
+  originalInfo = console.info;
   originalError = console.error;
   originalWarn = console.warn;
   originalWindow = globalThis.window;
@@ -76,6 +82,12 @@ afterEach(() => {
     globalThis.Element = originalElement;
   }
 
+  if (originalHTMLElement === undefined) {
+    delete globalThis.HTMLElement;
+  } else {
+    globalThis.HTMLElement = originalHTMLElement;
+  }
+
   if (originalCustomEvent === undefined) {
     delete globalThis.CustomEvent;
   } else {
@@ -100,6 +112,8 @@ afterEach(() => {
     globalThis.requestAnimationFrame = originalRequestAnimationFrame;
   }
 
+  console.debug = originalDebug;
+  console.info = originalInfo;
   console.error = originalError;
   console.warn = originalWarn;
 
@@ -373,6 +387,74 @@ test('browser logger records diagnostics entries and dispatches log events', () 
   });
   assert.equal(dispatchedEvents.length, 1);
   assert.equal(dispatchedEvents[0].type, Logger.diagnostics.eventName);
+});
+
+test('browser logger serializes element diagnostics, truncates large payloads, and gates element logs', () => {
+  class FakeHTMLElement {
+    constructor() {
+      this.tagName = 'BUTTON';
+      this.id = 'save';
+      this.className = 'btn primary';
+      this.attributes = { debug: '' };
+    }
+
+    hasAttribute(name) {
+      return Object.hasOwn(this.attributes, name);
+    }
+  }
+  globalThis.Element = FakeHTMLElement;
+  globalThis.HTMLElement = FakeHTMLElement;
+  globalThis.CustomEvent = class CustomEvent {
+    constructor(type, init = {}) {
+      this.type = type;
+      this.detail = init.detail;
+    }
+  };
+  const dispatchedEvents = [];
+  globalThis.window = {
+    dispatchEvent(event) {
+      dispatchedEvents.push(event);
+    }
+  };
+  const consoleCalls = {
+    debug: [],
+    info: [],
+    warn: [],
+    error: [],
+  };
+  console.debug = (...args) => consoleCalls.debug.push(args);
+  console.info = (...args) => consoleCalls.info.push(args);
+  console.warn = (...args) => consoleCalls.warn.push(args);
+  console.error = (...args) => consoleCalls.error.push(args);
+  Logger.enabled = true;
+  Logger.logLevel = LogLevel.DEBUG;
+  Logger.diagnostics.clear();
+
+  const element = new FakeHTMLElement();
+  const largePayload = {
+    items: Array.from({ length: 55 }, (_, index) => index),
+    nested: { a: { b: { c: { d: { e: 'too deep' } } } } },
+  };
+
+  Logger.system.debug('debug message', element, largePayload);
+  Logger.system.info('info message');
+  Logger.element.warn(element, 'element warning', new Date('2026-04-29T00:00:00.000Z'));
+  Logger.element.error(element, 'element error');
+
+  assert.equal(consoleCalls.debug.length, 1);
+  assert.equal(consoleCalls.info.length, 1);
+  assert.equal(consoleCalls.warn.length, 1);
+  assert.equal(consoleCalls.error.length, 1);
+  assert.equal(dispatchedEvents.length, 4);
+  assert.deepEqual(Logger.diagnostics.entries[0].args[0], {
+    element: 'button',
+    id: 'save',
+    classes: 'btn primary',
+  });
+  assert.equal(Logger.diagnostics.entries[0].args[1].items.length, 51);
+  assert.equal(Logger.diagnostics.entries[0].args[1].items.at(-1), '[5 more item(s)]');
+  assert.equal(Logger.diagnostics.entries[0].args[1].nested.a.b.c, '[MaxDepth:Object]');
+  assert.equal(Logger.diagnostics.last(LogLevel.WARN).args[1], '2026-04-29T00:00:00.000Z');
 });
 
 test('runtime error boundary records uncaught browser errors and rejected promises', () => {

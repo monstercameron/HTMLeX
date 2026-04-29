@@ -88,3 +88,9 @@ Full-surface unit coverage pass:
 - Expanded unit coverage from 53 to 96 tests across action handling, registration, DOM diffing, fragment parsing, browser Socket.IO payload normalization, runtime error boundaries, cache TTL behavior, rate-limit event snapshots, and renderer contracts.
 - Added direct unit coverage for streaming route handlers, process steps, socket namespace timers, certificate fallback reads, server logger helper output, and non-array todo persistence handling.
 - Re-ran the complete quality suite: syntax check, modern JavaScript gate, 96 unit tests, and 86 Playwright e2e tests.
+
+Runtime branch unit coverage follow-up:
+
+- Expanded unit coverage from 96 to 102 tests across non-GET action serialization, multi-select and file controls, source fallback selectors, `Emit` and `publish` signal timers, browser logger payload serialization, polling cleanup, auto/prefetch/lazy registration, and mutation-observer cleanup.
+- Improved unit coverage for the highest-risk browser runtime modules, including `actions.js`, `logger.js`, and `registration.js`.
+- Re-ran the complete quality suite: syntax check, modern JavaScript gate, 102 unit tests, and 86 Playwright e2e tests.
