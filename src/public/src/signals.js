@@ -9,6 +9,35 @@ import { Logger } from './logger.js';
 /** @type {Map<string, Set<Function>>} */
 const signalBus = new Map();
 
+function normalizeSignalName(signalName) {
+  try {
+    return String(signalName ?? '').trim();
+  } catch (error) {
+    Logger.system.warn('[SIGNALS] Ignoring signal name that could not be converted to text.', error);
+    return '';
+  }
+}
+
+function observeAsyncListenerResult(result, signalName) {
+  let thenMethod;
+  try {
+    thenMethod = result?.then;
+  } catch (error) {
+    Logger.system.error(`[SIGNALS] Error reading async listener result for "${signalName}":`, error);
+    return;
+  }
+
+  if (typeof thenMethod !== 'function') return;
+
+  try {
+    thenMethod.call(result, undefined, error => {
+      Logger.system.error(`[SIGNALS] Async error in signal listener for "${signalName}":`, error);
+    });
+  } catch (error) {
+    Logger.system.error(`[SIGNALS] Error observing async listener for "${signalName}":`, error);
+  }
+}
+
 /**
  * Registers a listener for a given signal.
  * @param {string} signalName - The name of the signal (e.g., "@todosLoaded").
@@ -16,35 +45,40 @@ const signalBus = new Map();
  * @returns {Function} Unregisters the listener.
  */
 export function registerSignalListener(signalName, callback) {
-  if (!signalName) {
+  const normalizedSignalName = normalizeSignalName(signalName);
+  if (!normalizedSignalName) {
     Logger.system.warn("[SIGNALS] Ignoring empty signal listener registration.");
     return () => {};
   }
+  if (typeof callback !== 'function') {
+    Logger.system.warn(`[SIGNALS] Ignoring listener for "${normalizedSignalName}" because callback is not a function.`);
+    return () => {};
+  }
 
-  let listeners = signalBus.get(signalName);
+  let listeners = signalBus.get(normalizedSignalName);
   if (!listeners) {
     listeners = new Set();
-    signalBus.set(signalName, listeners);
-    Logger.system.debug(`[SIGNALS] Created new signal bus for "${signalName}".`);
+    signalBus.set(normalizedSignalName, listeners);
+    Logger.system.debug(`[SIGNALS] Created new signal bus for "${normalizedSignalName}".`);
   }
 
   listeners.add(callback);
-  Logger.system.debug(`[SIGNALS] Registered listener for signal "${signalName}".`);
+  Logger.system.debug(`[SIGNALS] Registered listener for signal "${normalizedSignalName}".`);
   return () => {
-    const listeners = signalBus.get(signalName);
+    const listeners = signalBus.get(normalizedSignalName);
     if (!listeners) return;
     if (listeners.delete(callback)) {
-      Logger.system.debug(`[SIGNALS] Unregistered listener for signal "${signalName}".`);
+      Logger.system.debug(`[SIGNALS] Unregistered listener for signal "${normalizedSignalName}".`);
     }
     if (!listeners.size) {
-      signalBus.delete(signalName);
+      signalBus.delete(normalizedSignalName);
     }
   };
 }
 
 // Internal diagnostic used by the browser e2e suite to verify cleanup behavior.
 export function __getSignalListenerCount(signalName) {
-  return signalBus.get(signalName)?.size || 0;
+  return signalBus.get(normalizeSignalName(signalName))?.size || 0;
 }
 
 /**
@@ -52,23 +86,25 @@ export function __getSignalListenerCount(signalName) {
  * @param {string} signalName - The signal to emit.
  */
 export function emitSignal(signalName) {
-  if (!signalName) {
+  const normalizedSignalName = normalizeSignalName(signalName);
+  if (!normalizedSignalName) {
     Logger.system.warn("[SIGNALS] Ignoring empty signal emission.");
     return;
   }
 
-  Logger.system.debug(`[SIGNALS] Emitting signal "${signalName}".`);
-  const listeners = signalBus.get(signalName);
+  Logger.system.debug(`[SIGNALS] Emitting signal "${normalizedSignalName}".`);
+  const listeners = signalBus.get(normalizedSignalName);
   if (listeners) {
     for (const callback of [...listeners]) {
       try {
-        callback();
-        Logger.system.debug(`[SIGNALS] Signal "${signalName}" listener executed successfully.`);
+        const result = callback();
+        observeAsyncListenerResult(result, normalizedSignalName);
+        Logger.system.debug(`[SIGNALS] Signal "${normalizedSignalName}" listener executed successfully.`);
       } catch (error) {
-        Logger.system.error(`[SIGNALS] Error in signal listener for "${signalName}":`, error);
+        Logger.system.error(`[SIGNALS] Error in signal listener for "${normalizedSignalName}":`, error);
       }
     }
   } else {
-    Logger.system.warn(`[SIGNALS] No listeners registered for signal "${signalName}".`);
+    Logger.system.warn(`[SIGNALS] No listeners registered for signal "${normalizedSignalName}".`);
   }
 }

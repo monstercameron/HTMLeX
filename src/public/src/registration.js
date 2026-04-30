@@ -10,7 +10,14 @@ import { Logger } from './logger.js';
 import { registerSignalListener, emitSignal } from './signals.js';
 import { handleAction } from './actions.js';
 import { debounce, throttle } from './rateLimit.js';
-import { hasHTMLeXMarkup, parseTargets, querySelectorSafe, updateTarget as originalUpdateTarget } from './dom.js';
+import {
+  dispatchHTMLeXDOMUpdated,
+  hasHTMLeXMarkup,
+  parseTargets,
+  querySelectorAllSafe,
+  querySelectorSafe,
+  updateTarget as originalUpdateTarget
+} from './dom.js';
 import { handleWebSocket } from './websocket.js';
 
 const METHOD_ATTRIBUTES = ['get', 'post', 'put', 'delete', 'patch'];
@@ -23,34 +30,561 @@ const REGISTRATION_SELECTORS = [
   '[get]', '[post]', '[put]', '[delete]', '[patch]',
   '[socket]', '[publish]', '[timer]'
 ];
+const REGISTRATION_SELECTOR_STRING = REGISTRATION_SELECTORS.join(',');
+const COMMON_ON_ATTRIBUTE_EVENTS = new Set([
+  'click', 'submit', 'input', 'change', 'load', 'reset',
+  'focus', 'blur', 'keydown', 'keyup', 'keypress',
+  'mouseenter', 'mouseleave', 'mouseover', 'mouseout', 'mousemove',
+  'mousedown', 'mouseup', 'dblclick',
+  'pointerenter', 'pointerleave', 'pointermove', 'pointerdown', 'pointerup',
+  'touchstart', 'touchmove', 'touchend', 'touchcancel'
+]);
+const ELEMENT_NODE_TYPE = 1;
+
+function safeString(value, fallback = '') {
+  try {
+    return String(value ?? fallback);
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to coerce registration value to string.', error);
+    return fallback;
+  }
+}
+
+function getObjectField(value, fieldName, fallback = undefined) {
+  try {
+    return value?.[fieldName] ?? fallback;
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to read registration field "${fieldName}".`, error);
+    return fallback;
+  }
+}
+
+function setObjectField(value, fieldName, fieldValue) {
+  try {
+    if (value && typeof value === 'object') {
+      value[fieldName] = fieldValue;
+      return true;
+    }
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to set registration field "${fieldName}".`, error);
+  }
+  return false;
+}
+
+function deleteObjectField(value, fieldName) {
+  try {
+    if (value && typeof value === 'object') {
+      delete value[fieldName];
+    }
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to delete registration field "${fieldName}".`, error);
+  }
+}
+
+function getArrayLength(value) {
+  try {
+    const length = value?.length;
+    return Number.isSafeInteger(length) && length > 0 ? length : 0;
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to read registration array length.', error);
+    return 0;
+  }
+}
+
+function getArrayItem(value, index, label) {
+  try {
+    return value?.[index];
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to read ${label}.`, error);
+    return undefined;
+  }
+}
+
+function appendArrayItem(value, item, label) {
+  try {
+    value[value.length] = item;
+    return true;
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to append ${label}.`, error);
+    return false;
+  }
+}
+
+function popArrayItem(value, label) {
+  const length = getArrayLength(value);
+  if (!length) return null;
+  const item = getArrayItem(value, length - 1, label);
+  try {
+    value.length = length - 1;
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to remove ${label}.`, error);
+  }
+  return item;
+}
+
+function clearArray(value, label) {
+  if (!value) return;
+  try {
+    value.length = 0;
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to clear ${label}.`, error);
+  }
+}
+
+function getNonNegativeIntegerField(value, fieldName) {
+  const fieldValue = getObjectField(value, fieldName, 0);
+  return Number.isSafeInteger(fieldValue) && fieldValue > 0 ? fieldValue : 0;
+}
+
+function forEachIterableItem(value, label, callback) {
+  try {
+    if (!value) return;
+    for (const item of value) {
+      callback(item);
+    }
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to iterate ${label}.`, error);
+  }
+}
+
+function addSetItem(value, item, label) {
+  try {
+    value?.add?.(item);
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to add ${label}.`, error);
+  }
+}
+
+function deleteSetItem(value, item, label) {
+  try {
+    value?.delete?.(item);
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to delete ${label}.`, error);
+  }
+}
+
+function clearSetLike(value, label) {
+  try {
+    value?.clear?.();
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to clear ${label}.`, error);
+  }
+}
+
+function getTargetSelector(target) {
+  return safeString(getObjectField(target, 'selector', '')).trim();
+}
+
+function getElementNodeType() {
+  return getObjectField(getObjectField(globalThis, 'Node'), 'ELEMENT_NODE', ELEMENT_NODE_TYPE);
+}
+
+function isElementNode(node) {
+  return getObjectField(node, 'nodeType') === getElementNodeType();
+}
+
+function getRuntimeWindow() {
+  return typeof window === 'undefined' ? globalThis.window : window;
+}
+
+function getRuntimeDocument() {
+  return typeof document === 'undefined' ? globalThis.document : document;
+}
+
+function getDocumentBody(runtimeDocument = getRuntimeDocument()) {
+  try {
+    return runtimeDocument?.body || null;
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to read document body.', error);
+    return null;
+  }
+}
+
+function getWindowField(runtimeWindow, fieldName) {
+  try {
+    return runtimeWindow?.[fieldName];
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to read window field "${fieldName}".`, error);
+    return undefined;
+  }
+}
+
+function setWindowField(runtimeWindow, fieldName, value) {
+  try {
+    if (runtimeWindow && typeof runtimeWindow === 'object') {
+      runtimeWindow[fieldName] = value;
+    }
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to set window field "${fieldName}".`, error);
+  }
+}
+
+function addDocumentEventListener(runtimeDocument, eventName, listener) {
+  try {
+    if (typeof runtimeDocument?.addEventListener !== 'function') return false;
+    runtimeDocument.addEventListener(eventName, listener);
+    return true;
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to add document listener "${eventName}".`, error);
+    return false;
+  }
+}
+
+function removeDocumentEventListener(runtimeDocument, eventName, listener) {
+  try {
+    runtimeDocument?.removeEventListener?.(eventName, listener);
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to remove document listener "${eventName}".`, error);
+  }
+}
+
+function getDOMUpdateRoot(event, fallbackRoot) {
+  try {
+    return event?.detail?.root || fallbackRoot;
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to read DOM update event root.', error);
+    return fallbackRoot;
+  }
+}
+
+function isElementLike(value) {
+  if (!value || typeof value !== 'object') return false;
+
+  const ElementConstructor = getObjectField(globalThis, 'Element');
+  if (typeof ElementConstructor === 'function') {
+    try {
+      if (value instanceof ElementConstructor) return true;
+    } catch {
+      // Fall through to structural detection for hostile constructors.
+    }
+  }
+
+  return isElementNode(value) && (
+    typeof value.matches === 'function' ||
+    typeof value.closest === 'function' ||
+    typeof value.querySelectorAll === 'function'
+  );
+}
+
+function createHTMLeXEvent(type) {
+  const EventConstructor = getObjectField(globalThis, 'Event');
+  if (typeof EventConstructor === 'function') {
+    try {
+      return new EventConstructor(type);
+    } catch {
+      // Fall through to a minimal event snapshot.
+    }
+  }
+
+  return {
+    type,
+    target: null,
+    currentTarget: null,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    stopPropagation() {},
+    stopImmediatePropagation() {}
+  };
+}
+
+function isElementConnected(element) {
+  try {
+    const body = getDocumentBody();
+    if (typeof body?.contains !== 'function') return true;
+    return body.contains(element);
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to determine whether an element is connected.', error);
+    return false;
+  }
+}
+
+function safeMatches(element, selector) {
+  try {
+    return typeof element?.matches === 'function' && element.matches(selector);
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to match selector "${selector}" against an element.`, error);
+    return false;
+  }
+}
+
+function safeQuerySelectorAll(root, selector) {
+  try {
+    return typeof root?.querySelectorAll === 'function' ? root.querySelectorAll(selector) : [];
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to query selector "${selector}" within a DOM subtree.`, error);
+    return [];
+  }
+}
+
+function safeClosest(element, selector) {
+  try {
+    return typeof element?.closest === 'function' ? element.closest(selector) : null;
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to resolve closest selector "${selector}".`, error);
+    return null;
+  }
+}
+
+function getElementTagName(element) {
+  try {
+    return safeString(getObjectField(element, 'tagName', '')).toLowerCase();
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to read element tagName.', error);
+    return '';
+  }
+}
+
+function hasElementAttribute(element, attributeName) {
+  try {
+    return Boolean(element?.hasAttribute?.(attributeName));
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to read attribute "${attributeName}".`, error);
+    return false;
+  }
+}
+
+function getElementAttribute(element, attributeName) {
+  try {
+    return element?.getAttribute?.(attributeName) ?? null;
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to read attribute "${attributeName}".`, error);
+    return null;
+  }
+}
+
+function setElementAttribute(element, attributeName, value) {
+  try {
+    element?.setAttribute?.(attributeName, value);
+    return true;
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to set attribute "${attributeName}".`, error);
+    return false;
+  }
+}
+
+function removeElementAttribute(element, attributeName) {
+  try {
+    element?.removeAttribute?.(attributeName);
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to remove attribute "${attributeName}".`, error);
+  }
+}
+
+function getEventField(event, fieldName) {
+  try {
+    return event?.[fieldName];
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to read event field "${fieldName}".`, error);
+    return undefined;
+  }
+}
+
+function callEventMethod(event, methodName) {
+  try {
+    getEventField(event, methodName)?.();
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to call event method "${methodName}".`, error);
+  }
+}
+
+function scheduleTimeout(callback, delayMs, label) {
+  const runSafely = () => {
+    try {
+      callback();
+    } catch (error) {
+      Logger.system.error(`[HTMLeX] Scheduled ${label} callback failed.`, error);
+    }
+  };
+
+  if (typeof globalThis.setTimeout !== 'function') {
+    Logger.system.warn(`[HTMLeX] setTimeout is unavailable; ${label} cannot be delayed.`);
+    if (delayMs <= 0) runSafely();
+    return null;
+  }
+
+  try {
+    return globalThis.setTimeout(runSafely, delayMs);
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to schedule ${label}.`, error);
+    if (delayMs <= 0) runSafely();
+    return null;
+  }
+}
+
+function clearScheduledTimeout(timerId, label = 'timer') {
+  if (timerId === null || timerId === undefined) return;
+  if (typeof globalThis.clearTimeout !== 'function') return;
+
+  try {
+    globalThis.clearTimeout(timerId);
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to clear ${label}.`, error);
+  }
+}
+
+function scheduleInterval(callback, intervalMs, label) {
+  if (typeof globalThis.setInterval !== 'function') {
+    Logger.system.warn(`[HTMLeX] setInterval is unavailable; ${label} cannot be scheduled.`);
+    return null;
+  }
+
+  try {
+    return globalThis.setInterval(callback, intervalMs);
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to schedule ${label}.`, error);
+    return null;
+  }
+}
+
+function clearScheduledInterval(intervalId, label = 'interval') {
+  if (intervalId === null || intervalId === undefined) return;
+  if (typeof globalThis.clearInterval !== 'function') return;
+
+  try {
+    globalThis.clearInterval(intervalId);
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to clear ${label}.`, error);
+  }
+}
+
+function disconnectObserver(observer, label = 'observer') {
+  try {
+    observer?.disconnect?.();
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to disconnect ${label}.`, error);
+  }
+}
+
+function addElementEventListener(element, eventName, listener) {
+  try {
+    if (typeof element?.addEventListener !== 'function') return false;
+    element.addEventListener(eventName, listener);
+    return true;
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to add "${eventName}" event listener.`, error);
+    return false;
+  }
+}
+
+function removeElementEventListener(element, eventName, listener) {
+  try {
+    element?.removeEventListener?.(eventName, listener);
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to remove "${eventName}" event listener.`, error);
+  }
+}
+
+function removeElementNode(element) {
+  try {
+    element?.remove?.();
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to remove element.', error);
+  }
+}
+
+function setElementInnerHTML(element, html) {
+  try {
+    element.innerHTML = html;
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to update element content.', error);
+  }
+}
+
+function insertElementHTML(element, position, html) {
+  try {
+    element?.insertAdjacentHTML?.(position, html);
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to insert HTML at "${position}".`, error);
+  }
+}
+
+function safeAbort(controller) {
+  try {
+    controller?.abort?.();
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to abort an in-flight request.', error);
+  }
+}
+
+function createAbortController() {
+  if (typeof globalThis.AbortController !== 'function') {
+    Logger.system.warn('[HTMLeX] AbortController is unavailable; requests cannot be canceled by registration cleanup.');
+    return { signal: null, abort() {} };
+  }
+
+  try {
+    return new globalThis.AbortController();
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to create AbortController.', error);
+    return { signal: null, abort() {} };
+  }
+}
+
+function observeElementAttributes(element, callback, attributeFilter) {
+  if (typeof globalThis.MutationObserver !== 'function') return null;
+  try {
+    const observer = new globalThis.MutationObserver(callback);
+    observer.observe(element, { attributes: true, attributeFilter });
+    return observer;
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to observe element attributes.', error);
+    return null;
+  }
+}
+
+function observeBodyMutations(callback) {
+  const body = getDocumentBody();
+  if (typeof globalThis.MutationObserver !== 'function' || !body) {
+    return null;
+  }
+
+  try {
+    const observer = new globalThis.MutationObserver(callback);
+    observer.observe(body, { childList: true, subtree: true });
+    return observer;
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to observe body mutations.', error);
+    return null;
+  }
+}
+
+function getElementIdentity(element) {
+  try {
+    const elementId = safeString(getObjectField(element, 'id', '')).trim();
+    if (elementId) return `#${elementId}`;
+    const name = getElementAttribute(element, 'name');
+    if (name) return `[name="${name}"]`;
+    return safeString(getObjectField(element, 'outerHTML', '<button>')).slice(0, 60) + '...';
+  } catch {
+    return '<button>...';
+  }
+}
 
 function getQueuedCount(element, queueKey, cursorKey) {
-  const queue = element[queueKey];
-  const cursor = element[cursorKey] || 0;
-  return queue ? Math.max(queue.length - cursor, 0) : 0;
+  const queue = getObjectField(element, queueKey, null);
+  const cursor = getNonNegativeIntegerField(element, cursorKey);
+  return Math.max(getArrayLength(queue) - cursor, 0);
 }
 
 function dequeueQueuedItem(element, queueKey, cursorKey) {
-  const queue = element[queueKey];
-  const cursor = element[cursorKey] || 0;
-  if (!queue || cursor >= queue.length) return null;
+  const queue = getObjectField(element, queueKey, null);
+  const cursor = getNonNegativeIntegerField(element, cursorKey);
+  if (!queue || cursor >= getArrayLength(queue)) return null;
 
-  element[cursorKey] = cursor + 1;
-  return queue[cursor];
+  setObjectField(element, cursorKey, cursor + 1);
+  return getArrayItem(queue, cursor, queueKey);
 }
 
 function resetElementQueue(element, queueKey, cursorKey) {
-  if (element[queueKey]) {
-    element[queueKey].length = 0;
-  }
-  element[cursorKey] = 0;
+  clearArray(getObjectField(element, queueKey, null), queueKey);
+  setObjectField(element, cursorKey, 0);
 }
 
 function notifyDOMUpdated(content, root) {
   if (hasHTMLeXMarkup(content)) {
-    document.dispatchEvent(new CustomEvent('htmlex:dom-updated', {
-      detail: { root }
-    }));
+    dispatchHTMLeXDOMUpdated(root);
   }
 }
 
@@ -70,9 +604,11 @@ function notifyDOMUpdated(content, root) {
  * @returns {Element|undefined}
  */
 export function patchedUpdateTarget(target, content, resolvedElement, options = {}) {
-  Logger.system.debug("[HTMLeX] patchedUpdateTarget called with target:", target, "content length:", content.length);
-  const { forceResolvedElement = false, queueSequential = true } = options;
-  const selector = target.selector.trim().toLowerCase();
+  const contentString = safeString(content);
+  Logger.system.debug("[HTMLeX] patchedUpdateTarget called with target:", target, "content length:", contentString.length);
+  const forceResolvedElement = getObjectField(options, 'forceResolvedElement', false);
+  const queueSequential = getObjectField(options, 'queueSequential', true);
+  const selector = getTargetSelector(target).toLowerCase();
 
   if (queueSequential && resolvedElement._htmlexSequentialMode) {
     if (!resolvedElement._htmlexSequentialUpdates) {
@@ -80,26 +616,26 @@ export function patchedUpdateTarget(target, content, resolvedElement, options = 
       resolvedElement._htmlexSequentialUpdatesCursor = 0;
       Logger.system.debug("[HTMLeX] patchedUpdateTarget: Initialized sequential update queue.");
     }
-    Logger.system.debug("[HTMLeX] patchedUpdateTarget: Queuing sequential update for target", target.selector);
-    resolvedElement._htmlexSequentialUpdates.push({ target, content });
+    Logger.system.debug("[HTMLeX] patchedUpdateTarget: Queuing sequential update for target", getTargetSelector(target));
+    appendArrayItem(resolvedElement._htmlexSequentialUpdates, { target, content: contentString }, 'sequential update');
     return;
   }
   if (selector === '' || selector === 'this') {
     if (!resolvedElement._htmlexDefaultUpdated) {
       resolvedElement._htmlexDefaultUpdated = true;
-      Logger.system.debug("[HTMLeX] patchedUpdateTarget: First fragment - replacing content for target", target.selector);
-      resolvedElement.innerHTML = content;
-      notifyDOMUpdated(content, resolvedElement);
+      Logger.system.debug("[HTMLeX] patchedUpdateTarget: First fragment - replacing content for target", getTargetSelector(target));
+      setElementInnerHTML(resolvedElement, contentString);
+      notifyDOMUpdated(contentString, resolvedElement);
       return resolvedElement;
     }
 
-    Logger.system.debug("[HTMLeX] patchedUpdateTarget: Subsequent fragment - appending content for target", target.selector);
-    resolvedElement.insertAdjacentHTML('beforeend', content);
-    notifyDOMUpdated(content, resolvedElement);
+    Logger.system.debug("[HTMLeX] patchedUpdateTarget: Subsequent fragment - appending content for target", getTargetSelector(target));
+    insertElementHTML(resolvedElement, 'beforeend', contentString);
+    notifyDOMUpdated(contentString, resolvedElement);
     return resolvedElement;
   }
-  Logger.system.debug("[HTMLeX] patchedUpdateTarget: Delegating update to originalUpdateTarget for target", target.selector);
-  return originalUpdateTarget(target, content, resolvedElement, { forceResolvedElement });
+  Logger.system.debug("[HTMLeX] patchedUpdateTarget: Delegating update to originalUpdateTarget for target", getTargetSelector(target));
+  return originalUpdateTarget(target, contentString, resolvedElement, { forceResolvedElement });
 }
 
 /**
@@ -124,17 +660,17 @@ async function processSequentialQueue(element) {
 
     let resolvedElement = update.resolvedElement;
     if (!resolvedElement) {
-      if (update.target.selector.trim().toLowerCase() === "this") {
+      if (getTargetSelector(update.target).toLowerCase() === "this") {
         resolvedElement = element;
       } else {
-        resolvedElement = querySelectorSafe(update.target.selector);
+        resolvedElement = querySelectorSafe(getTargetSelector(update.target));
       }
     }
     if (!resolvedElement) {
-      Logger.system.debug("[HTMLeX] processSequentialQueue: Target element not found for selector", update.target.selector);
+      Logger.system.debug("[HTMLeX] processSequentialQueue: Target element not found for selector", getTargetSelector(update.target));
       return;
     }
-    Logger.system.debug("[HTMLeX] processSequentialQueue: Applying update for target", update.target.selector);
+    Logger.system.debug("[HTMLeX] processSequentialQueue: Applying update for target", getTargetSelector(update.target));
     originalUpdateTarget(update.target, update.content, resolvedElement);
     if (update.afterUpdate) update.afterUpdate();
   };
@@ -159,40 +695,44 @@ async function processSequentialQueue(element) {
         const { method, endpoint, updates = [], registrationToken, abortController, htmlexEvent } = sequentialEntry;
         if (
           abortController?.signal.aborted ||
-          !document.body.contains(element) ||
+          !isElementConnected(element) ||
           (registrationToken && element._htmlexRegistrationToken !== registrationToken)
         ) {
           Logger.system.debug("[HTMLeX] processSequentialQueue: Skipping stale sequential call for endpoint:", endpoint);
-          updates.length = 0;
+          clearArray(updates, 'stale sequential updates');
           continue;
         }
         Logger.system.debug("[HTMLeX] processSequentialQueue: Starting API call for endpoint:", endpoint);
         try {
           element._htmlexSequentialAbortControllers ||= new Set();
-          element._htmlexSequentialAbortControllers.add(abortController);
+          addSetItem(element._htmlexSequentialAbortControllers, abortController, 'sequential abort controller');
           await handleAction(
             element,
             method,
             endpoint,
-            { signal: abortController.signal, htmlexSequentialEntry: sequentialEntry, htmlexEvent }
+            {
+              ...(abortController?.signal ? { signal: abortController.signal } : {}),
+              htmlexSequentialEntry: sequentialEntry,
+              htmlexEvent
+            }
           );
           Logger.system.debug("[HTMLeX] processSequentialQueue: API call resolved for endpoint:", endpoint);
         } finally {
-          element._htmlexSequentialAbortControllers?.delete(abortController);
+          deleteSetItem(element._htmlexSequentialAbortControllers, abortController, 'sequential abort controller');
         }
         if (
           abortController?.signal.aborted ||
-          !document.body.contains(element) ||
+          !isElementConnected(element) ||
           (registrationToken && element._htmlexRegistrationToken !== registrationToken)
         ) {
           Logger.system.debug("[HTMLeX] processSequentialQueue: Skipping stale sequential updates for endpoint:", endpoint);
-          updates.length = 0;
+          clearArray(updates, 'stale sequential updates');
           continue;
         }
         for (const update of updates) {
           applyQueuedUpdate(update);
         }
-        updates.length = 0;
+        clearArray(updates, 'applied sequential updates');
       }
 
       // If there is at least one queued update, flush one update.
@@ -203,7 +743,10 @@ async function processSequentialQueue(element) {
         }
       }
       Logger.system.debug("[HTMLeX] processSequentialQueue: Waiting for sequential delay of", delay, "ms before next flush.");
-      await new Promise(resolve => setTimeout(resolve, delay));
+      await new Promise(resolve => {
+        const timerId = scheduleTimeout(resolve, delay, 'sequential delay');
+        if (timerId === null && delay > 0) resolve();
+      });
     }
   } catch (error) {
     Logger.system.error("[HTMLeX] Sequential queue processing failed; resetting queue state.", error);
@@ -237,15 +780,15 @@ export function flushSequentialUpdates(element) {
       if (!update) continue;
 
       let resolvedElement = update.resolvedElement;
-      if (!resolvedElement && update.target.selector.trim().toLowerCase() === "this") {
+      if (!resolvedElement && getTargetSelector(update.target).toLowerCase() === "this") {
         resolvedElement = element;
       } else if (!resolvedElement) {
-        resolvedElement = querySelectorSafe(update.target.selector);
+        resolvedElement = querySelectorSafe(getTargetSelector(update.target));
       }
       if (!resolvedElement) {
-        Logger.system.debug("[HTMLeX] flushSequentialUpdates: Target element not found for selector", update.target.selector);
+        Logger.system.debug("[HTMLeX] flushSequentialUpdates: Target element not found for selector", getTargetSelector(update.target));
       } else {
-        Logger.system.debug("[HTMLeX] flushSequentialUpdates: Applying queued update for target", update.target.selector);
+        Logger.system.debug("[HTMLeX] flushSequentialUpdates: Applying queued update for target", getTargetSelector(update.target));
         const result = originalUpdateTarget(update.target, update.content, resolvedElement);
         if (update.afterUpdate) update.afterUpdate();
         if (result && result.hasAttribute && result.hasAttribute('timer')) {
@@ -266,17 +809,17 @@ const registrationRecords = new WeakMap();
 
 function getRegistrationSignature(element) {
   return REGISTRATION_ATTRIBUTES
-    .map(attributeName => `${attributeName}=${element.getAttribute(attributeName) ?? ''}`)
+    .map(attributeName => `${attributeName}=${safeString(getElementAttribute(element, attributeName))}`)
     .join('|');
 }
 
-function cleanupElementRegistration(element) {
+function cleanupElementRegistration(element, options = {}) {
   const record = registrationRecords.get(element);
   if (!record) return;
 
   for (const cleanup of record.cleanupFns) {
     try {
-      cleanup();
+      cleanup(options);
     } catch (error) {
       Logger.system.error("[HTMLeX] Error cleaning up element registration:", error);
     }
@@ -284,9 +827,9 @@ function cleanupElementRegistration(element) {
   registrationRecords.delete(element);
   registeredElements.delete(element);
   if (element._htmlexRegistrationToken === record.token) {
-    delete element._htmlexRegistrationToken;
+    deleteObjectField(element, '_htmlexRegistrationToken');
   }
-  element.removeAttribute('data-htmlex-registered');
+  removeElementAttribute(element, 'data-htmlex-registered');
 }
 
 export function unregisterElement(element) {
@@ -299,13 +842,29 @@ export function unregisterElement(element) {
  * @param {string} eventName - The raw event name from the attribute.
  * @returns {string} The normalized event name.
  */
-function normalizeEvent(eventName) {
-  if (!eventName) return '';
-  eventName = eventName.trim();
-  const normalized = eventName.toLowerCase().startsWith('on')
+function normalizeEvent(eventName, fallbackEvent = '') {
+  if (!eventName) return fallbackEvent;
+  eventName = safeString(eventName).trim();
+  if (eventName.toLowerCase() === 'on') {
+    Logger.system.warn(`[HTMLeX Warning] Ignoring invalid trigger "${eventName}". Falling back to "${fallbackEvent}".`);
+    return fallbackEvent;
+  }
+  const shouldStripOnPrefix = (
+    eventName.length > 2 &&
+    eventName.toLowerCase().startsWith('on') &&
+    (
+      /^on[A-Z]/.test(eventName) ||
+      COMMON_ON_ATTRIBUTE_EVENTS.has(eventName.slice(2).toLowerCase())
+    )
+  );
+  const normalized = shouldStripOnPrefix
     ? eventName.slice(2)
     : eventName;
   const normalizedLowercase = normalized.toLowerCase();
+  if (!normalizedLowercase) {
+    Logger.system.warn(`[HTMLeX Warning] Ignoring invalid trigger "${eventName}". Falling back to "${fallbackEvent}".`);
+    return fallbackEvent;
+  }
   Logger.system.debug(`[HTMLeX] normalizeEvent: Raw="${eventName}" Normalized="${normalizedLowercase}"`);
   return normalizedLowercase;
 }
@@ -313,77 +872,103 @@ function normalizeEvent(eventName) {
 function snapshotEvent(event) {
   if (!event) return null;
   return {
-    type: event.type,
-    target: event.target,
-    currentTarget: event.currentTarget,
-    defaultPrevented: event.defaultPrevented,
-    preventDefault: () => event.preventDefault?.(),
-    stopPropagation: () => event.stopPropagation?.(),
-    stopImmediatePropagation: () => event.stopImmediatePropagation?.()
+    type: getEventField(event, 'type'),
+    target: getEventField(event, 'target'),
+    currentTarget: getEventField(event, 'currentTarget'),
+    defaultPrevented: getEventField(event, 'defaultPrevented'),
+    preventDefault: () => callEventMethod(event, 'preventDefault'),
+    stopPropagation: () => callEventMethod(event, 'stopPropagation'),
+    stopImmediatePropagation: () => callEventMethod(event, 'stopImmediatePropagation')
   };
 }
 
 function getActionMethod(element) {
-  return METHOD_ATTRIBUTES.find(methodAttribute => element.hasAttribute(methodAttribute));
+  return METHOD_ATTRIBUTES.find(methodAttribute => hasElementAttribute(element, methodAttribute));
 }
 
 function isSequentialEnabled(element) {
-  return element.hasAttribute('sequential') && element.getAttribute('sequential')?.trim().toLowerCase() !== 'false';
+  return hasElementAttribute(element, 'sequential') &&
+    safeString(getElementAttribute(element, 'sequential')).trim().toLowerCase() !== 'false';
 }
 
 function getDefaultTriggerEvent(element) {
-  return element.tagName.toLowerCase() === 'form' ? 'submit' : 'click';
+  return getElementTagName(element) === 'form' ? 'submit' : 'click';
 }
 
-function resolveTargetElement(target, fallbackElement) {
-  if (target.selector.trim().toLowerCase() === 'this') {
-    return fallbackElement;
+function parseNonNegativeInteger(value, defaultValue = 0) {
+  const normalizedValue = safeString(value).trim();
+  if (!/^\d+$/u.test(normalizedValue)) return defaultValue;
+
+  const parsed = Number.parseInt(normalizedValue, 10);
+  return Number.isSafeInteger(parsed) ? parsed : defaultValue;
+}
+
+function parseAutoDelay(value) {
+  const normalizedValue = safeString(value).trim();
+  if (normalizedValue.toLowerCase() === 'true') return 0;
+  if (!normalizedValue || /^-\d+$/u.test(normalizedValue)) return 0;
+  return parseNonNegativeInteger(normalizedValue, null);
+}
+
+function resolveTimerTargetElements(target, fallbackElement) {
+  if (getTargetSelector(target).toLowerCase() === 'this') {
+    return [fallbackElement];
   }
 
-  return querySelectorSafe(target.selector);
+  return querySelectorAllSafe(getTargetSelector(target));
 }
 
 function cleanupSocket(element) {
   if (element._htmlexSocket) {
-    element._htmlexSocket.disconnect();
+    try {
+      element._htmlexSocket.disconnect?.();
+    } catch (error) {
+      Logger.system.warn('[HTMLeX] Failed to disconnect socket during cleanup.', error);
+    }
     delete element._htmlexSocket;
   }
   if (element._htmlexSocketObserver) {
-    element._htmlexSocketObserver.disconnect();
+    disconnectObserver(element._htmlexSocketObserver, 'socket observer');
     delete element._htmlexSocketObserver;
+  }
+}
+
+function cleanupRemovedTree(node) {
+  if (!isElementNode(node) || isElementConnected(node)) return;
+
+  cleanupElementRegistration(node, { preserveRequestState: true });
+  try {
+    for (const descendant of node.querySelectorAll?.('*') || []) {
+      cleanupElementRegistration(descendant, { preserveRequestState: true });
+    }
+  } catch (error) {
+    Logger.system.warn("[HTMLeX] Failed to clean up a removed subtree.", error);
   }
 }
 
 function runTimerTargetAction(element, targetAttribute) {
   if (!targetAttribute) {
     Logger.system.info("[TIMER] Timer triggered: No target attribute specified; removing the element.");
-    element.remove();
-    return;
-  }
-
-  if (targetAttribute.toLowerCase().includes("(remove)")) {
-    if (targetAttribute.toLowerCase().includes("this(remove)")) {
-      Logger.system.info(`[TIMER] Timer triggered: Removing element as specified by target "this(remove)".`);
-      element.remove();
-      return;
-    }
-
-    const selector = targetAttribute.replace(/\(remove\)/gi, '').trim();
-    const resolvedElement = querySelectorSafe(selector);
-    if (resolvedElement) {
-      Logger.system.info(`[TIMER] Timer triggered: Removing element matching selector "${selector}".`);
-      resolvedElement.remove();
-    } else {
-      Logger.system.warn(`[TIMER] Timer triggered: No element found for selector "${selector}" to remove.`);
-    }
+    removeElementNode(element);
     return;
   }
 
   for (const target of parseTargets(targetAttribute)) {
-    const resolvedElement = resolveTargetElement(target, element);
-    if (resolvedElement) {
-      Logger.system.info(`[TIMER] Timer triggered: Clearing content of element matching target "${target.selector}".`);
-      resolvedElement.innerHTML = "";
+    const resolvedElements = resolveTimerTargetElements(target, element);
+    if (!resolvedElements.length) {
+      Logger.system.warn(`[TIMER] Timer triggered: No element found for selector "${getTargetSelector(target)}".`);
+      continue;
+    }
+
+    for (const resolvedElement of resolvedElements) {
+      if (getObjectField(target, 'strategy') === 'remove') {
+        Logger.system.info(`[TIMER] Timer triggered: Removing element matching target "${getTargetSelector(target)}".`);
+        removeElementNode(resolvedElement);
+        continue;
+      }
+
+      Logger.system.info(`[TIMER] Timer triggered: Clearing content of element matching target "${getTargetSelector(target)}".`);
+      setElementInnerHTML(resolvedElement, "");
     }
   }
 }
@@ -392,75 +977,79 @@ function runTimerAction(element) {
   const methodAttribute = getActionMethod(element);
   if (methodAttribute) {
     Logger.system.info(`[TIMER] Timer triggered: Calling API with method ${methodAttribute.toUpperCase()}.`);
-    handleAction(element, methodAttribute.toUpperCase(), element.getAttribute(methodAttribute), { htmlexEvent: new Event('timer') });
+    handleAction(element, methodAttribute.toUpperCase(), getElementAttribute(element, methodAttribute), { htmlexEvent: createHTMLeXEvent('timer') })
+      .catch(error => {
+        Logger.system.error("[TIMER] Timer-triggered API action failed:", error);
+      });
     return;
   }
 
-  if (element.hasAttribute('publish')) {
-    const publishSignal = element.getAttribute('publish');
-    Logger.system.info(`[TIMER] Timer triggered: Emitting publish signal "${publishSignal}".`);
+  if (hasElementAttribute(element, 'publish')) {
+    const publishSignal = getElementAttribute(element, 'publish');
+    Logger.system.info(`[TIMER] Timer triggered: Emitting publish signal "${safeString(publishSignal)}".`);
     emitSignal(publishSignal);
     return;
   }
 
-  runTimerTargetAction(element, element.getAttribute('target'));
+  runTimerTargetAction(element, getElementAttribute(element, 'target'));
 }
 
 function registerTimer(element, registrationToken, cleanupFns) {
-  if (!element.hasAttribute('timer')) return;
+  if (!hasElementAttribute(element, 'timer')) return;
 
-  if (element.hasAttribute('data-timer-set')) {
+  if (hasElementAttribute(element, 'data-timer-set')) {
     Logger.system.debug("[HTMLeX] Timer already set for element:", element);
     return;
   }
 
-  const timerDelayMs = Number.parseInt(element.getAttribute('timer'), 10);
-  if (!Number.isFinite(timerDelayMs) || timerDelayMs < 0) {
-    Logger.system.warn(`[HTMLeX Warning] Ignoring invalid timer delay "${element.getAttribute('timer')}".`);
+  const timerDelayMs = parseNonNegativeInteger(getElementAttribute(element, 'timer'), null);
+  if (timerDelayMs === null) {
+    Logger.system.warn(`[HTMLeX Warning] Ignoring invalid timer delay "${safeString(getElementAttribute(element, 'timer'))}".`);
     return;
   }
 
   Logger.system.info(`[HTMLeX INFO] Timer set for element with delay ${timerDelayMs}ms.`);
-  const timerAttributeValue = element.getAttribute('timer');
-  element.setAttribute('data-timer-set', 'true');
+  const timerAttributeValue = getElementAttribute(element, 'timer');
+  setElementAttribute(element, 'data-timer-set', 'true');
   let timerActive = true;
   let timerAttributeObserver = null;
 
-  const timerId = setTimeout(() => {
+  const timerId = scheduleTimeout(() => {
     timerActive = false;
-    timerAttributeObserver?.disconnect();
+    disconnectObserver(timerAttributeObserver, 'timer attribute observer');
     timerAttributeObserver = null;
-    if (element._htmlexRegistrationToken !== registrationToken || !document.body.contains(element)) return;
-    if (element.getAttribute('timer') !== timerAttributeValue) {
+    if (element._htmlexRegistrationToken !== registrationToken || !isElementConnected(element)) return;
+    if (getElementAttribute(element, 'timer') !== timerAttributeValue) {
       Logger.system.debug("[TIMER] Skipping stale timer because its timer attribute changed or was removed:", element);
       return;
     }
     Logger.system.debug("[TIMER] Timer callback triggered for element:", element);
     runTimerAction(element);
-  }, timerDelayMs);
+  }, timerDelayMs, 'timer action');
+  if (timerId === null && timerDelayMs > 0) {
+    removeElementAttribute(element, 'data-timer-set');
+    return;
+  }
 
   const clearRegisteredTimer = () => {
     if (timerActive) {
       timerActive = false;
-      clearTimeout(timerId);
+      clearScheduledTimeout(timerId, 'registered timer');
     }
-    timerAttributeObserver?.disconnect();
+    disconnectObserver(timerAttributeObserver, 'timer attribute observer');
     timerAttributeObserver = null;
-    element.removeAttribute('data-timer-set');
+    removeElementAttribute(element, 'data-timer-set');
   };
 
-  if (typeof MutationObserver === 'function') {
-    timerAttributeObserver = new MutationObserver(() => {
-      if (element.getAttribute('timer') === timerAttributeValue) return;
-      Logger.system.debug("[TIMER] Clearing timer because its timer attribute changed or was removed:", element);
-      clearRegisteredTimer();
-    });
-    timerAttributeObserver.observe(element, { attributes: true, attributeFilter: ['timer'] });
-  }
-
-  cleanupFns.push(() => {
+  timerAttributeObserver = observeElementAttributes(element, () => {
+    if (getElementAttribute(element, 'timer') === timerAttributeValue) return;
+    Logger.system.debug("[TIMER] Clearing timer because its timer attribute changed or was removed:", element);
     clearRegisteredTimer();
-  });
+  }, ['timer']);
+
+  appendArrayItem(cleanupFns, () => {
+    clearRegisteredTimer();
+  }, 'timer cleanup');
 }
 
 /**
@@ -470,16 +1059,11 @@ function registerTimer(element, registrationToken, cleanupFns) {
 export function registerElement(element) {
   // Warn if a <button> inside a form does not explicitly specify the type.
   if (
-    element.tagName.toLowerCase() === 'button' &&
-    !element.hasAttribute('type') &&
-    element.closest('form')
+    getElementTagName(element) === 'button' &&
+    !hasElementAttribute(element, 'type') &&
+    safeClosest(element, 'form')
   ) {
-    const identity =
-      element.id
-        ? `#${element.id}`
-        : element.getAttribute('name')
-        ? `[name="${element.getAttribute('name')}"]`
-        : element.outerHTML.slice(0, 60) + '...';
+    const identity = getElementIdentity(element);
     Logger.system.warn(
       `[HTMLeX Warning] A <button> element (${identity}) inside a form does not specify a type attribute. ` +
       `It defaults to 'submit', which may trigger the form's API/signal in addition to its own. ` +
@@ -500,70 +1084,75 @@ export function registerElement(element) {
 
   Logger.system.debug("[HTMLeX] Registering element:", element);
   registeredElements.add(element);
-  element.setAttribute('data-htmlex-registered', 'true');
+  setElementAttribute(element, 'data-htmlex-registered', 'true');
   const cleanupFns = [];
   const registrationToken = Symbol('htmlexRegistration');
   element._htmlexRegistrationToken = registrationToken;
-  cleanupFns.push(() => {
-    element._htmlexRequestId = (element._htmlexRequestId || 0) + 1;
-    element._htmlexRequestPending = false;
-    if (element._htmlexPendingCall) {
-      clearTimeout(element._htmlexPendingCall);
-      element._htmlexPendingCall = null;
-    }
-    if (element._htmlexAbortController) {
-      element._htmlexAbortController.abort();
-      element._htmlexAbortController = null;
-    }
-    if (element._htmlexSequentialAbortControllers) {
-      for (const controller of element._htmlexSequentialAbortControllers) {
-        controller.abort();
+  appendArrayItem(cleanupFns, ({ preserveRequestState = false } = {}) => {
+    if (!preserveRequestState) {
+      element._htmlexRequestId = (element._htmlexRequestId || 0) + 1;
+      element._htmlexRequestPending = false;
+      if (element._htmlexPendingCall) {
+        clearScheduledTimeout(element._htmlexPendingCall, 'pending action call');
+        element._htmlexPendingCall = null;
       }
-      element._htmlexSequentialAbortControllers.clear();
-    }
-    if (element._htmlexDelayedSignalTimers) {
-      for (const timerId of element._htmlexDelayedSignalTimers) {
-        clearTimeout(timerId);
+      if (element._htmlexAbortController) {
+        safeAbort(element._htmlexAbortController);
+        element._htmlexAbortController = null;
       }
-      element._htmlexDelayedSignalTimers.clear();
+      if (element._htmlexSequentialAbortControllers) {
+        forEachIterableItem(element._htmlexSequentialAbortControllers, 'sequential abort controllers', safeAbort);
+        clearSetLike(element._htmlexSequentialAbortControllers, 'sequential abort controllers');
+      }
+      if (element._htmlexDelayedSignalTimers) {
+        forEachIterableItem(element._htmlexDelayedSignalTimers, 'delayed signal timers', (timerId) => {
+          clearScheduledTimeout(timerId, 'delayed signal timer');
+        });
+        clearSetLike(element._htmlexDelayedSignalTimers, 'delayed signal timers');
+      }
+      if (element._htmlexSequentialQueue) {
+        resetElementQueue(element, '_htmlexSequentialQueue', '_htmlexSequentialQueueCursor');
+      }
+      if (element._htmlexSequentialUpdates) {
+        resetElementQueue(element, '_htmlexSequentialUpdates', '_htmlexSequentialUpdatesCursor');
+      }
+      element._htmlexSequentialMode = false;
+      element._htmlexSequentialProcessing = false;
     }
-    if (element._htmlexSequentialQueue) {
-      resetElementQueue(element, '_htmlexSequentialQueue', '_htmlexSequentialQueueCursor');
-    }
-    if (element._htmlexSequentialUpdates) {
-      resetElementQueue(element, '_htmlexSequentialUpdates', '_htmlexSequentialUpdatesCursor');
-    }
-    element._htmlexSequentialMode = false;
-    element._htmlexSequentialProcessing = false;
-  });
+  }, 'registration cleanup');
 
   const methodAttribute = getActionMethod(element);
-  const hasActionHandler = Boolean(methodAttribute || element.hasAttribute('publish'));
+  const hasActionHandler = Boolean(methodAttribute || hasElementAttribute(element, 'publish'));
 
-  const rawTrigger = element.getAttribute('trigger');
+  const rawTrigger = getElementAttribute(element, 'trigger');
+  const defaultTriggerEvent = getDefaultTriggerEvent(element);
   const triggerEvent = rawTrigger
-    ? normalizeEvent(rawTrigger)
-    : getDefaultTriggerEvent(element);
+    ? normalizeEvent(rawTrigger, defaultTriggerEvent)
+    : defaultTriggerEvent;
   Logger.system.debug(`[HTMLeX] triggerEvent for element: ${triggerEvent}`);
   const actionSelector = '[get], [post], [put], [delete], [patch], [publish]';
 
   const wrappedHandler = async (event) => {
-    Logger.system.debug(`[HTMLeX] Event triggered: type="${event.type}", currentTarget=`, event.currentTarget, "target=", event.target);
+    const eventType = getEventField(event, 'type');
+    const eventTarget = getEventField(event, 'target');
+    Logger.system.debug(`[HTMLeX] Event triggered: type="${eventType}", currentTarget=`, getEventField(event, 'currentTarget'), "target=", eventTarget);
 
     if (element._htmlexRegistrationToken !== registrationToken) {
       Logger.system.debug("[HTMLeX] Ignoring event for stale element registration:", element);
       return;
     }
 
-    if (!document.body.contains(element)) {
+    if (!isElementConnected(element)) {
       Logger.system.debug("[HTMLeX] Ignoring event for removed element:", element);
       return;
     }
 
-    const nestedAction = event.target instanceof Element ? event.target.closest(actionSelector) : null;
+    const nestedAction = isElementLike(eventTarget)
+      ? safeClosest(eventTarget, actionSelector)
+      : null;
     if (
       (triggerEvent === 'click' || triggerEvent === 'submit') &&
-      element.tagName.toLowerCase() !== 'form' &&
+      getElementTagName(element) !== 'form' &&
       nestedAction &&
       nestedAction !== element
     ) {
@@ -575,9 +1164,9 @@ export function registerElement(element) {
     const htmlexEvent = snapshotEvent(event);
 
     if (methodAttribute) {
-      if (triggerEvent === 'submit') event.preventDefault();
+      if (triggerEvent === 'submit') callEventMethod(event, 'preventDefault');
       if (isSequentialEnabled(element)) {
-        const sequentialDelay = Number.parseInt(element.getAttribute('sequential'), 10) || 0;
+        const sequentialDelay = parseNonNegativeInteger(getElementAttribute(element, 'sequential'), 0);
         element._htmlexSequentialMode = true;
         element._htmlexSequentialDelay = sequentialDelay;
         if (!element._htmlexSequentialQueue) {
@@ -586,51 +1175,52 @@ export function registerElement(element) {
           element._htmlexSequentialProcessing = false;
           Logger.system.debug("[HTMLeX] Initialized sequential queue with delay:", sequentialDelay, "ms");
         }
-        const abortController = new AbortController();
+        const abortController = createAbortController();
         const sequentialEntry = {
           method: methodAttribute.toUpperCase(),
-          endpoint: element.getAttribute(methodAttribute),
+          endpoint: getElementAttribute(element, methodAttribute),
           updates: [],
           registrationToken,
           abortController,
           htmlexEvent
         };
-        element._htmlexSequentialQueue.push(sequentialEntry);
-        Logger.system.debug("[HTMLeX] Enqueued sequential API call. Queue length now:", element._htmlexSequentialQueue.length);
+        appendArrayItem(element._htmlexSequentialQueue, sequentialEntry, 'sequential API call');
+        Logger.system.debug("[HTMLeX] Enqueued sequential API call. Queue length now:", getArrayLength(element._htmlexSequentialQueue));
         if (!element._htmlexSequentialProcessing) {
           processSequentialQueue(element);
         }
       } else {
         // Non-sequential: cancel pending or in-flight API calls.
         if (element._htmlexPendingCall) {
-          clearTimeout(element._htmlexPendingCall);
-          Logger.system.debug("[HTMLeX] Cancelled previous pending non-sequential API call (timeout) for endpoint:", element.getAttribute(methodAttribute));
+          clearScheduledTimeout(element._htmlexPendingCall, 'pending non-sequential action');
+          Logger.system.debug("[HTMLeX] Cancelled previous pending non-sequential API call (timeout) for endpoint:", getElementAttribute(element, methodAttribute));
         }
         if (element._htmlexAbortController) {
-          element._htmlexAbortController.abort();
-          Logger.system.debug("[HTMLeX] Aborted previous in-flight non-sequential API call for endpoint:", element.getAttribute(methodAttribute));
+          safeAbort(element._htmlexAbortController);
+          Logger.system.debug("[HTMLeX] Aborted previous in-flight non-sequential API call for endpoint:", getElementAttribute(element, methodAttribute));
         }
-        element._htmlexAbortController = new AbortController();
-        Logger.system.debug("[HTMLeX] Created new AbortController for non-sequential API call for endpoint:", element.getAttribute(methodAttribute));
-        element._htmlexPendingCall = setTimeout(() => {
-          Logger.system.debug("[HTMLeX] Executing non-sequential API call for endpoint:", element.getAttribute(methodAttribute));
+        element._htmlexAbortController = createAbortController();
+        Logger.system.debug("[HTMLeX] Created new AbortController for non-sequential API call for endpoint:", getElementAttribute(element, methodAttribute));
+        element._htmlexPendingCall = scheduleTimeout(() => {
+          Logger.system.debug("[HTMLeX] Executing non-sequential API call for endpoint:", getElementAttribute(element, methodAttribute));
           (async () => {
             try {
-              await handleAction(element, methodAttribute.toUpperCase(), element.getAttribute(methodAttribute), {
-                signal: element._htmlexAbortController.signal,
-                htmlexEvent
-              });
-              Logger.system.debug("[HTMLeX] Non-sequential API call completed for endpoint:", element.getAttribute(methodAttribute));
+              const actionOptions = { htmlexEvent };
+              if (element._htmlexAbortController?.signal) {
+                actionOptions.signal = element._htmlexAbortController.signal;
+              }
+              await handleAction(element, methodAttribute.toUpperCase(), getElementAttribute(element, methodAttribute), actionOptions);
+              Logger.system.debug("[HTMLeX] Non-sequential API call completed for endpoint:", getElementAttribute(element, methodAttribute));
             } catch (error) {
-              Logger.system.debug("[HTMLeX] Non-sequential API call aborted or errored for endpoint:", element.getAttribute(methodAttribute), error);
+              Logger.system.debug("[HTMLeX] Non-sequential API call aborted or errored for endpoint:", getElementAttribute(element, methodAttribute), error);
             }
           })();
           element._htmlexPendingCall = null;
-        }, 0);
+        }, 0, 'non-sequential action');
       }
-    } else if (element.hasAttribute('publish')) {
-      const publishSignal = element.getAttribute('publish');
-      Logger.system.info(`[HTMLeX] Emitting publish signal "${publishSignal}" on event "${triggerEvent}".`);
+    } else if (hasElementAttribute(element, 'publish')) {
+      const publishSignal = getElementAttribute(element, 'publish');
+      Logger.system.info(`[HTMLeX] Emitting publish signal "${safeString(publishSignal)}" on event "${triggerEvent}".`);
       emitSignal(publishSignal);
     }
   };
@@ -639,59 +1229,60 @@ export function registerElement(element) {
   if (hasActionHandler) {
     // Apply debounce/throttle if defined.
     const rateLimitCleanups = [];
-    const debounceMs = Number.parseInt(element.getAttribute('debounce') || '0', 10);
+    const debounceMs = parseNonNegativeInteger(getElementAttribute(element, 'debounce'), 0);
     if (debounceMs > 0) {
       const debouncedHandler = debounce(handler, debounceMs);
-      rateLimitCleanups.push(() => debouncedHandler.cancel?.());
+      appendArrayItem(rateLimitCleanups, () => debouncedHandler.cancel?.(), 'debounce cleanup');
       handler = debouncedHandler;
       Logger.system.debug(`[HTMLeX] Applied debounce of ${debounceMs}ms`);
     }
-    const throttleMs = Number.parseInt(element.getAttribute('throttle') || '0', 10);
+    const throttleMs = parseNonNegativeInteger(getElementAttribute(element, 'throttle'), 0);
     if (throttleMs > 0) {
       const throttledHandler = throttle(handler, throttleMs);
-      rateLimitCleanups.push(() => throttledHandler.cancel?.());
+      appendArrayItem(rateLimitCleanups, () => throttledHandler.cancel?.(), 'throttle cleanup');
       handler = throttledHandler;
       Logger.system.debug(`[HTMLeX] Applied throttle of ${throttleMs}ms`);
     }
     if (rateLimitCleanups.length) {
-      cleanupFns.push(() => {
+      appendArrayItem(cleanupFns, () => {
         for (const cleanup of rateLimitCleanups) {
           cleanup();
         }
-      });
+      }, 'rate limit cleanup');
     }
 
     const eventListener = (event) => {
-      if (triggerEvent === 'submit' && typeof event.preventDefault === 'function') {
-        event.preventDefault();
+      if (triggerEvent === 'submit' && typeof getEventField(event, 'preventDefault') === 'function') {
+        callEventMethod(event, 'preventDefault');
       }
       return handler(event);
     };
-    element.addEventListener(triggerEvent, eventListener);
-    cleanupFns.push(() => element.removeEventListener(triggerEvent, eventListener));
-    Logger.system.info(`[HTMLeX INFO] Registered ${methodAttribute ? methodAttribute.toUpperCase() : 'publish'} action on element with event "${triggerEvent}" for endpoint "${methodAttribute ? element.getAttribute(methodAttribute) : ''}".`);
+    if (addElementEventListener(element, triggerEvent, eventListener)) {
+      appendArrayItem(cleanupFns, () => removeElementEventListener(element, triggerEvent, eventListener), 'event listener cleanup');
+    }
+    Logger.system.info(`[HTMLeX INFO] Registered ${methodAttribute ? methodAttribute.toUpperCase() : 'publish'} action on element with event "${triggerEvent}" for endpoint "${methodAttribute ? safeString(getElementAttribute(element, methodAttribute)) : ''}".`);
   }
 
   // Revised polling code to respect the "repeat" attribute.
-  if (hasActionHandler && element.hasAttribute('poll')) {
-    const rawPollInterval = Number.parseInt(element.getAttribute('poll'), 10);
+  if (hasActionHandler && hasElementAttribute(element, 'poll')) {
+    const rawPollInterval = parseNonNegativeInteger(getElementAttribute(element, 'poll'), 0);
     const pollInterval = Number.isFinite(rawPollInterval) && rawPollInterval > 0
       ? Math.max(rawPollInterval, 100)
       : 0;
     if (pollInterval > 0) {
-      const repeatLimit = Number.parseInt(element.getAttribute('repeat') || '0', 10);
+      const repeatLimit = parseNonNegativeInteger(getElementAttribute(element, 'repeat'), 0);
       let pollIterationCount = 0;
       let pollRemovalObserver = null;
       const clearPolling = () => {
-        clearInterval(intervalId);
+        clearScheduledInterval(intervalId, 'poll interval');
         element._htmlexPollIntervalId = null;
         if (pollRemovalObserver) {
-          pollRemovalObserver.disconnect();
+          disconnectObserver(pollRemovalObserver, 'poll removal observer');
           pollRemovalObserver = null;
         }
       };
-      const intervalId = setInterval(() => {
-        if (!document.body.contains(element)) {
+      const intervalId = scheduleInterval(() => {
+        if (!isElementConnected(element)) {
           Logger.system.info("[HTMLeX INFO] Polling element removed. Clearing interval.");
           clearPolling();
           return;
@@ -702,108 +1293,129 @@ export function registerElement(element) {
           return;
         }
         Logger.system.debug("[HTMLeX] Polling triggered for element:", element);
-        handler(new Event(triggerEvent));
+        handler(createHTMLeXEvent(triggerEvent));
         pollIterationCount += 1;
-      }, pollInterval);
-      element._htmlexPollIntervalId = intervalId;
-      pollRemovalObserver = new MutationObserver(() => {
-        if (!document.body.contains(element)) {
-          Logger.system.info("[HTMLeX INFO] Polling element removed. Clearing interval.");
-          clearPolling();
+      }, pollInterval, 'poll interval');
+      if (intervalId !== null) {
+        element._htmlexPollIntervalId = intervalId;
+        pollRemovalObserver = observeBodyMutations(() => {
+          if (!isElementConnected(element)) {
+            Logger.system.info("[HTMLeX INFO] Polling element removed. Clearing interval.");
+            clearPolling();
+          }
+        });
+        if (pollRemovalObserver) {
+          element._htmlexPollRemovalObserver = pollRemovalObserver;
         }
-      });
-      pollRemovalObserver.observe(document.body, { childList: true, subtree: true });
-      element._htmlexPollRemovalObserver = pollRemovalObserver;
-      cleanupFns.push(clearPolling);
-      Logger.system.info(`[HTMLeX INFO] Set up polling every ${pollInterval}ms for element with repeat limit: ${repeatLimit || "unlimited"}.`);
+        appendArrayItem(cleanupFns, clearPolling, 'poll cleanup');
+        Logger.system.info(`[HTMLeX INFO] Set up polling every ${pollInterval}ms for element with repeat limit: ${repeatLimit || "unlimited"}.`);
+      }
     }
   }
 
   // Auto-firing based on the "auto" attribute.
-  if (hasActionHandler && element.hasAttribute('auto')) {
-    const autoValue = String(element.getAttribute('auto') ?? '').trim();
+  if (hasActionHandler && hasElementAttribute(element, 'auto')) {
+    const autoValue = safeString(getElementAttribute(element, 'auto')).trim();
     const autoMode = autoValue.toLowerCase();
     if (autoMode === 'false') {
       Logger.system.info("[HTMLeX INFO] Auto firing disabled for element.");
     } else if (autoMode === 'lazy') {
-      if (typeof IntersectionObserver !== 'function') {
+      if (typeof globalThis.IntersectionObserver !== 'function') {
         Logger.system.warn("[HTMLeX Warning] IntersectionObserver unavailable. Firing lazy auto action immediately.");
-        handler(new Event(triggerEvent));
+        handler(createHTMLeXEvent(triggerEvent));
       } else {
         let lazyRemovalObserver = null;
         const cleanupLazyObserver = (observer) => {
-          observer.disconnect();
+          disconnectObserver(observer, 'lazy observer');
           if (lazyRemovalObserver) {
-            lazyRemovalObserver.disconnect();
+            disconnectObserver(lazyRemovalObserver, 'lazy removal observer');
             lazyRemovalObserver = null;
           }
           element._htmlexLazyObserver = null;
           element._htmlexLazyRemovalObserver = null;
         };
-        const observer = new IntersectionObserver((entries, observer) => {
-          for (const entry of entries) {
-            if (!document.body.contains(element)) {
-              cleanupLazyObserver(observer);
-              return;
+        try {
+          const observer = new globalThis.IntersectionObserver((entries, observer) => {
+            for (const entry of entries) {
+              if (!isElementConnected(element)) {
+                cleanupLazyObserver(observer);
+                return;
+              }
+              if (entry.isIntersecting) {
+                Logger.system.debug("[HTMLeX] Lazy auto firing action for element:", element);
+                handler(createHTMLeXEvent(triggerEvent));
+                cleanupLazyObserver(observer);
+              }
             }
-            if (entry.isIntersecting) {
-              Logger.system.debug("[HTMLeX] Lazy auto firing action for element:", element);
-              handler(new Event(triggerEvent));
+          });
+          observer.observe(element);
+          lazyRemovalObserver = observeBodyMutations(() => {
+            if (!isElementConnected(element)) {
+              Logger.system.info("[HTMLeX INFO] Lazy auto element removed. Disconnecting observer.");
               cleanupLazyObserver(observer);
             }
+          });
+          element._htmlexLazyObserver = observer;
+          element._htmlexLazyRemovalObserver = lazyRemovalObserver;
+          appendArrayItem(cleanupFns, () => cleanupLazyObserver(observer), 'lazy observer cleanup');
+          Logger.system.info("[HTMLeX INFO] Set up lazy auto firing for element.");
+        } catch (error) {
+          Logger.system.warn("[HTMLeX Warning] Failed to set up IntersectionObserver. Firing lazy auto action immediately.", error);
+          try {
+            handler(createHTMLeXEvent(triggerEvent));
+          } catch (handlerError) {
+            Logger.system.error("[HTMLeX ERROR] Lazy auto fallback failed for element:", element, handlerError);
           }
-        });
-        observer.observe(element);
-        lazyRemovalObserver = new MutationObserver(() => {
-          if (!document.body.contains(element)) {
-            Logger.system.info("[HTMLeX INFO] Lazy auto element removed. Disconnecting observer.");
-            cleanupLazyObserver(observer);
-          }
-        });
-        lazyRemovalObserver.observe(document.body, { childList: true, subtree: true });
-        element._htmlexLazyObserver = observer;
-        element._htmlexLazyRemovalObserver = lazyRemovalObserver;
-        cleanupFns.push(() => cleanupLazyObserver(observer));
-        Logger.system.info("[HTMLeX INFO] Set up lazy auto firing for element.");
+        }
       }
     } else if (autoMode === 'prefetch') {
       (async () => {
         try {
-          await handler(new Event(triggerEvent));
+          await handler(createHTMLeXEvent(triggerEvent));
           Logger.system.info("[HTMLeX INFO] Prefetch completed for element:", element);
         } catch (error) {
           Logger.system.error("[HTMLeX ERROR] Prefetch failed for element:", element, error);
         }
       })();
     } else {
-      const delay = Number.parseInt(autoValue, 10) || 0;
-      const autoTimerId = setTimeout(() => {
-        if (!document.body.contains(element)) return;
-        Logger.system.debug("[HTMLeX] Auto firing action for element after delay:", delay, "ms", element);
-        handler(new Event(triggerEvent));
-      }, delay);
-      cleanupFns.push(() => clearTimeout(autoTimerId));
-      Logger.system.info(`[HTMLeX INFO] Auto firing set for element with delay ${delay}ms.`);
+      const delay = parseAutoDelay(autoValue);
+      if (delay === null) {
+        Logger.system.warn(`[HTMLeX Warning] Ignoring invalid auto delay "${autoValue}".`);
+      } else {
+        const autoTimerId = scheduleTimeout(() => {
+          if (!isElementConnected(element)) return;
+          Logger.system.debug("[HTMLeX] Auto firing action for element after delay:", delay, "ms", element);
+          handler(createHTMLeXEvent(triggerEvent));
+        }, delay, 'auto action');
+        if (autoTimerId !== null) {
+          appendArrayItem(cleanupFns, () => clearScheduledTimeout(autoTimerId, 'auto action timer'), 'auto action cleanup');
+          Logger.system.info(`[HTMLeX INFO] Auto firing set for element with delay ${delay}ms.`);
+        }
+      }
     }
   }
 
   // Publish-only element registration.
-  if (!methodAttribute && element.hasAttribute('publish')) {
-    Logger.system.info(`[HTMLeX INFO] Registered publish-only element for signal "${element.getAttribute('publish')}" with event "${triggerEvent}".`);
+  if (!methodAttribute && hasElementAttribute(element, 'publish')) {
+    Logger.system.info(`[HTMLeX INFO] Registered publish-only element for signal "${safeString(getElementAttribute(element, 'publish'))}" with event "${triggerEvent}".`);
   }
 
   // Handle subscriptions using the "subscribe" attribute.
-  if (element.hasAttribute('subscribe')) {
-    const signals = element.getAttribute('subscribe').split(/\s+/).filter(Boolean);
+  if (hasElementAttribute(element, 'subscribe')) {
+    const signals = safeString(getElementAttribute(element, 'subscribe')).split(/\s+/).filter(Boolean);
     const unsubscribers = [];
     let subscribeRemovalObserver = null;
     const cleanupSubscriptions = () => {
-      while (unsubscribers.length) {
-        const unsubscribe = unsubscribers.pop();
-        unsubscribe();
+      while (getArrayLength(unsubscribers)) {
+        const unsubscribe = popArrayItem(unsubscribers, 'subscription cleanup');
+        try {
+          unsubscribe?.();
+        } catch (error) {
+          Logger.system.warn('[HTMLeX] Failed to unsubscribe signal listener.', error);
+        }
       }
       if (subscribeRemovalObserver) {
-        subscribeRemovalObserver.disconnect();
+        disconnectObserver(subscribeRemovalObserver, 'subscription removal observer');
         subscribeRemovalObserver = null;
       }
       element._htmlexSubscribeRemovalObserver = null;
@@ -815,40 +1427,45 @@ export function registerElement(element) {
           cleanupSubscriptions();
           return;
         }
-        if (!document.body.contains(element)) {
+        if (!isElementConnected(element)) {
           cleanupSubscriptions();
           return;
         }
         Logger.system.debug(`[HTMLeX] Signal "${signalName}" triggered listener on element:`, element);
         const subscribedMethod = getActionMethod(element);
         if (subscribedMethod) {
-          const endpoint = element.getAttribute(subscribedMethod);
-          Logger.system.debug(`[HTMLeX] Handling subscribed signal with method ${subscribedMethod.toUpperCase()} for endpoint "${endpoint}".`);
-          handleAction(element, subscribedMethod.toUpperCase(), endpoint, { htmlexEvent: new Event('signal') });
+          const endpoint = getElementAttribute(element, subscribedMethod);
+          Logger.system.debug(`[HTMLeX] Handling subscribed signal with method ${subscribedMethod.toUpperCase()} for endpoint "${safeString(endpoint)}".`);
+          return handleAction(element, subscribedMethod.toUpperCase(), endpoint, { htmlexEvent: createHTMLeXEvent('signal') })
+            .catch(error => {
+              Logger.system.error(`[HTMLeX] Subscribed signal action failed for "${signalName}".`, error);
+            });
         }
+        return undefined;
       });
-      unsubscribers.push(unsubscribe);
+      appendArrayItem(unsubscribers, unsubscribe, 'subscription cleanup');
       Logger.system.debug(`[HTMLeX] Registered subscriber for signal "${signalName}" on element:`, element);
     }
 
-    if (unsubscribers.length) {
-      subscribeRemovalObserver = new MutationObserver(() => {
-        if (!document.body.contains(element)) {
+    if (getArrayLength(unsubscribers)) {
+      subscribeRemovalObserver = observeBodyMutations(() => {
+        if (!isElementConnected(element)) {
           cleanupSubscriptions();
         }
       });
-      subscribeRemovalObserver.observe(document.body, { childList: true, subtree: true });
-      element._htmlexSubscribeRemovalObserver = subscribeRemovalObserver;
+      if (subscribeRemovalObserver) {
+        element._htmlexSubscribeRemovalObserver = subscribeRemovalObserver;
+      }
     }
-    cleanupFns.push(cleanupSubscriptions);
+    appendArrayItem(cleanupFns, cleanupSubscriptions, 'subscription cleanup');
   }
 
   // Handle WebSocket connections.
-  if (element.hasAttribute('socket')) {
-    const socketUrl = element.getAttribute('socket');
+  if (hasElementAttribute(element, 'socket')) {
+    const socketUrl = getElementAttribute(element, 'socket');
     Logger.system.debug("[HTMLeX] Setting up WebSocket connection for element:", element, "URL:", socketUrl);
     handleWebSocket(element, socketUrl);
-    cleanupFns.push(() => cleanupSocket(element));
+    appendArrayItem(cleanupFns, () => cleanupSocket(element), 'socket cleanup');
   }
 
   registerTimer(element, registrationToken, cleanupFns);
@@ -867,47 +1484,70 @@ export function registerElement(element) {
  */
 export function initHTMLeX() {
   Logger.system.info("[HTMLeX INFO] Initializing HTMLeX...");
-  if (window.__htmlexObserver) {
-    window.__htmlexObserver.disconnect();
+  const runtimeWindow = getRuntimeWindow();
+  const runtimeDocument = getRuntimeDocument();
+  const documentBody = getDocumentBody(runtimeDocument);
+  if (
+    !runtimeWindow ||
+    !runtimeDocument ||
+    !documentBody ||
+    typeof globalThis.MutationObserver !== 'function'
+  ) {
+    Logger.system.warn("[HTMLeX Warning] Browser DOM APIs are unavailable; skipping initialization.");
+    return;
   }
-  if (window.__htmlexDomUpdatedHandler) {
-    document.removeEventListener('htmlex:dom-updated', window.__htmlexDomUpdatedHandler);
+
+  const existingObserver = getWindowField(runtimeWindow, '__htmlexObserver');
+  if (existingObserver) {
+    disconnectObserver(existingObserver, 'previous HTMLeX observer');
   }
-  const selectorString = REGISTRATION_SELECTORS.join(',');
+  const existingDomUpdatedHandler = getWindowField(runtimeWindow, '__htmlexDomUpdatedHandler');
+  if (existingDomUpdatedHandler) {
+    removeDocumentEventListener(runtimeDocument, 'htmlex:dom-updated', existingDomUpdatedHandler);
+  }
 
   const registerTree = (node) => {
-    if (!node || node.nodeType !== Node.ELEMENT_NODE) return;
-    if (node.matches(selectorString)) {
-      Logger.system.debug("[HTMLeX] HTMLeX element found:", node);
-      registerElement(node);
-    }
-    const newElements = node.querySelectorAll(selectorString);
-    for (const el of newElements) {
-      Logger.system.debug("[HTMLeX] Descendant HTMLeX element found:", el);
-      registerElement(el);
+    if (!isElementNode(node)) return;
+    try {
+      if (safeMatches(node, REGISTRATION_SELECTOR_STRING)) {
+        Logger.system.debug("[HTMLeX] HTMLeX element found:", node);
+        registerElement(node);
+      }
+      const newElements = safeQuerySelectorAll(node, REGISTRATION_SELECTOR_STRING);
+      for (const el of newElements) {
+        Logger.system.debug("[HTMLeX] Descendant HTMLeX element found:", el);
+        registerElement(el);
+      }
+    } catch (error) {
+      Logger.system.warn("[HTMLeX] Failed to register a DOM subtree.", error);
     }
   };
 
   // Register existing HTMLeX elements.
-  const elements = document.querySelectorAll(selectorString);
+  const elements = safeQuerySelectorAll(runtimeDocument, REGISTRATION_SELECTOR_STRING);
   for (const el of elements) {
     registerElement(el);
   }
   Logger.system.info(`[HTMLeX INFO] Registered ${elements.length} element(s).`);
 
-  window.__htmlexDomUpdatedHandler = (event) => {
-    registerTree(event.detail?.root || document.body);
+  const domUpdatedHandler = (event) => {
+    registerTree(getDOMUpdateRoot(event, documentBody));
   };
-  document.addEventListener('htmlex:dom-updated', window.__htmlexDomUpdatedHandler);
+  setWindowField(runtimeWindow, '__htmlexDomUpdatedHandler', domUpdatedHandler);
+  if (addDocumentEventListener(runtimeDocument, 'htmlex:dom-updated', domUpdatedHandler)) {
+    Logger.system.debug("[HTMLeX] Registered DOM update listener.");
+  }
 
   // Observe for new elements added to the DOM.
-  const observer = new MutationObserver(mutationsList => {
+  let observer;
+  try {
+    observer = new globalThis.MutationObserver(mutationsList => {
     for (const mutation of mutationsList) {
       if (mutation.type === 'attributes') {
         if (
-          mutation.target.nodeType === Node.ELEMENT_NODE &&
+          isElementNode(mutation.target) &&
           registrationRecords.has(mutation.target) &&
-          !mutation.target.matches(selectorString)
+          !safeMatches(mutation.target, REGISTRATION_SELECTOR_STRING)
         ) {
           Logger.system.debug("[HTMLeX] HTMLeX attributes removed. Cleaning up registration:", mutation.target);
           cleanupElementRegistration(mutation.target);
@@ -916,20 +1556,27 @@ export function initHTMLeX() {
         registerTree(mutation.target);
         continue;
       }
-      if (mutation.type === 'childList' && mutation.addedNodes.length) {
-        for (const node of mutation.addedNodes) {
+      if (mutation.type === 'childList') {
+        for (const node of mutation.removedNodes || []) {
+          cleanupRemovedTree(node);
+        }
+        for (const node of mutation.addedNodes || []) {
           registerTree(node);
         }
       }
     }
-  });
+    });
 
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: REGISTRATION_ATTRIBUTES
-  });
-  window.__htmlexObserver = observer;
+    observer.observe(documentBody, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: REGISTRATION_ATTRIBUTES
+    });
+  } catch (error) {
+    Logger.system.warn("[HTMLeX] Failed to start mutation observer.", error);
+    return;
+  }
+  setWindowField(runtimeWindow, '__htmlexObserver', observer);
   Logger.system.info("[HTMLeX INFO] HTMLeX is now observing for new elements.");
 }

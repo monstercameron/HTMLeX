@@ -14,8 +14,18 @@ import { Logger } from './logger.js';
 const cacheStore = new Map();
 const MAX_CACHE_ENTRIES = 100;
 
+function getCurrentTimeMs() {
+  try {
+    const timestamp = Date.now();
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  } catch (error) {
+    Logger.system.warn("[CACHE] Failed to read current time; using fallback timestamp.", error);
+    return 0;
+  }
+}
+
 function pruneCache() {
-  const now = Date.now();
+  const now = getCurrentTimeMs();
   for (const [key, { expireAt }] of cacheStore) {
     if (Number.isFinite(expireAt) && now >= expireAt) {
       cacheStore.delete(key);
@@ -38,7 +48,7 @@ export function setCache(key, response, ttl) {
   pruneCache();
   const ttlMs = Number(ttl);
   const expireAt = Number.isFinite(ttlMs) && ttlMs > 0
-    ? Date.now() + ttlMs
+    ? getCurrentTimeMs() + ttlMs
     : Infinity;
   cacheStore.set(key, { response, expireAt });
   pruneCache();
@@ -60,7 +70,7 @@ export function getCache(key) {
   }
 
   const { response, expireAt } = entry;
-  if (Date.now() < expireAt) {
+  if (getCurrentTimeMs() < expireAt) {
     Logger.system.debug("[CACHE] Cache hit for key:", key);
     return response;
   }

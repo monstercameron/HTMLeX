@@ -12,6 +12,7 @@ let originalHTMLInputElement;
 let originalHTMLSelectElement;
 let originalRequestAnimationFrame;
 let originalSetTimeout;
+let originalURLSearchParams;
 let originalWindow;
 let originalHistory;
 let originalLoggerEnabled;
@@ -25,6 +26,7 @@ beforeEach(() => {
   originalHTMLSelectElement = globalThis.HTMLSelectElement;
   originalRequestAnimationFrame = globalThis.requestAnimationFrame;
   originalSetTimeout = globalThis.setTimeout;
+  originalURLSearchParams = globalThis.URLSearchParams;
   originalWindow = globalThis.window;
   originalHistory = globalThis.history;
   originalLoggerEnabled = Logger.enabled;
@@ -96,6 +98,12 @@ afterEach(() => {
     globalThis.setTimeout = originalSetTimeout;
   }
 
+  if (originalURLSearchParams === undefined) {
+    delete globalThis.URLSearchParams;
+  } else {
+    globalThis.URLSearchParams = originalURLSearchParams;
+  }
+
   if (originalWindow === undefined) {
     delete globalThis.window;
   } else {
@@ -117,6 +125,7 @@ afterEach(() => {
 
 class FakeInput {
   constructor({ name, value = '', type = 'text', checked = true, disabled = false, files = [] } = {}) {
+    this.tagName = 'INPUT';
     this.name = name;
     this.value = value;
     this.type = type;
@@ -128,6 +137,7 @@ class FakeInput {
 
 class FakeSelect {
   constructor({ name, multiple = false, selectedOptions = [], value = '', disabled = false } = {}) {
+    this.tagName = 'SELECT';
     this.name = name;
     this.multiple = multiple;
     this.selectedOptions = selectedOptions;
@@ -240,8 +250,35 @@ test('processResponse falls back to the caller target for non-fragment response 
 
 test('processResponse handles empty response bodies without leaving streaming flags set', async () => {
   const element = new FakeElement();
+  element._htmlexFragmentErrorStatus = '500';
+  element._htmlexDefaultUpdated = true;
 
   assert.equal(await processResponse({ body: null }, element), '');
+  assert.equal(element._htmlexFragmentErrorStatus, null);
+  assert.equal(element._htmlexDefaultUpdated, false);
+  assert.equal(element._htmlexStreamingActive, false);
+  assert.equal(element._htmlexStreaming, false);
+});
+
+test('processResponse tolerates hostile response attribute APIs', async () => {
+  const element = new FakeElement({
+    attributes: {
+      cache: '1000',
+      target: '#out(append)',
+      maxresponsechars: '100',
+    },
+  });
+  element.hasAttribute = () => {
+    throw new Error('attribute check denied');
+  };
+  element.getAttribute = () => {
+    throw new Error('attribute read denied');
+  };
+  installDocument({ '#out': new FakeElement() });
+
+  const responseText = await processResponse(new Response('Plain hostile attribute response'), element);
+
+  assert.equal(responseText, 'Plain hostile attribute response');
   assert.equal(element._htmlexStreamingActive, false);
   assert.equal(element._htmlexStreaming, false);
 });
@@ -427,6 +464,34 @@ test('handleAction retries failures and writes the configured error target', asy
   assert.equal(element._htmlexRequestPending, false);
 });
 
+test('handleAction treats partial retry and timeout attributes as invalid', async () => {
+  const errorTarget = new FakeElement();
+  installDocument({ '#error': errorTarget });
+  let fetchCount = 0;
+  globalThis.fetch = async (_url, options = {}) => {
+    fetchCount += 1;
+    assert.equal(options.signal, undefined);
+    return new Response('Down', {
+      status: 503,
+      statusText: 'Unavailable',
+    });
+  };
+
+  const element = new FakeElement({
+    attributes: {
+      retry: '1abc',
+      timeout: '25ms',
+      onerror: '#error(append)',
+    },
+  });
+
+  await handleAction(element, 'GET', `/unit-partial-retry-${Date.now()}`);
+
+  assert.equal(fetchCount, 1);
+  assert.equal(errorTarget.inserted.length, 1);
+  assert.equal(element._htmlexRequestPending, false);
+});
+
 test('handleAction applies configurable retry delay and backoff before later attempts', async () => {
   const timers = [];
   globalThis.setTimeout = (callback, delayMs) => {
@@ -477,6 +542,83 @@ test('handleAction applies configurable retry delay and backoff before later att
     position: 'beforeend',
     content: 'Recovered',
   }]);
+});
+
+test('handleAction treats partial retry delay, backoff, and max-delay attributes as invalid', async () => {
+  const timers = [];
+  globalThis.setTimeout = (callback, delayMs) => {
+    timers.push({ callback, delayMs });
+    return timers.length - 1;
+  };
+  const output = new FakeElement();
+  installDocument({ '#out': output });
+
+  let fetchCount = 0;
+  globalThis.fetch = async () => {
+    fetchCount += 1;
+    if (fetchCount < 3) {
+      return new Response('Down', {
+        status: 503,
+        statusText: 'Unavailable',
+      });
+    }
+    return new Response('Recovered strict');
+  };
+  const element = new FakeElement({
+    attributes: {
+      retry: '2',
+      retrydelay: '10',
+      retrybackoff: '2x',
+      retrymaxdelay: '15ms',
+      target: '#out(append)',
+    },
+  });
+
+  const actionPromise = handleAction(element, 'GET', `/unit-strict-retry-backoff-${Date.now()}`);
+  await new Promise(resolve => originalSetTimeout(resolve, 0));
+
+  assert.equal(fetchCount, 1);
+  assert.deepEqual(timers.map(timer => timer.delayMs), [10]);
+
+  timers[0].callback();
+  await new Promise(resolve => originalSetTimeout(resolve, 0));
+  await new Promise(resolve => originalSetTimeout(resolve, 0));
+
+  assert.equal(fetchCount, 2);
+  assert.deepEqual(timers.map(timer => timer.delayMs), [10, 10]);
+
+  timers[1].callback();
+  await actionPromise;
+
+  assert.equal(fetchCount, 3);
+  assert.deepEqual(output.inserted, [{
+    position: 'beforeend',
+    content: 'Recovered strict',
+  }]);
+
+  fetchCount = 0;
+  globalThis.fetch = async () => {
+    fetchCount += 1;
+    if (fetchCount === 1) {
+      return new Response('Down', {
+        status: 503,
+        statusText: 'Unavailable',
+      });
+    }
+    return new Response('Recovered no delay');
+  };
+  const noDelayElement = new FakeElement({
+    attributes: {
+      retry: '1',
+      retrydelay: '10ms',
+      target: '#out(append)',
+    },
+  });
+
+  await handleAction(noDelayElement, 'GET', `/unit-strict-retry-delay-${Date.now()}`);
+
+  assert.equal(fetchCount, 2);
+  assert.deepEqual(timers.map(timer => timer.delayMs), [10, 10]);
 });
 
 test('handleAction treats error-status fragments as failed swaps without success side effects', async () => {
@@ -661,7 +803,7 @@ test('handleAction serializes POST controls, multi-selects, files, form sources,
   await handleAction(element, 'POST', '/post-action');
   await handleAction(element, 'POST', '/post-action');
 
-  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls.length, 2);
   assert.equal(fetchCalls[0].url, '/post-action');
   assert.equal(fetchCalls[0].options.method, 'POST');
   assert.deepEqual(fetchCalls[0].bodyEntries, [
@@ -674,6 +816,491 @@ test('handleAction serializes POST controls, multi-selects, files, form sources,
     ['extraOnly', ''],
   ]);
   assert.equal(output.inserted.filter(entry => entry.content === 'Posted response').length, 2);
+});
+
+test('handleAction still caches POST bodies that do not include binary values', async () => {
+  class FakeFormData {
+    constructor() {
+      this.values = [];
+    }
+
+    append(key, value) {
+      this.values.push([key, value]);
+    }
+
+    entries() {
+      return this.values[Symbol.iterator]();
+    }
+
+    [Symbol.iterator]() {
+      return this.entries();
+    }
+  }
+  globalThis.FormData = FakeFormData;
+
+  const output = new FakeElement();
+  const element = new FakeElement({
+    attributes: {
+      target: '#out(append)',
+      cache: '500',
+    },
+    controls: [
+      new FakeInput({ name: 'title', value: 'Post title' }),
+    ],
+  });
+  installDocument({ '#out': output });
+
+  const fetchCalls = [];
+  globalThis.fetch = async (url, options) => {
+    fetchCalls.push({ url, options, bodyEntries: [...options.body.entries()] });
+    return new Response('Cached POST response');
+  };
+
+  await handleAction(element, 'POST', '/cached-post-action');
+  await handleAction(element, 'POST', '/cached-post-action');
+
+  assert.equal(fetchCalls.length, 1);
+  assert.deepEqual(fetchCalls[0].bodyEntries, [['title', 'Post title']]);
+  assert.equal(output.inserted.filter(entry => entry.content === 'Cached POST response').length, 2);
+});
+
+test('handleAction tolerates non-constructor File globals when building POST cache keys', async () => {
+  class FakeFormData {
+    constructor() {
+      this.values = [];
+    }
+
+    append(key, value) {
+      this.values.push([key, value]);
+    }
+
+    entries() {
+      return this.values[Symbol.iterator]();
+    }
+
+    [Symbol.iterator]() {
+      return this.entries();
+    }
+  }
+  globalThis.File = {};
+  globalThis.FormData = FakeFormData;
+
+  const uploadedFile = { name: 'not-a-real-file' };
+  const output = new FakeElement();
+  const element = new FakeElement({
+    attributes: {
+      target: '#out(append)',
+      cache: '500',
+    },
+    controls: [
+      new FakeInput({ name: 'attachment', type: 'file', files: [uploadedFile] }),
+    ],
+  });
+  installDocument({ '#out': output });
+
+  const fetchCalls = [];
+  globalThis.fetch = async (url, options) => {
+    fetchCalls.push({ url, bodyEntries: [...options.body.entries()] });
+    return new Response('Posted with fake File global');
+  };
+
+  await handleAction(element, 'POST', '/fake-file-global');
+
+  assert.equal(fetchCalls.length, 1);
+  assert.deepEqual(fetchCalls[0].bodyEntries, [['attachment', uploadedFile]]);
+  assert.equal(output.inserted[0].content, 'Posted with fake File global');
+});
+
+test('handleAction collects controls without browser control constructors and skips hostile source subtrees', async () => {
+  class FakeFormData {
+    constructor() {
+      this.values = [];
+    }
+
+    append(key, value) {
+      this.values.push([key, value]);
+    }
+
+    entries() {
+      return this.values[Symbol.iterator]();
+    }
+
+    [Symbol.iterator]() {
+      return this.entries();
+    }
+  }
+  delete globalThis.HTMLInputElement;
+  globalThis.HTMLSelectElement = {};
+  globalThis.FormData = FakeFormData;
+
+  const output = new FakeElement();
+  const hostileSource = new FakeElement();
+  hostileSource.matches = () => {
+    throw new Error('matches unavailable');
+  };
+  hostileSource.querySelectorAll = () => {
+    throw new Error('subtree unavailable');
+  };
+  const element = new FakeElement({
+    attributes: {
+      source: '#hostile',
+      target: '#out(append)',
+    },
+    controls: [
+      new FakeInput({ name: 'title', value: 'Constructor-free title' }),
+      new FakeInput({ name: 'skipUnchecked', value: 'no', type: 'checkbox', checked: false }),
+      new FakeSelect({
+        name: 'choice',
+        multiple: true,
+        selectedOptions: [{ value: 'a' }, { value: 'b' }],
+      }),
+    ],
+  });
+  installDocument({
+    '#out': output,
+    '#hostile': hostileSource,
+  });
+
+  const fetchCalls = [];
+  globalThis.fetch = async (url, options) => {
+    fetchCalls.push({ url, bodyEntries: [...options.body.entries()] });
+    return new Response('Constructor-free controls');
+  };
+
+  await handleAction(element, 'POST', '/constructor-free-controls');
+
+  assert.equal(fetchCalls.length, 1);
+  assert.deepEqual(fetchCalls[0].bodyEntries, [
+    ['title', 'Constructor-free title'],
+    ['choice', 'a'],
+    ['choice', 'b'],
+  ]);
+  assert.equal(output.inserted[0].content, 'Constructor-free controls');
+});
+
+test('handleAction builds GET requests without FormData or URLSearchParams globals', async () => {
+  delete globalThis.FormData;
+  globalThis.URLSearchParams = {};
+
+  const output = new FakeElement();
+  const element = new FakeElement({
+    attributes: {
+      target: '#out(append)',
+    },
+    controls: [
+      new FakeInput({ name: 'title', value: 'fallback query' }),
+      new FakeInput({ name: 'empty', value: '' }),
+    ],
+  });
+  installDocument({ '#out': output });
+  const fetchCalls = [];
+  globalThis.fetch = async (url, options) => {
+    fetchCalls.push({ url, options });
+    return new Response('Fallback query response');
+  };
+
+  await handleAction(element, 'GET', '/fallback-query');
+
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls[0].url, '/fallback-query?title=fallback%20query&empty=');
+  assert.equal(fetchCalls[0].options.method, 'GET');
+  assert.equal(output.inserted[0].content, 'Fallback query response');
+});
+
+test('handleAction manual query serialization replaces invalid Unicode', async () => {
+  class FakeFormData {
+    constructor() {
+      this.values = [];
+    }
+
+    append(key, value) {
+      this.values.push([key, value]);
+    }
+
+    entries() {
+      return this.values[Symbol.iterator]();
+    }
+
+    [Symbol.iterator]() {
+      return this.entries();
+    }
+  }
+  globalThis.FormData = FakeFormData;
+  globalThis.URLSearchParams = class ThrowingURLSearchParams {
+    constructor() {
+      throw new Error('URLSearchParams denied');
+    }
+  };
+
+  const output = new FakeElement();
+  const element = new FakeElement({
+    attributes: {
+      target: '#out(append)',
+    },
+    controls: [
+      new FakeInput({ name: 'bad\uD800', value: 'value\uD800' }),
+    ],
+  });
+  installDocument({ '#out': output });
+  const fetchCalls = [];
+  globalThis.fetch = async (url, options) => {
+    fetchCalls.push({ url, options });
+    return new Response('Unicode query response');
+  };
+
+  await handleAction(element, 'GET', '/unicode-query');
+
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls[0].url, '/unicode-query?bad%EF%BF%BD=value%EF%BF%BD');
+  assert.equal(output.inserted[0].content, 'Unicode query response');
+});
+
+test('handleAction skips malformed FormData entries while building cache metadata', async () => {
+  class HostileFormData {
+    constructor() {
+      this.values = [];
+    }
+
+    append(key, value) {
+      this.values.push([key, value]);
+    }
+
+    entries() {
+      return [
+        ...this.values,
+        null,
+        {
+          [Symbol.iterator]() {
+            throw new Error('entry iterator denied');
+          },
+        },
+        ['blank'],
+      ][Symbol.iterator]();
+    }
+
+    [Symbol.iterator]() {
+      return this.entries();
+    }
+  }
+  globalThis.FormData = HostileFormData;
+
+  const output = new FakeElement();
+  const element = new FakeElement({
+    attributes: {
+      target: '#out(append)',
+      cache: '500',
+    },
+    controls: [
+      new FakeInput({ name: 'title', value: 'Cache title' }),
+    ],
+  });
+  installDocument({ '#out': output });
+  const fetchCalls = [];
+  globalThis.fetch = async (url, options) => {
+    fetchCalls.push({ url, options });
+    return new Response('Cached malformed form data response');
+  };
+
+  await handleAction(element, 'POST', '/malformed-form-data');
+  await handleAction(element, 'POST', '/malformed-form-data');
+
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls[0].url, '/malformed-form-data');
+  assert.equal(output.inserted.filter(entry => entry.content === 'Cached malformed form data response').length, 2);
+});
+
+test('handleAction ignores unsafe prototype-style fetch option keys', async () => {
+  installDocument();
+  const extraOptions = {
+    headers: { 'x-unit': '1' },
+  };
+  Object.defineProperty(extraOptions, '__proto__', {
+    enumerable: true,
+    value: { polluted: true },
+  });
+  Object.defineProperty(extraOptions, 'constructor', {
+    enumerable: true,
+    value: 'polluted constructor',
+  });
+  Object.defineProperty(extraOptions, 'prototype', {
+    enumerable: true,
+    value: { polluted: true },
+  });
+  const fetchCalls = [];
+  globalThis.fetch = async (url, options) => {
+    fetchCalls.push({ url, options });
+    return new Response('');
+  };
+
+  await handleAction(new FakeElement(), 'GET', '/safe-options', extraOptions);
+
+  assert.equal(fetchCalls.length, 1);
+  assert.deepEqual(fetchCalls[0].options.headers, { 'x-unit': '1' });
+  assert.equal(Object.hasOwn(fetchCalls[0].options, '__proto__'), false);
+  assert.equal(Object.hasOwn(fetchCalls[0].options, 'constructor'), false);
+  assert.equal(Object.hasOwn(fetchCalls[0].options, 'prototype'), false);
+  assert.equal(Object.getPrototypeOf(fetchCalls[0].options), Object.prototype);
+});
+
+test('handleAction tolerates hostile controls and failing FormData constructors', async () => {
+  globalThis.FormData = class ThrowingFormData {
+    constructor() {
+      throw new Error('FormData denied');
+    }
+  };
+
+  const hostileControl = {
+    get name() {
+      throw new Error('control name denied');
+    },
+    get tagName() {
+      throw new Error('control tag denied');
+    },
+  };
+  const throwingValueControl = {
+    tagName: 'INPUT',
+    name: 'safe',
+    type: 'text',
+    get value() {
+      throw new Error('control value denied');
+    },
+  };
+  const element = new FakeElement({
+    controls: [hostileControl, throwingValueControl],
+  });
+  installDocument();
+  const fetchCalls = [];
+  globalThis.fetch = async (url, options) => {
+    fetchCalls.push({ url, options });
+    return new Response('');
+  };
+
+  await handleAction(element, 'GET', '/hostile-controls');
+
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls[0].url, '/hostile-controls?safe=');
+});
+
+test('handleAction tolerates hostile action strings and option getters', async () => {
+  installDocument();
+  const hostileString = {
+    toString() {
+      throw new Error('string denied');
+    },
+  };
+  const hostileOptions = {};
+  Object.defineProperty(hostileOptions, 'htmlexEvent', {
+    enumerable: true,
+    get() {
+      throw new Error('event option denied');
+    },
+  });
+  Object.defineProperty(hostileOptions, 'signal', {
+    enumerable: true,
+    get() {
+      throw new Error('signal option denied');
+    },
+  });
+  const element = new FakeElement({
+    attributes: {
+      source: hostileString,
+      extras: hostileString,
+    },
+  });
+  const fetchCalls = [];
+  globalThis.fetch = async (url, options) => {
+    fetchCalls.push({ url, options });
+    return new Response('');
+  };
+
+  await assert.doesNotReject(() => handleAction(element, hostileString, hostileString, hostileOptions));
+
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls[0].url, '');
+  assert.equal(fetchCalls[0].options.method, '');
+  assert.equal(fetchCalls[0].options.signal, undefined);
+  assert.equal(element._htmlexRequestPending, false);
+});
+
+test('handleAction renders fallback error text for unstringifiable failures', async () => {
+  const errorTarget = new FakeElement();
+  installDocument({ '#error': errorTarget });
+  globalThis.fetch = async () => {
+    throw {
+      toString() {
+        throw new Error('error string denied');
+      },
+    };
+  };
+
+  const element = new FakeElement({
+    attributes: {
+      onerror: '#error(append)',
+    },
+  });
+
+  await handleAction(element, 'GET', '/unstringifiable-error');
+
+  assert.equal(errorTarget.inserted.length, 1);
+  assert.match(errorTarget.inserted[0].content, /Error: Unknown error/);
+  assert.equal(element._htmlexRequestPending, false);
+});
+
+test('handleAction retries and skips delayed signals when timers fail', async () => {
+  const originalClearTimeout = globalThis.clearTimeout;
+  const output = new FakeElement();
+  const signals = [];
+  const { registerSignalListener } = await import('../../src/public/src/signals.js');
+  const cleanupHeader = registerSignalListener('timerFailHeader', () => signals.push('header'));
+  const cleanupPublish = registerSignalListener('timerFailPublish', () => signals.push('publish'));
+  globalThis.setTimeout = () => {
+    throw new Error('timer denied');
+  };
+  globalThis.clearTimeout = () => {
+    throw new Error('clear denied');
+  };
+
+  try {
+    installDocument({ '#out': output });
+    let fetchCount = 0;
+    globalThis.fetch = async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        return new Response('Down', {
+          status: 503,
+          statusText: 'Unavailable',
+        });
+      }
+      return new Response('Recovered without timers', {
+        headers: {
+          Emit: 'timerFailHeader; delay=10',
+        },
+      });
+    };
+    const element = new FakeElement({
+      attributes: {
+        retry: '1',
+        retrydelay: '25',
+        target: '#out(append)',
+        publish: 'timerFailPublish',
+        timer: '15',
+      },
+    });
+
+    await handleAction(element, 'GET', '/timer-failures');
+
+    assert.equal(fetchCount, 2);
+    assert.deepEqual(output.inserted, [{
+      position: 'beforeend',
+      content: 'Recovered without timers',
+    }]);
+    assert.deepEqual(signals, ['publish']);
+    assert.equal(element._htmlexRequestPending, false);
+  } finally {
+    globalThis.clearTimeout = originalClearTimeout;
+    cleanupHeader();
+    cleanupPublish();
+  }
 });
 
 test('handleAction emits header and publish signals immediately or through guarded timers', async () => {
@@ -691,7 +1318,7 @@ test('handleAction emits header and publish signals immediately or through guard
     installDocument();
     globalThis.fetch = async () => new Response('', {
       headers: {
-        Emit: 'headerSignal; delay=25',
+        Emit: 'headerSignal; Delay=25',
       },
     });
     const element = new FakeElement({
@@ -719,5 +1346,71 @@ test('handleAction emits header and publish signals immediately or through guard
   } finally {
     cleanupHeader();
     cleanupPublish();
+  }
+});
+
+test('handleAction ignores partial delayed signal timers', async () => {
+  const timers = [];
+  globalThis.setTimeout = (callback, delayMs) => {
+    timers.push({ callback, delayMs });
+    return timers.length - 1;
+  };
+  globalThis.__actionSignals = [];
+  const { registerSignalListener } = await import('../../src/public/src/signals.js');
+  const cleanupHeader = registerSignalListener('partialHeaderSignal', () => globalThis.__actionSignals.push('header'));
+  const cleanupPublish = registerSignalListener('partialPublishSignal', () => globalThis.__actionSignals.push('publish'));
+
+  try {
+    installDocument();
+    globalThis.fetch = async () => new Response('', {
+      headers: {
+        Emit: 'partialHeaderSignal; delay=25ms',
+      },
+    });
+    const element = new FakeElement({
+      attributes: {
+        publish: 'partialPublishSignal',
+        timer: '15ms',
+      },
+    });
+
+    await handleAction(element, 'GET', '/partial-signals');
+
+    assert.deepEqual(globalThis.__actionSignals, ['header', 'publish']);
+    assert.deepEqual(timers, []);
+  } finally {
+    cleanupHeader();
+    cleanupPublish();
+  }
+});
+
+test('handleAction delayed signals fail closed when document containment throws', async () => {
+  const timers = [];
+  globalThis.setTimeout = (callback, delayMs) => {
+    timers.push({ callback, delayMs });
+    return timers.length - 1;
+  };
+  globalThis.__actionSignals = [];
+  const { registerSignalListener } = await import('../../src/public/src/signals.js');
+  const cleanupSignal = registerSignalListener('guardedSignal', () => globalThis.__actionSignals.push('signal'));
+
+  try {
+    installDocument();
+    document.body.contains = () => {
+      throw new Error('contains failed');
+    };
+    globalThis.fetch = async () => new Response('', {
+      headers: {
+        Emit: 'guardedSignal; delay=10',
+      },
+    });
+    const element = new FakeElement();
+
+    await handleAction(element, 'GET', '/guarded-signal');
+    assert.equal(timers[0].delayMs, 10);
+    assert.doesNotThrow(() => timers[0].callback());
+    assert.deepEqual(globalThis.__actionSignals, []);
+  } finally {
+    cleanupSignal();
   }
 });

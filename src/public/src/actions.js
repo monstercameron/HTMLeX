@@ -14,6 +14,7 @@ import { emitSignal } from './signals.js';
 import { runLifecycleHook } from './hooks.js';
 
 export const DEFAULT_RESPONSE_BUFFER_LIMIT_CHARS = 1024 * 1024;
+const RESERVED_FETCH_OPTION_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 class ResponseBufferLimitError extends Error {
   constructor(limitChars) {
@@ -23,8 +24,17 @@ class ResponseBufferLimitError extends Error {
   }
 }
 
+function safeString(value, fallback = '') {
+  try {
+    return String(value ?? fallback);
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to coerce value to string.', error);
+    return fallback;
+  }
+}
+
 function escapeHtml(value) {
-  return String(value ?? '')
+  return safeString(value)
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
@@ -33,7 +43,155 @@ function escapeHtml(value) {
 }
 
 function getErrorMessage(error) {
-  return error instanceof Error ? error.message : String(error ?? 'Unknown error');
+  if (isInstanceOf(error, getGlobalField('Error'))) {
+    return safeString(getObjectField(error, 'message', 'Unknown error'), 'Unknown error');
+  }
+
+  return safeString(error, 'Unknown error');
+}
+
+function getGlobalField(name) {
+  try {
+    return globalThis[name];
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to read global ${name}.`, error);
+    return undefined;
+  }
+}
+
+function getGlobalFunction(name) {
+  const value = getGlobalField(name);
+  return typeof value === 'function' ? value : null;
+}
+
+function getObjectField(value, fieldName, fallback = undefined) {
+  try {
+    return value?.[fieldName] ?? fallback;
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to read ${fieldName}.`, error);
+    return fallback;
+  }
+}
+
+function hasElementAttribute(element, attributeName) {
+  try {
+    return Boolean(element?.hasAttribute?.(attributeName));
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to check ${attributeName} attribute.`, error);
+    return false;
+  }
+}
+
+function getElementAttribute(element, attributeName) {
+  try {
+    return element?.getAttribute?.(attributeName) ?? null;
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to read ${attributeName} attribute.`, error);
+    return null;
+  }
+}
+
+function normalizeFormDataEntry(entry) {
+  try {
+    if (!entry || typeof entry[Symbol.iterator] !== 'function') return null;
+    const iterator = entry[Symbol.iterator]();
+    const key = iterator.next();
+    const value = iterator.next();
+    if (key?.done) return null;
+    return [key.value, value?.done ? '' : value?.value];
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Ignoring malformed FormData entry.', error);
+    return null;
+  }
+}
+
+function getFormDataEntries(formData) {
+  const normalizedEntries = [];
+  let entries;
+  try {
+    entries = formData?.entries?.();
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to read FormData entries.', error);
+    return normalizedEntries;
+  }
+  if (!entries) return normalizedEntries;
+
+  try {
+    for (const entry of entries) {
+      const normalizedEntry = normalizeFormDataEntry(entry);
+      if (normalizedEntry) normalizedEntries.push(normalizedEntry);
+    }
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Stopped reading malformed FormData entries.', error);
+  }
+  return normalizedEntries;
+}
+
+function appendFormDataValue(formData, key, value) {
+  try {
+    formData?.append?.(key, value);
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to append form value "${safeString(key)}".`, error);
+  }
+}
+
+function getIterable(value, label) {
+  try {
+    if (value && typeof value[Symbol.iterator] === 'function') return value;
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to inspect iterable ${label}.`, error);
+  }
+
+  return [];
+}
+
+function scheduleTimeout(callback, delayMs, label) {
+  if (delayMs <= 0) return null;
+  const setTimeoutFn = getGlobalFunction('setTimeout');
+  if (!setTimeoutFn) {
+    Logger.system.warn(`[HTMLeX] setTimeout is unavailable; ${label} cannot be delayed.`);
+    return null;
+  }
+
+  try {
+    return setTimeoutFn(callback, delayMs);
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to schedule ${label}.`, error);
+    return null;
+  }
+}
+
+function clearScheduledTimeout(timeoutId, label) {
+  if (timeoutId === null) return;
+  const clearTimeoutFn = getGlobalFunction('clearTimeout');
+  if (!clearTimeoutFn) return;
+
+  try {
+    clearTimeoutFn(timeoutId);
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to clear ${label}.`, error);
+  }
+}
+
+function addAbortListener(signal, listener) {
+  try {
+    if (typeof signal?.addEventListener !== 'function') return () => {};
+    try {
+      signal.addEventListener('abort', listener, { once: true });
+    } catch {
+      signal.addEventListener('abort', listener);
+    }
+    return () => {
+      try {
+        signal.removeEventListener?.('abort', listener);
+      } catch (error) {
+        Logger.system.warn('[HTMLeX] Failed to remove retry abort listener.', error);
+      }
+    };
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to attach retry abort listener.', error);
+    return () => {};
+  }
 }
 
 function scheduleTargetUpdate(element, target, content, sequentialEntry = null, resolvedElement = null, afterUpdate = null, requestId = null) {
@@ -55,8 +213,12 @@ function scheduleTargetUpdate(element, target, content, sequentialEntry = null, 
   scheduleUpdate(updateFn, isSequential(element));
 }
 
+function getTargetSelector(target) {
+  return safeString(getObjectField(target, 'selector', '')).trim();
+}
+
 function isSelfTarget(target) {
-  return String(target?.selector ?? '').trim().toLowerCase() === 'this';
+  return getTargetSelector(target).toLowerCase() === 'this';
 }
 
 function resolveTargetElement(target, fallbackElement) {
@@ -64,7 +226,7 @@ function resolveTargetElement(target, fallbackElement) {
     return fallbackElement;
   }
 
-  return querySelectorSafe(target.selector) || fallbackElement;
+  return querySelectorSafe(getTargetSelector(target)) || fallbackElement;
 }
 
 function resolveSelfTargetElement(target, fallbackElement) {
@@ -72,36 +234,103 @@ function resolveSelfTargetElement(target, fallbackElement) {
 }
 
 function appendControlValue(formData, control) {
-  if (!control.name || control.disabled) return;
-  if ((control.type === 'checkbox' || control.type === 'radio') && !control.checked) return;
-  if (control instanceof HTMLSelectElement && control.multiple) {
-    for (const option of control.selectedOptions) {
-      formData.append(control.name, option.value);
+  const controlName = getObjectField(control, 'name', '');
+  if (!controlName || getObjectField(control, 'disabled', false)) return;
+  const controlType = safeString(getObjectField(control, 'type', '')).toLowerCase();
+  if ((controlType === 'checkbox' || controlType === 'radio') && !getObjectField(control, 'checked', false)) return;
+  if (isSelectControl(control) && getObjectField(control, 'multiple', false)) {
+    for (const option of getIterable(getObjectField(control, 'selectedOptions', []), 'selectedOptions')) {
+      appendFormDataValue(formData, controlName, getObjectField(option, 'value', ''));
     }
     return;
   }
-  if (control instanceof HTMLInputElement && control.type === 'file') {
-    for (const file of control.files || []) {
-      formData.append(control.name, file);
+  if (isInputControl(control) && controlType === 'file') {
+    for (const file of getIterable(getObjectField(control, 'files', []), 'files')) {
+      appendFormDataValue(formData, controlName, file);
     }
     return;
   }
-  formData.append(control.name, control.value);
+  appendFormDataValue(formData, controlName, getObjectField(control, 'value', ''));
+}
+
+function isInstanceOf(value, constructorValue) {
+  if (typeof constructorValue !== 'function') return false;
+  try {
+    return value instanceof constructorValue;
+  } catch {
+    return false;
+  }
+}
+
+function getElementTagName(element) {
+  return safeString(getObjectField(element, 'tagName', '')).trim().toLowerCase();
+}
+
+function isInputControl(control) {
+  return getElementTagName(control) === 'input' || isInstanceOf(control, getGlobalField('HTMLInputElement'));
+}
+
+function isSelectControl(control) {
+  return getElementTagName(control) === 'select' || isInstanceOf(control, getGlobalField('HTMLSelectElement'));
+}
+
+function isFormElement(element) {
+  return getElementTagName(element) === 'form';
+}
+
+function isSubmittableControl(element) {
+  const tagName = getElementTagName(element);
+  return tagName === 'input' || tagName === 'select' || tagName === 'textarea' ||
+    isInputControl(element) ||
+    isSelectControl(element);
+}
+
+function matchesSubmittableControl(element) {
+  try {
+    return typeof element?.matches === 'function'
+      ? element.matches('input, select, textarea')
+      : isSubmittableControl(element);
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to test whether an element is submittable.', error);
+    return isSubmittableControl(element);
+  }
+}
+
+function querySubmittableControls(element) {
+  try {
+    return typeof element?.querySelectorAll === 'function'
+      ? element.querySelectorAll('input, select, textarea')
+      : [];
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to collect descendant form controls.', error);
+    return [];
+  }
 }
 
 function appendElementValues(formData, element) {
-  if (element.tagName.toLowerCase() === 'form') {
-    for (const [key, value] of new FormData(element)) {
-      formData.append(key, value);
+  if (!element) return;
+
+  if (isFormElement(element)) {
+    const FormDataConstructor = getGlobalField('FormData');
+    if (typeof FormDataConstructor !== 'function') {
+      Logger.system.warn('[HTMLeX] FormData is unavailable; skipping form element serialization.');
+      return;
+    }
+    try {
+      for (const [key, value] of new FormDataConstructor(element)) {
+        appendFormDataValue(formData, key, value);
+      }
+    } catch (error) {
+      Logger.system.warn('[HTMLeX] Failed to read FormData from form element.', error);
     }
     return;
   }
 
-  if (element.matches('input, select, textarea')) {
+  if (matchesSubmittableControl(element)) {
     appendControlValue(formData, element);
   }
 
-  for (const input of element.querySelectorAll('input, select, textarea')) {
+  for (const input of querySubmittableControls(element)) {
     appendControlValue(formData, input);
   }
 }
@@ -113,7 +342,7 @@ const collectSelectorResults = selectors => (
 const flattenSelectorMatches = results => results.flatMap(({ matches }) => matches);
 
 function resolveSourceElements(sourceAttribute) {
-  const sourceExpression = String(sourceAttribute ?? '').trim();
+  const sourceExpression = safeString(sourceAttribute).trim();
   if (!sourceExpression) return [];
 
   const selectors = sourceExpression.includes(',')
@@ -133,28 +362,61 @@ function resolveSourceElements(sourceAttribute) {
 }
 
 function appendExtras(formData, extrasAttribute) {
-  for (const pair of String(extrasAttribute ?? '').split(/\s+/).filter(Boolean)) {
+  for (const pair of safeString(extrasAttribute).split(/\s+/).filter(Boolean)) {
     const separatorIndex = pair.indexOf('=');
     const key = separatorIndex >= 0 ? pair.slice(0, separatorIndex) : pair;
     const value = separatorIndex >= 0 ? pair.slice(separatorIndex + 1) : '';
     Logger.system.debug(`Processing extra: ${key} = ${value}`);
     if (key) {
-      formData.append(key, value);
+      appendFormDataValue(formData, key, value);
     }
   }
 }
 
 function serializeFormDataValue(value) {
-  if (typeof File !== 'undefined' && value instanceof File) {
+  const FileConstructor = getGlobalField('File');
+  if (isInstanceOf(value, FileConstructor)) {
     return {
-      file: value.name,
-      size: value.size,
-      type: value.type,
-      lastModified: value.lastModified
+      file: getObjectField(value, 'name', ''),
+      size: getObjectField(value, 'size', 0),
+      type: getObjectField(value, 'type', ''),
+      lastModified: getObjectField(value, 'lastModified', 0)
     };
   }
 
-  return String(value ?? '');
+  return safeString(value);
+}
+
+function encodeQueryComponent(value) {
+  const text = safeString(value);
+  try {
+    return encodeURIComponent(text);
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to encode query value; replacing invalid Unicode.', error);
+  }
+
+  try {
+    return encodeURIComponent(text.replace(/[\uD800-\uDFFF]/gu, '\uFFFD'));
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to encode sanitized query value; using an empty component.', error);
+    return '';
+  }
+}
+
+function isBinaryFormDataValue(value) {
+  const FileConstructor = getGlobalField('File');
+  const BlobConstructor = getGlobalField('Blob');
+  return (
+    isInstanceOf(value, FileConstructor) ||
+    isInstanceOf(value, BlobConstructor)
+  );
+}
+
+function formDataHasBinaryValue(formData) {
+  for (const [, value] of getFormDataEntries(formData)) {
+    if (isBinaryFormDataValue(value)) return true;
+  }
+  return false;
 }
 
 function buildCacheKey(method, url, formData) {
@@ -162,11 +424,52 @@ function buildCacheKey(method, url, formData) {
     return `${method} ${url}`;
   }
 
-  const entries = [...formData.entries()].map(([key, value]) => [
-    key,
-    serializeFormDataValue(value)
-  ]);
+  const entries = [];
+  for (const [key, value] of getFormDataEntries(formData)) {
+    entries.push([key, serializeFormDataValue(value)]);
+  }
   return `${method} ${url} ${JSON.stringify(entries)}`;
+}
+
+function createFormData() {
+  const FormDataConstructor = getGlobalField('FormData');
+  if (typeof FormDataConstructor === 'function') {
+    try {
+      return new FormDataConstructor();
+    } catch (error) {
+      Logger.system.warn('[HTMLeX] Failed to create FormData; using fallback form data.', error);
+    }
+  }
+
+  const entries = [];
+  return {
+    append(key, value) {
+      entries.push([key, value]);
+    },
+    entries() {
+      return entries[Symbol.iterator]();
+    },
+    [Symbol.iterator]() {
+      return this.entries();
+    }
+  };
+}
+
+function encodeFormDataParams(formData) {
+  const URLSearchParamsConstructor = getGlobalField('URLSearchParams');
+  if (typeof URLSearchParamsConstructor === 'function') {
+    try {
+      return new URLSearchParamsConstructor(formData).toString();
+    } catch (error) {
+      Logger.system.warn('[HTMLeX] URLSearchParams failed for FormData; falling back to manual query serialization.', error);
+    }
+  }
+
+  const encodedPairs = [];
+  for (const [key, value] of getFormDataEntries(formData)) {
+    encodedPairs.push(`${encodeQueryComponent(key)}=${encodeQueryComponent(value)}`);
+  }
+  return encodedPairs.join('&');
 }
 
 function resetResponseState(element) {
@@ -183,12 +486,57 @@ function runHook(element, hookName, event = null) {
 }
 
 function getResponseBufferLimit(element) {
-  const rawLimit = element?.getAttribute?.('maxresponsechars') ??
-    element?.getAttribute?.('max-response-chars') ??
-    element?.getAttribute?.('maxresponsebuffer') ??
-    element?.getAttribute?.('max-response-buffer');
-  const limit = Number.parseInt(rawLimit || '', 10);
+  const rawLimit = getElementAttribute(element, 'maxresponsechars') ??
+    getElementAttribute(element, 'max-response-chars') ??
+    getElementAttribute(element, 'maxresponsebuffer') ??
+    getElementAttribute(element, 'max-response-buffer');
+  const limit = parseNonNegativeInteger(rawLimit, 0);
   return Number.isFinite(limit) && limit > 0 ? limit : DEFAULT_RESPONSE_BUFFER_LIMIT_CHARS;
+}
+
+function parseNonNegativeInteger(value, defaultValue = 0) {
+  const normalizedValue = safeString(value).trim();
+  if (!/^\d+$/u.test(normalizedValue)) return defaultValue;
+
+  const parsed = Number.parseInt(normalizedValue, 10);
+  return Number.isSafeInteger(parsed) ? parsed : defaultValue;
+}
+
+function parseNonNegativeNumber(value, defaultValue = 0) {
+  const normalizedValue = safeString(value).trim();
+  if (!/^(?:\d+|\d*\.\d+)$/u.test(normalizedValue)) return defaultValue;
+
+  const parsed = Number(normalizedValue);
+  return Number.isFinite(parsed) ? parsed : defaultValue;
+}
+
+function normalizeActionOptions(extraOptions) {
+  const htmlexSequentialEntry = getObjectField(extraOptions, 'htmlexSequentialEntry', null);
+  const htmlexEvent = getObjectField(extraOptions, 'htmlexEvent', null);
+  const fetchOptions = {};
+
+  if (!extraOptions || typeof extraOptions !== 'object') {
+    return { htmlexSequentialEntry, htmlexEvent, fetchOptions };
+  }
+
+  let optionKeys;
+  try {
+    optionKeys = Object.keys(extraOptions);
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to inspect action options.', error);
+    optionKeys = [];
+  }
+
+  for (const optionKey of optionKeys) {
+    if (optionKey === 'htmlexSequentialEntry' || optionKey === 'htmlexEvent') continue;
+    if (RESERVED_FETCH_OPTION_KEYS.has(optionKey)) {
+      Logger.system.warn(`[HTMLeX] Ignoring unsafe fetch option key "${optionKey}".`);
+      continue;
+    }
+    fetchOptions[optionKey] = getObjectField(extraOptions, optionKey);
+  }
+
+  return { htmlexSequentialEntry, htmlexEvent, fetchOptions };
 }
 
 function appendChunkWithLimit(chunks, currentLength, chunk, limitChars) {
@@ -210,7 +558,7 @@ function appendBufferWithLimit(buffer, chunk, limitChars) {
 }
 
 function createSwapLifecycle(element, afterSwapComplete = null, event = null) {
-  if (!element.hasAttribute('onafterSwap') && !afterSwapComplete) return null;
+  if (!hasElementAttribute(element, 'onafterSwap') && !afterSwapComplete) return null;
 
   let pending = 0;
   let scheduled = false;
@@ -255,8 +603,8 @@ function replayResponseText(element, responseText, sequentialEntry = null, after
   const swapLifecycle = createSwapLifecycle(element, afterSwapComplete, event);
   const remainingContent = processFragmentBuffer(responseText, element, sequentialEntry, swapLifecycle);
 
-  if (!element._htmlexFragmentsProcessed && remainingContent.trim() !== '' && element.hasAttribute('target')) {
-    const targets = parseTargets(element.getAttribute('target'));
+  if (!element._htmlexFragmentsProcessed && safeString(remainingContent).trim() !== '' && hasElementAttribute(element, 'target')) {
+    const targets = parseTargets(getElementAttribute(element, 'target'));
     for (const target of targets) {
       const resolvedElement = resolveTargetElement(target, element);
       const afterSwap = swapLifecycle?.createUpdateCallback();
@@ -274,36 +622,43 @@ function emitSignalWithDelay(element, signalName, delay, context) {
   if (delay > 0) {
     element._htmlexDelayedSignalTimers ||= new Set();
     const registrationToken = element._htmlexRegistrationToken;
-    const timerId = setTimeout(() => {
+    const timerId = scheduleTimeout(() => {
       element._htmlexDelayedSignalTimers?.delete(timerId);
-      if (!document.body.contains(element)) return;
+      if (!isElementConnected(element)) return;
       if (registrationToken && element._htmlexRegistrationToken !== registrationToken) return;
-      Logger.system.info(`Emitting signal "${signalName}" after ${delay}ms delay (${context}).`);
+      Logger.system.info(`Emitting signal "${safeString(signalName)}" after ${delay}ms delay (${safeString(context)}).`);
       emitSignal(signalName);
-    }, delay);
+    }, delay, `delayed signal "${safeString(signalName)}"`);
+    if (timerId === null) return;
     element._htmlexDelayedSignalTimers.add(timerId);
     return;
   }
 
-  Logger.system.info(`Emitting signal "${signalName}" immediately (${context}).`);
+  Logger.system.info(`Emitting signal "${safeString(signalName)}" immediately (${safeString(context)}).`);
   emitSignal(signalName);
 }
 
 function emitHeaderSignal(element, response) {
   if (!response?.headers) return;
 
-  const headerValue = response.headers.get('Emit');
+  let headerValue;
+  try {
+    headerValue = response.headers.get?.('Emit');
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to read Emit response header.', error);
+    return;
+  }
   if (!headerValue) return;
 
-  Logger.system.info(`Received Emit header: ${headerValue}`);
-  const headerParts = headerValue.split(';').map(part => part.trim()).filter(Boolean);
+  Logger.system.info(`Received Emit header: ${safeString(headerValue)}`);
+  const headerParts = safeString(headerValue).split(';').map(part => part.trim()).filter(Boolean);
   const signalName = headerParts[0] || '';
   let delayMs = 0;
 
   for (const param of headerParts.slice(1)) {
-    if (param.startsWith('delay=')) {
-      const parsedDelay = Number.parseInt(param.split('=')[1], 10);
-      delayMs = Number.isFinite(parsedDelay) && parsedDelay > 0 ? parsedDelay : 0;
+    const [name, value] = param.split('=');
+    if (name.trim().toLowerCase() === 'delay') {
+      delayMs = parseNonNegativeInteger(value, 0);
     }
   }
 
@@ -311,17 +666,18 @@ function emitHeaderSignal(element, response) {
 }
 
 function emitPublishSignal(element) {
-  if (!element.hasAttribute('publish')) return;
+  if (!hasElementAttribute(element, 'publish')) return;
 
-  const publishSignal = element.getAttribute('publish');
-  Logger.system.info(`Emitting signal "${publishSignal}" after successful API call.`);
+  const publishSignal = getElementAttribute(element, 'publish');
+  Logger.system.info(`Emitting signal "${safeString(publishSignal)}" after successful API call.`);
   emitSignal(publishSignal);
 
-  if (!element.hasAttribute('timer')) return;
+  if (!hasElementAttribute(element, 'timer')) return;
 
-  const delay = Number.parseInt(element.getAttribute('timer'), 10);
-  if (!Number.isFinite(delay) || delay < 0) {
-    Logger.system.warn(`[HTMLeX Warning] Ignoring invalid delayed publish timer "${element.getAttribute('timer')}".`);
+  const timerAttribute = getElementAttribute(element, 'timer');
+  const delay = parseNonNegativeInteger(timerAttribute, null);
+  if (delay === null) {
+    Logger.system.warn(`[HTMLeX Warning] Ignoring invalid delayed publish timer "${safeString(timerAttribute)}".`);
     return;
   }
 
@@ -335,14 +691,14 @@ function runSuccessSideEffects(element, response = null) {
 }
 
 function getFragmentErrorStatus(element) {
-  const status = Number.parseInt(element?._htmlexFragmentErrorStatus ?? '', 10);
-  return Number.isFinite(status) && status >= 400 ? status : null;
+  const status = parseNonNegativeInteger(element?._htmlexFragmentErrorStatus, null);
+  return status !== null && status >= 400 ? status : null;
 }
 
 function getNumericAttribute(element, attributeNames, defaultValue, validator = value => Number.isFinite(value)) {
   for (const attributeName of attributeNames) {
-    if (!element.hasAttribute(attributeName)) continue;
-    const value = Number.parseFloat(element.getAttribute(attributeName));
+    if (!hasElementAttribute(element, attributeName)) continue;
+    const value = parseNonNegativeNumber(getElementAttribute(element, attributeName), defaultValue);
     return validator(value) ? value : defaultValue;
   }
 
@@ -350,34 +706,64 @@ function getNumericAttribute(element, attributeNames, defaultValue, validator = 
 }
 
 function createAbortError(reason) {
-  if (reason instanceof Error) return reason;
+  if (isInstanceOf(reason, getGlobalField('Error'))) return reason;
   const error = new Error('Retry delay aborted');
   error.name = 'AbortError';
   return error;
+}
+
+function isSignalAborted(signal) {
+  try {
+    return Boolean(signal?.aborted);
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to read retry abort signal state.', error);
+    return false;
+  }
+}
+
+function getSignalReason(signal) {
+  try {
+    return signal?.reason;
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to read retry abort signal reason.', error);
+    return undefined;
+  }
+}
+
+function isElementConnected(element) {
+  try {
+    if (typeof document === 'undefined' || typeof document.body?.contains !== 'function') return true;
+    return document.body.contains(element);
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to determine whether an element is connected.', error);
+    return false;
+  }
 }
 
 function waitForRetryDelay(delayMs, signal = null) {
   if (delayMs <= 0) return;
 
   return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(createAbortError(signal.reason));
+    if (isSignalAborted(signal)) {
+      reject(createAbortError(getSignalReason(signal)));
       return;
     }
 
-    const timeoutId = setTimeout(() => {
+    let removeAbortListener = () => {};
+    const timeoutId = scheduleTimeout(() => {
       removeAbortListener();
       resolve();
-    }, delayMs);
+    }, delayMs, 'retry delay');
+    if (timeoutId === null) {
+      resolve();
+      return;
+    }
     const abortListener = () => {
-      clearTimeout(timeoutId);
+      clearScheduledTimeout(timeoutId, 'retry delay');
       removeAbortListener();
-      reject(createAbortError(signal.reason));
+      reject(createAbortError(getSignalReason(signal)));
     };
-    const removeAbortListener = () => {
-      signal?.removeEventListener?.('abort', abortListener);
-    };
-    signal?.addEventListener?.('abort', abortListener, { once: true });
+    removeAbortListener = addAbortListener(signal, abortListener);
   });
 }
 
@@ -421,11 +807,8 @@ export async function processResponse(response, triggeringElement, sequentialEnt
   Logger.system.debug("Starting to process response stream.");
 
   let chunkCount = 0;
-  triggeringElement._htmlexFragmentsProcessed = false;
-  triggeringElement._htmlexFallbackUpdated = false;
-  triggeringElement._htmlexDefaultUpdated = false;
+  resetResponseState(triggeringElement);
   triggeringElement._htmlexStreamingActive = true;
-  triggeringElement._htmlexStreaming = false;
 
   if (!response.body) {
     triggeringElement._htmlexStreamingActive = false;
@@ -439,7 +822,7 @@ export async function processResponse(response, triggeringElement, sequentialEnt
   const responseTextChunks = [];
   let responseTextLength = 0;
   let retainResponseText = true;
-  const shouldCacheResponse = triggeringElement.hasAttribute('cache');
+  const shouldCacheResponse = hasElementAttribute(triggeringElement, 'cache');
   const responseBufferLimit = getResponseBufferLimit(triggeringElement);
   const swapLifecycle = createSwapLifecycle(triggeringElement, afterSwapComplete, event);
   const releaseResponseTextIfFragmentOnly = () => {
@@ -488,14 +871,14 @@ export async function processResponse(response, triggeringElement, sequentialEnt
       releaseResponseTextIfFragmentOnly();
     }
 
-    if (!triggeringElement._htmlexFragmentsProcessed && fragmentBuffer.trim() !== '' && triggeringElement.hasAttribute('target')) {
+    if (!triggeringElement._htmlexFragmentsProcessed && safeString(fragmentBuffer).trim() !== '' && hasElementAttribute(triggeringElement, 'target')) {
       Logger.system.debug("No fragments processed; performing fallback update with leftover text.");
-      const targets = parseTargets(triggeringElement.getAttribute('target'));
+      const targets = parseTargets(getElementAttribute(triggeringElement, 'target'));
       for (const target of targets) {
         const resolvedElement = resolveTargetElement(target, triggeringElement);
 
         if (resolvedElement === triggeringElement && !isSelfTarget(target)) {
-          Logger.system.debug(`Fallback: No element found for selector "${target.selector}". Using triggering element.`);
+          Logger.system.debug(`Fallback: No element found for selector "${getTargetSelector(target)}". Using triggering element.`);
         }
 
         Logger.system.debug("Applying fallback update to target:", target, "resolved as:", resolvedElement);
@@ -532,7 +915,9 @@ export async function processResponse(response, triggeringElement, sequentialEnt
  */
 export async function handleAction(element, method, endpoint, extraOptions = {}) {
   Logger.system.debug("handleAction invoked for element:", element);
-  const { htmlexSequentialEntry = null, htmlexEvent = null, ...fetchOptions } = extraOptions;
+  const { htmlexSequentialEntry, htmlexEvent, fetchOptions } = normalizeActionOptions(extraOptions);
+  const requestMethod = safeString(method).trim().toUpperCase();
+  const requestEndpoint = safeString(endpoint).trim();
   element._htmlexOnAfterDeferred = false;
   const requestId = (element._htmlexRequestId || 0) + 1;
   element._htmlexRequestId = requestId;
@@ -560,25 +945,25 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
   // Lifecycle hook: onbefore (before API call starts)
   runHook(element, 'onbefore', htmlexEvent);
 
-  Logger.system.info(`Handling ${method} action for endpoint: ${endpoint}`);
+  Logger.system.info(`Handling ${requestMethod} action for endpoint: ${requestEndpoint}`);
 
-  const formData = new FormData();
+  const formData = createFormData();
   appendElementValues(formData, element);
 
-  if (element.hasAttribute('source')) {
-    for (const sourceElement of resolveSourceElements(element.getAttribute('source'))) {
+  if (hasElementAttribute(element, 'source')) {
+    for (const sourceElement of resolveSourceElements(getElementAttribute(element, 'source'))) {
       appendElementValues(formData, sourceElement);
     }
   }
 
   // Process extras (inline parameters)
-  if (element.hasAttribute('extras')) {
-    appendExtras(formData, element.getAttribute('extras'));
+  if (hasElementAttribute(element, 'extras')) {
+    appendExtras(formData, getElementAttribute(element, 'extras'));
   }
 
   // If a loading state is desired, update the loading target immediately.
-  if (element.hasAttribute('loading')) {
-    const loadingTargets = parseTargets(element.getAttribute('loading'));
+  if (hasElementAttribute(element, 'loading')) {
+    const loadingTargets = parseTargets(getElementAttribute(element, 'loading'));
     for (const target of loadingTargets) {
       Logger.system.debug("Updating loading target:", target);
       scheduleUpdate(() => {
@@ -591,10 +976,10 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
   }
 
   // Merge caller-provided fetch options into our request options.
-  const requestOptions = { method, ...fetchOptions };
-  let url = endpoint;
-  if (method === 'GET') {
-    const params = new URLSearchParams(formData).toString();
+  const requestOptions = { ...fetchOptions, method: requestMethod };
+  let url = requestEndpoint;
+  if (requestMethod === 'GET') {
+    const params = encodeFormDataParams(formData);
     if (params) {
       url += (url.includes('?') ? '&' : '?') + params;
     }
@@ -603,13 +988,15 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
     requestOptions.body = formData;
     Logger.system.debug("Non-GET request, using FormData body.");
   }
-  const cacheKey = buildCacheKey(method, url, formData);
+  const cacheKey = buildCacheKey(requestMethod, url, formData);
+  const hasCacheAttribute = hasElementAttribute(element, 'cache');
+  const canUseCache = hasCacheAttribute && !formDataHasBinaryValue(formData);
 
   // Caching support.
-  if (element.hasAttribute('cache')) {
+  if (canUseCache) {
     const cached = getCache(cacheKey);
     if (cached !== null) {
-      Logger.system.info(`Using cached response for: ${url}`);
+      Logger.system.info(`Using cached response for: ${safeString(url)}`);
       runHook(element, 'onbeforeSwap', htmlexEvent);
       replayResponseText(element, cached, htmlexSequentialEntry, runAfterHook, htmlexEvent, requestId);
       completeCurrentRequest();
@@ -619,18 +1006,19 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
       }
       return;
     }
+  } else if (hasCacheAttribute) {
+    Logger.system.debug('Skipping cache for request with binary FormData payload.');
   }
 
-  const timeoutMs = Number.parseInt(element.getAttribute('timeout') || '0', 10);
-  const rawRetryCount = Number.parseInt(element.getAttribute('retry') || '0', 10);
-  const retryCount = Number.isFinite(rawRetryCount) && rawRetryCount > 0 ? rawRetryCount : 0;
+  const timeoutMs = parseNonNegativeInteger(getElementAttribute(element, 'timeout'), 0);
+  const retryCount = parseNonNegativeInteger(getElementAttribute(element, 'retry'), 0);
   let responseText = null;
   let response = null;
 
   Logger.system.debug("Initiating fetch attempts. Timeout:", timeoutMs, "Retry count:", retryCount);
   for (let attempt = 0; attempt <= retryCount; attempt++) {
     try {
-      Logger.system.debug(`Attempt ${attempt + 1}: Fetching URL ${url}`);
+      Logger.system.debug(`Attempt ${attempt + 1}: Fetching URL ${safeString(url)}`);
       response = await fetchWithTimeout(url, requestOptions, timeoutMs);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status} ${response.statusText}`.trim());
@@ -647,14 +1035,14 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
     } catch (error) {
       const errorMessage = getErrorMessage(error);
       Logger.system.warn(`Attempt ${attempt + 1} failed: ${errorMessage}`);
-      if (error?.name === 'AbortError' || fetchOptions.signal?.aborted) {
+      if (getObjectField(error, 'name') === 'AbortError' || isSignalAborted(fetchOptions.signal)) {
         completeCurrentRequest();
         return;
       }
       if (attempt === retryCount) {
         completeCurrentRequest();
-        if (element.hasAttribute('onerror')) {
-          const errorTargets = parseTargets(element.getAttribute('onerror'));
+        if (hasElementAttribute(element, 'onerror')) {
+          const errorTargets = parseTargets(getElementAttribute(element, 'onerror'));
           for (const target of errorTargets) {
             const resolvedElement = resolveSelfTargetElement(target, element);
             Logger.system.debug("Updating error target after failure:", target);
@@ -679,7 +1067,7 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
           await waitForRetryDelay(retryDelayMs, fetchOptions.signal);
         }
       } catch (delayError) {
-        if (delayError?.name === 'AbortError' || fetchOptions.signal?.aborted) {
+        if (getObjectField(delayError, 'name') === 'AbortError' || isSignalAborted(fetchOptions.signal)) {
           completeCurrentRequest();
           return;
         }
@@ -689,15 +1077,15 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
   }
 
   // Fallback update if streaming wasn't used.
-  if (element.hasAttribute('target') && !element._htmlexFragmentsProcessed && !element._htmlexFallbackUpdated && responseText) {
+  if (hasElementAttribute(element, 'target') && !element._htmlexFragmentsProcessed && !element._htmlexFallbackUpdated && responseText) {
     const swapLifecycle = createSwapLifecycle(element, runAfterHook, htmlexEvent);
-    const targets = parseTargets(element.getAttribute('target'));
+    const targets = parseTargets(getElementAttribute(element, 'target'));
     for (const target of targets) {
       const resolvedElement = resolveTargetElement(target, element);
       if (isSelfTarget(target)) {
         Logger.system.debug("Fallback: target selector is 'this'; using triggering element.");
       } else if (resolvedElement === element) {
-        Logger.system.debug(`No element found for selector "${target.selector}". Falling back to triggering element.`);
+        Logger.system.debug(`No element found for selector "${getTargetSelector(target)}". Falling back to triggering element.`);
       }
       Logger.system.debug("Fallback updating target:", target, "resolved as:", resolvedElement);
       const afterSwap = swapLifecycle?.createUpdateCallback();
@@ -714,8 +1102,8 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
 
   runSuccessSideEffects(element, response);
 
-  if (element.hasAttribute('cache')) {
-    const cacheTtl = Number.parseInt(element.getAttribute('cache'), 10);
+  if (canUseCache) {
+    const cacheTtl = parseNonNegativeInteger(getElementAttribute(element, 'cache'), Number.NaN);
     setCache(cacheKey, responseText, cacheTtl);
     Logger.system.debug("Response cached with TTL:", cacheTtl);
   }

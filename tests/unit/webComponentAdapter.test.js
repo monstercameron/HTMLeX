@@ -4,6 +4,7 @@ import {
   createHTMLeXElementClass,
   defineHTMLeXElement,
 } from '../../src/public/src/htmlex.js';
+import { Logger } from '../../src/public/src/logger.js';
 
 let originalCustomElements;
 let originalDocument;
@@ -143,11 +144,51 @@ test('custom element adapter registers and unregisters HTMLeX behavior', () => {
   assert.equal(element.getAttribute('data-htmlex-registered'), 'true');
   assert.equal(typeof element.listeners.get('click'), 'function');
   assert.equal(ElementClass.observedAttributes.includes('retry-delay'), true);
+  const observedAttributes = ElementClass.observedAttributes;
+  observedAttributes.push('mutated-attribute');
+  assert.equal(ElementClass.observedAttributes.includes('mutated-attribute'), false);
 
   element.disconnectedCallback();
 
   assert.equal(element.hasAttribute('data-htmlex-registered'), false);
   assert.equal(element.listeners.has('click'), false);
+});
+
+test('custom element adapter isolates hostile lifecycle and queued flag failures', async () => {
+  const wasEnabled = Logger.enabled;
+  Logger.enabled = false;
+  try {
+    const ElementClass = createHTMLeXElementClass(FakeHTMLElement);
+    const tokenHostileElement = new ElementClass();
+    tokenHostileElement.setAttribute('get', '/hostile-lifecycle');
+    tokenHostileElement.isConnected = true;
+    Object.defineProperty(tokenHostileElement, '_htmlexRegistrationToken', {
+      configurable: true,
+      set() {
+        throw new Error('token denied');
+      },
+    });
+
+    assert.doesNotThrow(() => tokenHostileElement.connectedCallback());
+    assert.doesNotThrow(() => tokenHostileElement.disconnectedCallback());
+
+    const queueHostileElement = new ElementClass();
+    queueHostileElement.isConnected = true;
+    Object.defineProperty(queueHostileElement, '_htmlexAdapterRegistrationQueued', {
+      configurable: true,
+      get() {
+        throw new Error('queued read denied');
+      },
+      set() {
+        throw new Error('queued write denied');
+      },
+    });
+
+    assert.doesNotThrow(() => queueHostileElement.attributeChangedCallback());
+    await new Promise(resolve => queueMicrotask(resolve));
+  } finally {
+    Logger.enabled = wasEnabled;
+  }
 });
 
 test('custom element adapter re-registers connected attribute changes once per microtask', async () => {
@@ -175,6 +216,48 @@ test('custom element adapter re-registers connected attribute changes once per m
   assert.equal(disconnected._htmlexAdapterRegistrationQueued, undefined);
 });
 
+test('custom element adapter falls back when microtasks or HTMLElement are unavailable', () => {
+  const originalQueueMicrotask = globalThis.queueMicrotask;
+  const originalSetTimeout = globalThis.setTimeout;
+  const callbacks = [];
+  delete globalThis.queueMicrotask;
+  delete globalThis.HTMLElement;
+  globalThis.setTimeout = (callback) => {
+    callbacks.push(callback);
+    return callbacks.length;
+  };
+
+  try {
+    const FallbackElementClass = createHTMLeXElementClass();
+    const fallbackElement = new FallbackElementClass();
+    assert.equal(fallbackElement instanceof FallbackElementClass, true);
+    assert.equal(FallbackElementClass.observedAttributes.includes('get'), true);
+
+    const ElementClass = createHTMLeXElementClass(FakeHTMLElement);
+    const element = new ElementClass();
+    element.setAttribute('get', '/queued-adapter');
+    element.isConnected = true;
+
+    element.attributeChangedCallback();
+
+    assert.equal(element._htmlexAdapterRegistrationQueued, true);
+    assert.equal(callbacks.length, 1);
+
+    callbacks[0]();
+
+    assert.equal(element._htmlexAdapterRegistrationQueued, false);
+    assert.equal(element.getAttribute('data-htmlex-registered'), 'true');
+  } finally {
+    if (originalQueueMicrotask === undefined) {
+      delete globalThis.queueMicrotask;
+    } else {
+      globalThis.queueMicrotask = originalQueueMicrotask;
+    }
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.HTMLElement = FakeHTMLElement;
+  }
+});
+
 test('custom element adapter exposes manual register and unregister methods', () => {
   const ElementClass = createHTMLeXElementClass(FakeHTMLElement);
   const element = new ElementClass();
@@ -200,11 +283,82 @@ test('defineHTMLeXElement defines once and returns existing custom element class
   assert.equal(ExistingClass, ElementClass);
 });
 
+test('defineHTMLeXElement normalizes options and reports invalid registries', () => {
+  const ElementClass = defineHTMLeXElement('x-htmlex-null-options', null);
+  assert.equal(globalThis.customElements.get('x-htmlex-null-options'), ElementClass);
+
+  globalThis.customElements = {};
+  assert.throws(
+    () => defineHTMLeXElement('x-invalid-registry'),
+    /customElements is not available/
+  );
+
+  globalThis.customElements = {
+    get() {
+      throw new Error('invalid name');
+    },
+    define() {},
+  };
+  assert.throws(
+    () => defineHTMLeXElement('bad-name'),
+    /Invalid custom element name/
+  );
+});
+
 test('defineHTMLeXElement reports unavailable custom element registries', () => {
   delete globalThis.customElements;
 
   assert.throws(
     () => defineHTMLeXElement('x-missing-registry'),
     /customElements is not available/
+  );
+});
+
+test('defineHTMLeXElement safely reports hostile registries and names', () => {
+  Object.defineProperty(globalThis, 'customElements', {
+    configurable: true,
+    get() {
+      throw new Error('registry denied');
+    },
+  });
+  assert.throws(
+    () => defineHTMLeXElement('x-hostile-registry'),
+    /customElements is not available/
+  );
+
+  Object.defineProperty(globalThis, 'customElements', {
+    configurable: true,
+    writable: true,
+    value: {
+      get() {
+        throw new Error('name denied');
+      },
+      define() {},
+    },
+  });
+  assert.throws(
+    () => defineHTMLeXElement({
+      toString() {
+        throw new Error('string denied');
+      },
+    }),
+    /Invalid custom element name "\[Unstringifiable\]"/
+  );
+
+  globalThis.customElements = {
+    get() {
+      return null;
+    },
+    define() {
+      throw new Error('define denied');
+    },
+  };
+  assert.throws(
+    () => defineHTMLeXElement('x-define-denied', { baseClass: FakeHTMLElement }),
+    /Unable to define custom element "x-define-denied"/
+  );
+  assert.throws(
+    () => defineHTMLeXElement(null, { baseClass: FakeHTMLElement }),
+    /Unable to define custom element "\[Unstringifiable\]"/
   );
 });

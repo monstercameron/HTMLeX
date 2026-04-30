@@ -1,17 +1,11 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
-import path from 'node:path';
+import {
+  collectMatchingFiles,
+  DEFAULT_IGNORED_DIRS,
+  getRelativePath,
+  readFileWithContext,
+} from './check-utils.mjs';
 
 const ROOT = process.cwd();
-const IGNORED_DIRS = new Set([
-  '.git',
-  '.playwright',
-  'coverage',
-  'media',
-  'node_modules',
-  'playwright-report',
-  'test-results',
-  'tmp'
-]);
 const TEXT_EXTENSIONS = new Set([
   '.cjs',
   '.css',
@@ -35,42 +29,9 @@ const TEXT_FILENAMES = new Set([
   'LICENSE'
 ]);
 
-async function collectTextFiles(directory) {
-  const entries = await readdir(directory, { withFileTypes: true });
-  entries.sort((left, right) => left.name.localeCompare(right.name));
-  const files = [];
-
-  for (const entry of entries) {
-    const entryPath = path.join(directory, entry.name);
-
-    if (entry.isDirectory()) {
-      if (!IGNORED_DIRS.has(entry.name)) {
-        files.push(...await collectTextFiles(entryPath));
-      }
-      continue;
-    }
-
-    if (!entry.isFile()) continue;
-
-    if (TEXT_FILENAMES.has(entry.name) || TEXT_EXTENSIONS.has(path.extname(entry.name))) {
-      files.push(entryPath);
-    }
-  }
-
-  return files;
-}
-
-async function isDirectory(directory) {
-  try {
-    return (await stat(directory)).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
 function checkTextFile(file, buffer) {
   const failures = [];
-  const relativePath = path.relative(ROOT, file);
+  const relativePath = getRelativePath(ROOT, file);
 
   if (buffer.length > 0 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) {
     failures.push(`${relativePath}: UTF-8 BOM is not allowed.`);
@@ -95,12 +56,15 @@ function checkTextFile(file, buffer) {
   return failures;
 }
 
-const rootIsDirectory = await isDirectory(ROOT);
-const files = rootIsDirectory ? await collectTextFiles(ROOT) : [];
+const files = await collectMatchingFiles(ROOT, {
+  ignoredDirs: DEFAULT_IGNORED_DIRS,
+  extensions: TEXT_EXTENSIONS,
+  filenames: TEXT_FILENAMES
+});
 const failures = [];
 
 for (const file of files) {
-  failures.push(...checkTextFile(file, await readFile(file)));
+  failures.push(...checkTextFile(file, await readFileWithContext(file, undefined, getRelativePath(ROOT, file))));
 }
 
 if (failures.length > 0) {

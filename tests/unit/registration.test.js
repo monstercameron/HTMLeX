@@ -6,14 +6,17 @@ import {
   initHTMLeX,
   patchedUpdateTarget,
   registerElement,
+  unregisterElement,
 } from '../../src/public/src/registration.js';
 import { Logger } from '../../src/public/src/logger.js';
 import { emitSignal, registerSignalListener } from '../../src/public/src/signals.js';
 
 let originalClearTimeout;
+let originalAbortController;
 let originalCustomEvent;
 let originalDocument;
 let originalElement;
+let originalEvent;
 let originalFetch;
 let originalHistory;
 let originalHTMLInputElement;
@@ -30,9 +33,11 @@ let originalWindow;
 
 beforeEach(() => {
   originalClearTimeout = globalThis.clearTimeout;
+  originalAbortController = globalThis.AbortController;
   originalCustomEvent = globalThis.CustomEvent;
   originalDocument = globalThis.document;
   originalElement = globalThis.Element;
+  originalEvent = globalThis.Event;
   originalFetch = globalThis.fetch;
   originalHistory = globalThis.history;
   originalHTMLInputElement = globalThis.HTMLInputElement;
@@ -93,6 +98,12 @@ afterEach(() => {
     globalThis.clearTimeout = originalClearTimeout;
   }
 
+  if (originalAbortController === undefined) {
+    delete globalThis.AbortController;
+  } else {
+    globalThis.AbortController = originalAbortController;
+  }
+
   if (originalCustomEvent === undefined) {
     delete globalThis.CustomEvent;
   } else {
@@ -109,6 +120,12 @@ afterEach(() => {
     delete globalThis.Element;
   } else {
     globalThis.Element = originalElement;
+  }
+
+  if (originalEvent === undefined) {
+    delete globalThis.Event;
+  } else {
+    globalThis.Event = originalEvent;
   }
 
   if (originalFetch === undefined) {
@@ -333,6 +350,85 @@ test('patchedUpdateTarget updates this targets, appends later defaults, and queu
   }]);
 });
 
+test('patchedUpdateTarget queues sequential updates without relying on queue push', () => {
+  const sequentialElement = new FakeElement('section');
+  sequentialElement._htmlexSequentialMode = true;
+  sequentialElement._htmlexSequentialUpdates = [];
+  sequentialElement._htmlexSequentialUpdates.push = () => {
+    throw new Error('push denied');
+  };
+
+  assert.doesNotThrow(() => {
+    patchedUpdateTarget(
+      { selector: 'this', strategy: 'append' },
+      '<p>Queued without push</p>',
+      sequentialElement
+    );
+  });
+  assert.equal(sequentialElement._htmlexSequentialUpdates.length, 1);
+  assert.equal(sequentialElement._htmlexSequentialUpdates[0].content, '<p>Queued without push</p>');
+});
+
+test('patchedUpdateTarget and registerElement tolerate hostile registration metadata', () => {
+  const element = new FakeElement('section');
+  const hostileContent = {
+    toString() {
+      throw new Error('content string denied');
+    },
+  };
+  const hostileTarget = {};
+  Object.defineProperty(hostileTarget, 'selector', {
+    get() {
+      throw new Error('selector denied');
+    },
+  });
+  Object.defineProperty(hostileTarget, 'strategy', {
+    get() {
+      throw new Error('strategy denied');
+    },
+  });
+  const hostileOptions = {};
+  Object.defineProperty(hostileOptions, 'forceResolvedElement', {
+    get() {
+      throw new Error('force option denied');
+    },
+  });
+  Object.defineProperty(hostileOptions, 'queueSequential', {
+    get() {
+      throw new Error('queue option denied');
+    },
+  });
+
+  assert.doesNotThrow(() => {
+    patchedUpdateTarget(hostileTarget, hostileContent, element, hostileOptions);
+  });
+  assert.equal(element.innerHTML, '');
+
+  const timers = [];
+  globalThis.setTimeout = (_callback, delayMs) => {
+    timers.push({ delayMs });
+    return timers.length - 1;
+  };
+  const hostileAttribute = {
+    toString() {
+      throw new Error('attribute string denied');
+    },
+  };
+  const registeredElement = new FakeElement('button', {
+    get: '/hostile-registration',
+    trigger: hostileAttribute,
+    timer: hostileAttribute,
+    auto: hostileAttribute,
+    subscribe: hostileAttribute,
+    sequential: hostileAttribute,
+  });
+
+  assert.doesNotThrow(() => registerElement(registeredElement));
+  assert.equal(registeredElement.listeners.has('click'), true);
+  assert.equal(registeredElement.hasAttribute('data-timer-set'), false);
+  assert.deepEqual(timers.map(timer => timer.delayMs), [0]);
+});
+
 test('flushSequentialUpdates applies queued updates and afterUpdate callbacks', () => {
   const element = new FakeElement('section');
   const afterUpdateCalls = [];
@@ -423,6 +519,35 @@ test('registerElement timer targets remove this element and cleanup stale timers
   assert.equal(element.removed, true);
 });
 
+test('registerElement timer targets support mixed strategies and multiple matches', () => {
+  const timers = [];
+  globalThis.setTimeout = (callback, delayMs) => {
+    timers.push({ callback, delayMs });
+    return timers.length - 1;
+  };
+  const firstToast = new FakeElement('div');
+  const secondToast = new FakeElement('div');
+  const panel = new FakeElement('section');
+  panel.innerHTML = '<p>Old content</p>';
+  document.querySelectorAll = (selector) => {
+    if (selector === '.toast') return [firstToast, secondToast];
+    if (selector === '#panel') return [panel];
+    return [];
+  };
+  const element = new FakeElement('div', {
+    timer: '20',
+    target: '.toast(remove) #panel(innerHTML)',
+  });
+
+  registerElement(element);
+  timers[0].callback();
+
+  assert.equal(firstToast.removed, true);
+  assert.equal(secondToast.removed, true);
+  assert.equal(panel.innerHTML, '');
+  assert.equal(element.removed, false);
+});
+
 test('registerElement clears pending timers when the timer attribute changes', () => {
   FakeMutationObserver.instances = [];
   globalThis.MutationObserver = FakeMutationObserver;
@@ -451,6 +576,304 @@ test('registerElement clears pending timers when the timer attribute changes', (
   assert.equal(timers[0].cleared, true);
   assert.equal(element.hasAttribute('data-timer-set'), false);
   assert.equal(element.removed, false);
+});
+
+test('registerElement falls back when trigger normalizes to an empty event', () => {
+  const element = new FakeElement('button', {
+    get: '/invalid-trigger',
+    trigger: 'on',
+  });
+  const onClickElement = new FakeElement('button', {
+    get: '/onclick-trigger',
+    trigger: 'onClick',
+  });
+  const onlineElement = new FakeElement('button', {
+    get: '/online-trigger',
+    trigger: 'online',
+  });
+
+  registerElement(element);
+  registerElement(onClickElement);
+  registerElement(onlineElement);
+
+  assert.equal(element.listeners.has('click'), true);
+  assert.equal(element.listeners.has(''), false);
+  assert.equal(onClickElement.listeners.has('click'), true);
+  assert.equal(onlineElement.listeners.has('online'), true);
+  assert.equal(onlineElement.listeners.has('line'), false);
+});
+
+test('registerElement clamps negative sequential and auto delays', async () => {
+  const timers = [];
+  globalThis.setTimeout = (callback, delayMs) => {
+    timers.push({ callback, delayMs });
+    return timers.length - 1;
+  };
+
+  let resolveFetch;
+  globalThis.fetch = async () => new Promise(resolve => {
+    resolveFetch = () => resolve(new Response(''));
+  });
+  const sequentialElement = new FakeElement('button', {
+    get: '/negative-sequential',
+    sequential: '-25',
+  });
+
+  registerElement(sequentialElement);
+  await sequentialElement.listeners.get('click')({
+    type: 'click',
+    target: sequentialElement,
+    currentTarget: sequentialElement,
+  });
+
+  assert.equal(sequentialElement._htmlexSequentialDelay, 0);
+  resolveFetch();
+  await delay(0);
+
+  const autoElement = new FakeElement('button', {
+    get: '/negative-auto',
+    auto: '-10',
+  });
+  registerElement(autoElement);
+
+  assert.equal(timers.at(-1).delayMs, 0);
+});
+
+test('registerElement ignores partial numeric timer and rate-limit attributes', () => {
+  const timers = [];
+  globalThis.setTimeout = (callback, delayMs) => {
+    timers.push({ callback, delayMs });
+    return timers.length - 1;
+  };
+  globalThis.clearTimeout = () => {};
+
+  const timerElement = new FakeElement('div', {
+    timer: '50ms',
+    target: 'this(remove)',
+  });
+  registerElement(timerElement);
+
+  const actionElement = new FakeElement('button', {
+    get: '/partial-numeric',
+    debounce: '25ms',
+    throttle: '10ms',
+    poll: '75ms',
+    repeat: '2abc',
+    auto: '30ms',
+  });
+  registerElement(actionElement);
+
+  assert.equal(timerElement.hasAttribute('data-timer-set'), false);
+  assert.equal(actionElement.listeners.has('click'), true);
+  assert.deepEqual(timers.map(timer => timer.delayMs), []);
+});
+
+test('registerElement tolerates non-constructor Event and Element globals for synthetic triggers', async () => {
+  globalThis.Event = {};
+  globalThis.Element = {};
+  globalThis.setTimeout = (callback) => {
+    callback();
+    return 1;
+  };
+  const output = new FakeElement('section');
+  document.querySelector = selector => selector === '#syntheticOut' ? output : null;
+  document.querySelectorAll = selector => selector === '#syntheticOut' ? [output] : [];
+  globalThis.fetch = async () => new Response('Synthetic event response');
+  const element = new FakeElement('button', {
+    get: '/synthetic-event',
+    auto: 'true',
+    target: '#syntheticOut(append)',
+  });
+
+  assert.doesNotThrow(() => registerElement(element));
+  await delay(0);
+
+  assert.deepEqual(output.inserted, [{
+    position: 'beforeend',
+    content: 'Synthetic event response',
+  }]);
+});
+
+test('registerElement works without AbortController or MutationObserver helpers', async () => {
+  delete globalThis.AbortController;
+  delete globalThis.MutationObserver;
+  const timers = [];
+  const intervals = [];
+  globalThis.setTimeout = (callback, delayMs) => {
+    timers.push({ callback, delayMs, cleared: false });
+    if (delayMs === 0) callback();
+    return timers.length - 1;
+  };
+  globalThis.clearTimeout = (timerId) => {
+    timers[timerId].cleared = true;
+  };
+  globalThis.setInterval = (callback, intervalMs) => {
+    intervals.push({ callback, intervalMs, cleared: false });
+    return intervals.length - 1;
+  };
+  globalThis.clearInterval = (intervalId) => {
+    intervals[intervalId].cleared = true;
+  };
+  const output = new FakeElement('section');
+  document.querySelector = selector => selector === '#fallbackOut' ? output : null;
+  document.querySelectorAll = selector => selector === '#fallbackOut' ? [output] : [];
+  const fetchCalls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    fetchCalls.push({ url, hasSignal: Object.hasOwn(options, 'signal') });
+    return new Response(`Response ${fetchCalls.length}`);
+  };
+
+  const actionElement = new FakeElement('button', {
+    get: '/no-abort-controller',
+    target: '#fallbackOut(append)',
+  });
+  registerElement(actionElement);
+  await actionElement.listeners.get('click')({
+    type: 'click',
+    target: actionElement,
+    currentTarget: actionElement,
+  });
+  await delay(0);
+
+  const pollingElement = new FakeElement('button', {
+    get: '/no-mutation-poll',
+    poll: '100',
+    repeat: '1',
+    target: '#fallbackOut(append)',
+  });
+  registerElement(pollingElement);
+  intervals[0].callback();
+  await delay(0);
+
+  const timerElement = new FakeElement('div', {
+    timer: '25',
+    target: 'this(remove)',
+  });
+  registerElement(timerElement);
+
+  assert.deepEqual(fetchCalls.map(call => call.hasSignal), [false, false]);
+  assert.equal(pollingElement._htmlexPollRemovalObserver, undefined);
+  assert.equal(timerElement.hasAttribute('data-timer-set'), true);
+});
+
+test('registerElement tolerates hostile events and listener registration failures', async () => {
+  const calls = [];
+  const cleanup = registerSignalListener('unit:hostile-event', () => calls.push('published'));
+  const publishElement = new FakeElement('form', {
+    publish: 'unit:hostile-event',
+  });
+
+  try {
+    registerElement(publishElement);
+    await assert.doesNotReject(() => publishElement.listeners.get('submit')({
+      get type() {
+        throw new Error('type unavailable');
+      },
+      get target() {
+        throw new Error('target unavailable');
+      },
+      get currentTarget() {
+        throw new Error('current target unavailable');
+      },
+      get defaultPrevented() {
+        throw new Error('default prevented unavailable');
+      },
+      preventDefault() {
+        throw new Error('prevent denied');
+      },
+    }));
+    assert.deepEqual(calls, ['published']);
+
+    const listenerHostile = new FakeElement('button', {
+      publish: 'unit:hostile-event',
+    });
+    listenerHostile.addEventListener = () => {
+      throw new Error('listener denied');
+    };
+    listenerHostile.removeEventListener = () => {
+      throw new Error('remove listener denied');
+    };
+
+    assert.doesNotThrow(() => registerElement(listenerHostile));
+    assert.doesNotThrow(() => registerElement(listenerHostile));
+  } finally {
+    cleanup();
+  }
+});
+
+test('registerElement handles missing timer APIs without breaking registration', async () => {
+  delete globalThis.setTimeout;
+  delete globalThis.clearTimeout;
+  delete globalThis.setInterval;
+  delete globalThis.clearInterval;
+  const output = new FakeElement('section');
+  document.querySelector = selector => selector === '#noTimerOut' ? output : null;
+  document.querySelectorAll = selector => selector === '#noTimerOut' ? [output] : [];
+  const fetchCalls = [];
+  globalThis.fetch = async (url) => {
+    fetchCalls.push(url);
+    return new Response(`No timer response ${fetchCalls.length}`);
+  };
+
+  const actionElement = new FakeElement('button', {
+    get: '/no-timeout-action',
+    target: '#noTimerOut(append)',
+  });
+  registerElement(actionElement);
+  await actionElement.listeners.get('click')({
+    type: 'click',
+    target: actionElement,
+    currentTarget: actionElement,
+  });
+  await delay(0);
+
+  const timerElement = new FakeElement('div', {
+    timer: '25',
+    target: 'this(remove)',
+  });
+  assert.doesNotThrow(() => registerElement(timerElement));
+
+  const pollingElement = new FakeElement('button', {
+    get: '/no-interval-poll',
+    poll: '100',
+    target: '#noTimerOut(append)',
+  });
+  assert.doesNotThrow(() => registerElement(pollingElement));
+
+  assert.deepEqual(fetchCalls, ['/no-timeout-action']);
+  assert.equal(output.inserted[0].content, 'No timer response 1');
+  assert.equal(timerElement.hasAttribute('data-timer-set'), false);
+  assert.equal(pollingElement._htmlexPollIntervalId, undefined);
+});
+
+test('registerElement falls back when IntersectionObserver setup fails', async () => {
+  const output = new FakeElement('section');
+  document.querySelector = selector => selector === '#lazyFallbackOut' ? output : null;
+  document.querySelectorAll = selector => selector === '#lazyFallbackOut' ? [output] : [];
+  globalThis.fetch = async () => new Response('Lazy fallback response');
+  class ThrowingIntersectionObserver {
+    constructor() {}
+
+    observe() {
+      throw new Error('observe denied');
+    }
+
+    disconnect() {
+      throw new Error('disconnect denied');
+    }
+  }
+  globalThis.IntersectionObserver = ThrowingIntersectionObserver;
+
+  const element = new FakeElement('button', {
+    get: '/lazy-fallback',
+    auto: 'lazy',
+    target: '#lazyFallbackOut(append)',
+  });
+
+  assert.doesNotThrow(() => registerElement(element));
+  await delay(0);
+
+  assert.equal(output.inserted[0].content, 'Lazy fallback response');
 });
 
 test('registerElement wires method actions through fetch and target updates', async () => {
@@ -575,6 +998,63 @@ test('sequential queue failures reset processing state for later recovery', asyn
   assert.equal(element._htmlexSequentialUpdates?.length ?? 0, 0);
 });
 
+test('registerElement queues sequential actions without relying on queue push', async () => {
+  let resolveFetch;
+  globalThis.fetch = async () => new Promise(resolve => {
+    resolveFetch = () => resolve(new Response('Queued without push'));
+  });
+  const element = new FakeElement('button', {
+    get: '/sequential-without-push',
+    sequential: '1',
+  });
+  element._htmlexSequentialQueue = [];
+  element._htmlexSequentialQueue.push = () => {
+    throw new Error('push denied');
+  };
+  element._htmlexSequentialQueueCursor = 0;
+  element._htmlexSequentialProcessing = false;
+
+  registerElement(element);
+  await element.listeners.get('click')({
+    type: 'click',
+    target: element,
+    currentTarget: element,
+  });
+
+  assert.equal(element._htmlexSequentialQueue.length, 1);
+  resolveFetch();
+  await delay(5);
+});
+
+test('unregisterElement tolerates hostile sequential cleanup collections', () => {
+  let aborted = false;
+  let clearedTimers = 0;
+  globalThis.clearTimeout = () => {
+    clearedTimers += 1;
+  };
+  const abortControllers = new Set([{
+    abort() {
+      aborted = true;
+    },
+  }]);
+  abortControllers.clear = () => {
+    throw new Error('controller clear denied');
+  };
+  const delayedSignalTimers = new Set([123]);
+  delayedSignalTimers.clear = () => {
+    throw new Error('timer clear denied');
+  };
+  const element = new FakeElement('button', { get: '/cleanup-hostile' });
+
+  registerElement(element);
+  element._htmlexSequentialAbortControllers = abortControllers;
+  element._htmlexDelayedSignalTimers = delayedSignalTimers;
+
+  assert.doesNotThrow(() => unregisterElement(element));
+  assert.equal(aborted, true);
+  assert.equal(clearedTimers, 1);
+});
+
 test('registerElement handles subscribe-triggered API actions and cleanup on removal', async () => {
   const output = new FakeElement('section');
   document.querySelector = selector => selector === '#subOut' ? output : null;
@@ -624,6 +1104,112 @@ test('initHTMLeX registers existing controls and DOM-updated descendants', () =>
   assert.equal(FakeMutationObserver.instances.length, 1);
   assert.equal(FakeMutationObserver.instances[0].target, document.body);
   assert.equal(window.__htmlexObserver, FakeMutationObserver.instances[0]);
+});
+
+test('initHTMLeX tolerates hostile document listener cleanup and DOM update events', () => {
+  FakeMutationObserver.instances = [];
+  globalThis.MutationObserver = FakeMutationObserver;
+  const previousObserver = {
+    disconnect() {
+      throw new Error('disconnect denied');
+    },
+  };
+  let domUpdatedHandler;
+  globalThis.window = {
+    __htmlexObserver: previousObserver,
+    __htmlexDomUpdatedHandler() {},
+  };
+  document.querySelectorAll = () => [];
+  document.removeEventListener = () => {
+    throw new Error('remove listener denied');
+  };
+  document.addEventListener = (_eventName, callback) => {
+    domUpdatedHandler = callback;
+    throw new Error('add listener denied');
+  };
+
+  assert.doesNotThrow(() => initHTMLeX());
+  assert.equal(FakeMutationObserver.instances.length, 1);
+  assert.equal(window.__htmlexObserver, FakeMutationObserver.instances[0]);
+
+  assert.doesNotThrow(() => domUpdatedHandler({
+    get detail() {
+      throw new Error('detail denied');
+    },
+  }));
+});
+
+test('initHTMLeX exits cleanly when browser DOM APIs are unavailable', () => {
+  delete globalThis.window;
+  delete globalThis.document;
+  delete globalThis.MutationObserver;
+
+  assert.doesNotThrow(() => initHTMLeX());
+});
+
+test('initHTMLeX observer cleanup tolerates hostile removed subtrees', () => {
+  FakeMutationObserver.instances = [];
+  globalThis.MutationObserver = FakeMutationObserver;
+  const removed = new FakeElement('section', { get: '/removed' });
+  removed.querySelectorAll = () => {
+    throw new Error('subtree unavailable');
+  };
+  document.querySelectorAll = () => [];
+  document.addEventListener = () => {};
+  document.removeEventListener = () => {};
+
+  registerElement(removed);
+  initHTMLeX();
+  removed.connected = false;
+
+  assert.doesNotThrow(() => {
+    FakeMutationObserver.instances.at(-1).callback([{
+      type: 'childList',
+      removedNodes: [removed],
+      addedNodes: [],
+    }]);
+  });
+  assert.equal(removed.hasAttribute('data-htmlex-registered'), false);
+});
+
+test('initHTMLeX tolerates hostile initial scans and attribute mutation matches', () => {
+  FakeMutationObserver.instances = [];
+  globalThis.MutationObserver = FakeMutationObserver;
+  const registered = new FakeElement('button', { get: '/existing' });
+  document.querySelectorAll = () => {
+    throw new Error('initial scan unavailable');
+  };
+  document.addEventListener = () => {};
+  document.removeEventListener = () => {};
+
+  registerElement(registered);
+  registered.matches = () => {
+    throw new Error('matches unavailable');
+  };
+
+  assert.doesNotThrow(() => initHTMLeX());
+  assert.doesNotThrow(() => {
+    FakeMutationObserver.instances.at(-1).callback([{
+      type: 'attributes',
+      target: registered,
+    }]);
+  });
+  assert.equal(registered.hasAttribute('data-htmlex-registered'), false);
+});
+
+test('initHTMLeX exits cleanly when MutationObserver construction fails', () => {
+  class ThrowingMutationObserver {
+    constructor() {
+      throw new Error('observer unavailable');
+    }
+  }
+  globalThis.MutationObserver = ThrowingMutationObserver;
+  document.querySelectorAll = () => [];
+  document.addEventListener = () => {};
+  document.removeEventListener = () => {};
+
+  assert.doesNotThrow(() => initHTMLeX());
+  assert.equal(window.__htmlexObserver, undefined);
 });
 
 test('registerElement polling respects repeat limits and clears removal observers', async () => {
@@ -701,6 +1287,14 @@ test('registerElement auto modes handle false, delayed, prefetch, and lazy obser
   await delay(0);
   assert.equal(fetchCount, 0);
 
+  const immediate = new FakeElement('button', {
+    get: '/immediate-auto',
+    auto: 'true',
+    target: '#autoOut(append)',
+  });
+  registerElement(immediate);
+  await delay(0);
+
   const delayed = new FakeElement('button', {
     get: '/delayed-auto',
     auto: '25',
@@ -731,8 +1325,8 @@ test('registerElement auto modes handle false, delayed, prefetch, and lazy obser
   ], FakeIntersectionObserver.instances[0]);
   await delay(0);
 
-  assert.equal(fetchCount, 3);
-  assert.deepEqual(output.inserted.map(entry => entry.content), ['Auto 1', 'Auto 2', 'Auto 3']);
+  assert.equal(fetchCount, 4);
+  assert.deepEqual(output.inserted.map(entry => entry.content), ['Auto 1', 'Auto 2', 'Auto 3', 'Auto 4']);
   assert.equal(FakeIntersectionObserver.instances[0].disconnected, true);
   assert.equal(lazy._htmlexLazyObserver, null);
 });
@@ -758,6 +1352,31 @@ test('initHTMLeX mutation observer registers child nodes and cleans removed attr
 
   assert.equal(added.getAttribute('data-htmlex-registered'), 'true');
   assert.equal(registered.hasAttribute('data-htmlex-registered'), false);
+});
+
+test('initHTMLeX mutation observer cleans removed registered subtrees', () => {
+  FakeMutationObserver.instances = [];
+  globalThis.MutationObserver = FakeMutationObserver;
+  const child = new FakeElement('button', { get: '/child' });
+  const registered = new FakeElement('button', { get: '/existing' }, [child]);
+  document.querySelectorAll = () => [registered, child];
+  document.addEventListener = () => {};
+  document.removeEventListener = () => {};
+
+  initHTMLeX();
+  const observer = FakeMutationObserver.instances.at(-1);
+
+  assert.equal(registered.listeners.has('click'), true);
+  assert.equal(child.listeners.has('click'), true);
+
+  registered.connected = false;
+  child.connected = false;
+  observer.callback([{ type: 'childList', addedNodes: [], removedNodes: [registered] }]);
+
+  assert.equal(registered.hasAttribute('data-htmlex-registered'), false);
+  assert.equal(child.hasAttribute('data-htmlex-registered'), false);
+  assert.equal(registered.listeners.size, 0);
+  assert.equal(child.listeners.size, 0);
 });
 
 test('initHTMLeX processes every attribute mutation in one observer batch', () => {

@@ -30,13 +30,55 @@ import {
   endResponse,
   endServerError,
   sendFragmentResponse,
+  sendTextResponse,
   sendServerError,
+  setResponseHeader,
   writeFragmentResponse,
 } from './responses.js';
 import { logRequestError } from '../serverLogger.js';
 
+const FALLBACK_ISO_TIMESTAMP = '1970-01-01T00:00:00.000Z';
+const FALLBACK_CLOCK_TIME = 'now';
+
+function safeString(value, fallback = '') {
+  try {
+    return String(value ?? fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+function getCurrentTimestamp() {
+  try {
+    const timestamp = Date.now();
+    return Number.isSafeInteger(timestamp) ? timestamp : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function formatIsoTimestamp() {
+  try {
+    return new Date().toISOString();
+  } catch {
+    return FALLBACK_ISO_TIMESTAMP;
+  }
+}
+
+function formatClockTime() {
+  try {
+    return new Date().toLocaleTimeString();
+  } catch {
+    return FALLBACK_CLOCK_TIME;
+  }
+}
+
+function normalizeItemCount(count) {
+  return Number.isSafeInteger(count) && count >= 0 && count <= 100 ? count : 5;
+}
+
 function responseDelay(ms) {
-  return process.env.HTMLEX_TEST_FAST === '1' ? Math.min(ms, 25) : ms;
+  return safeString(process.env.HTMLEX_TEST_FAST).trim() === '1' ? Math.min(ms, 25) : ms;
 }
 
 function waitForResponseDelay(ms) {
@@ -44,8 +86,9 @@ function waitForResponseDelay(ms) {
 }
 
 function renderLoadMoreItems(count = 5) {
-  const baseTimestamp = Date.now();
-  return Array.from({ length: count }, (_, index) =>
+  const itemCount = normalizeItemCount(count);
+  const baseTimestamp = getCurrentTimestamp();
+  return Array.from({ length: itemCount }, (_, index) =>
     render(div({ class: 'surface-muted p-3 small' }, `Item ${baseTimestamp + index}`))
   ).join('');
 }
@@ -172,7 +215,9 @@ export async function incrementCounterDemoInit(req, res) {
  */
 export async function incrementCounter(req, res) {
   try {
-    clickerCounter++;
+    clickerCounter = Number.isSafeInteger(clickerCounter) && clickerCounter < Number.MAX_SAFE_INTEGER
+      ? clickerCounter + 1
+      : 1;
     sendFragmentResponse(res, '#counterDisplay(innerHTML)', renderCounter(clickerCounter));
   } catch (error) {
     logRequestError(req, 'Failed to increment counter demo.', error);
@@ -273,15 +318,13 @@ export async function sequentialDemoInit(req, res) {
 export async function sequentialNext(req, res) {
   try {
     await waitForResponseDelay(1000);
-    const timestamp = new Date().toISOString();
+    const timestamp = formatIsoTimestamp();
     const contentNode = div({}, timestamp);
     const htmlContent = render(contentNode);
     writeFragmentResponse(res, '#sequentialOutput(append)', htmlContent);
   } catch (error) {
     logRequestError(req, 'Failed to append sequential update.', error);
-    if (!res.headersSent) {
-      res.status(500).write('Internal server error');
-    }
+    endServerError(res);
   } finally {
     endResponse(res);
   }
@@ -301,7 +344,7 @@ export async function sequentialNext(req, res) {
 async function processStep(step, req, res) {
   try {
     await waitForResponseDelay(1000);
-    const message = `Step ${step}: Data received at ${new Date().toLocaleTimeString()}`;
+    const message = `Step ${step}: Data received at ${formatClockTime()}`;
     sendFragmentResponse(res, `#chainOutput(${step === 1 ? 'innerHTML' : 'append'})`, render(div({}, message)));
   } catch (error) {
     logRequestError(req, `Failed to render process step ${step}.`, error);
@@ -469,8 +512,11 @@ export async function sseDemoInit(req, res) {
  */
 export async function sseSubscribe(req, res) {
   try {
-    res.setHeader('Emit', 'sseUpdate');
-    res.send('');
+    if (!setResponseHeader(res, 'Emit', 'sseUpdate')) {
+      sendServerError(res, '');
+      return;
+    }
+    sendTextResponse(res, 200, '');
   } catch (error) {
     logRequestError(req, 'Failed to emit SSE subscription signal.', error);
     sendServerError(res, '');
@@ -544,7 +590,7 @@ export async function pollingDemoInit(req, res) {
 
 export async function pollingTick(req, res) {
   try {
-    const timestamp = new Date().toISOString();
+    const timestamp = formatIsoTimestamp();
     sendFragmentResponse(res, '#pollingOutput(innerHTML)', render(div({}, `Polling update at ${timestamp}`)));
   } catch (error) {
     logRequestError(req, 'Failed to render polling tick.', error);
@@ -569,4 +615,3 @@ export async function hoverMessage(req, res) {
     sendServerError(res);
   }
 }
-

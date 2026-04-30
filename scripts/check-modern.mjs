@@ -1,18 +1,12 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
-import path from 'node:path';
+import {
+  collectMatchingFiles,
+  DEFAULT_IGNORED_DIRS,
+  getRelativePath,
+  readFileWithContext,
+} from './check-utils.mjs';
 
 const ROOT = process.cwd();
 const CHECK_DIRS = ['.'];
-const IGNORED_DIRS = new Set([
-  '.git',
-  '.playwright',
-  'coverage',
-  'media',
-  'node_modules',
-  'playwright-report',
-  'test-results',
-  'tmp'
-]);
 const JAVASCRIPT_EXTENSIONS = new Set(['.cjs', '.js', '.mjs']);
 const BARE_NODE_BUILTINS = [
   'assert',
@@ -94,39 +88,8 @@ const NON_BROWSER_LEGACY_PATTERNS = [
   }
 ];
 
-async function collectJavaScriptFiles(directory) {
-  const entries = await readdir(directory, { withFileTypes: true });
-  entries.sort((left, right) => left.name.localeCompare(right.name));
-  const files = [];
-
-  for (const entry of entries) {
-    const entryPath = path.join(directory, entry.name);
-
-    if (entry.isDirectory()) {
-      if (!IGNORED_DIRS.has(entry.name)) {
-        files.push(...await collectJavaScriptFiles(entryPath));
-      }
-      continue;
-    }
-
-    if (entry.isFile() && JAVASCRIPT_EXTENSIONS.has(path.extname(entry.name))) {
-      files.push(entryPath);
-    }
-  }
-
-  return files;
-}
-
-async function isDirectory(directory) {
-  try {
-    return (await stat(directory)).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
 function isBrowserRuntimeFile(file) {
-  return path.relative(ROOT, file).replaceAll(path.sep, '/').startsWith('src/public/');
+  return getRelativePath(ROOT, file).startsWith('src/public/');
 }
 
 function findLegacyPatterns(file, source) {
@@ -152,21 +115,20 @@ function findLegacyPatterns(file, source) {
   return failures;
 }
 
-const files = [];
-for (const directoryName of CHECK_DIRS) {
-  const directory = path.join(ROOT, directoryName);
-  if (await isDirectory(directory)) {
-    files.push(...await collectJavaScriptFiles(directory));
-  }
-}
+const files = await collectMatchingFiles(ROOT, {
+  directories: CHECK_DIRS,
+  ignoredDirs: DEFAULT_IGNORED_DIRS,
+  extensions: JAVASCRIPT_EXTENSIONS
+});
 
 const failures = [];
 for (const file of files) {
-  const source = await readFile(file, 'utf8');
+  const relativePath = getRelativePath(ROOT, file);
+  const source = await readFileWithContext(file, 'utf8', relativePath);
   const fileFailures = findLegacyPatterns(file, source);
   for (const failure of fileFailures) {
     failures.push({
-      file: path.relative(ROOT, file),
+      file: relativePath,
       ...failure
     });
   }

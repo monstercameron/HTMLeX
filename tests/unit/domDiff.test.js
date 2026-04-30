@@ -4,6 +4,7 @@ import {
   diffAndUpdate,
   diffChildren,
   performInnerHTMLUpdate,
+  updateTarget,
 } from '../../src/public/src/dom.js';
 import { Logger } from '../../src/public/src/logger.js';
 
@@ -267,6 +268,132 @@ test('diffAndUpdate preserves focused input value and selection state', () => {
   assert.deepEqual(input.focusOptions, { preventScroll: true });
 });
 
+test('diffAndUpdate applies server values to inactive controls', () => {
+  const input = new FakeElementNode('input', { id: 'title', value: 'server-old' }, []);
+  input.value = 'stale client value';
+  input.checked = true;
+  const nextInput = new FakeElementNode('input', { id: 'title', value: 'server-new' }, []);
+  nextInput.value = 'server-new';
+  nextInput.checked = false;
+  globalThis.document = {
+    activeElement: null,
+  };
+
+  diffAndUpdate(input, nextInput);
+
+  assert.equal(input.getAttribute('value'), 'server-new');
+  assert.equal(input.value, 'server-new');
+  assert.equal(input.checked, false);
+});
+
+test('diffAndUpdate tolerates hostile node mutation and attribute APIs', () => {
+  const hostileAttributeValue = {
+    toString() {
+      throw new Error('attribute string denied');
+    },
+  };
+  const existingBehaviorElement = new FakeElementNode('button', { get: hostileAttributeValue }, []);
+  const nextBehaviorElement = new FakeElementNode('button', { get: '/safe' }, []);
+
+  assert.doesNotThrow(() => diffAndUpdate(existingBehaviorElement, nextBehaviorElement));
+
+  const keyedParent = new FakeElementNode('div', {}, []);
+  const keyedNext = new FakeElementNode('div', {}, [
+    new FakeElementNode('span', { id: hostileAttributeValue }, []),
+  ]);
+
+  assert.doesNotThrow(() => diffChildren(keyedParent, keyedNext));
+
+  const throwingReplacement = {
+    nodeType: Node.ELEMENT_NODE,
+    nodeName: 'SECTION',
+    cloneNode() {
+      throw new Error('clone denied');
+    },
+  };
+  const existingDifferentType = {
+    nodeType: Node.TEXT_NODE,
+    nodeName: '#text',
+    replaceWith() {
+      throw new Error('replace denied');
+    },
+  };
+
+  assert.doesNotThrow(() => diffAndUpdate(existingDifferentType, throwingReplacement));
+
+  const existingElement = new FakeElementNode('div', { stale: 'yes' }, []);
+  Object.defineProperty(existingElement, 'attributes', {
+    get() {
+      throw new Error('attributes denied');
+    },
+  });
+  Object.defineProperty(existingElement, 'childNodes', {
+    get() {
+      throw new Error('children denied');
+    },
+  });
+
+  assert.doesNotThrow(() => diffAndUpdate(existingElement, new FakeElementNode('div', { id: 'safe' }, [])));
+
+  const existingText = new FakeTextNode('old');
+  Object.defineProperty(existingText, 'textContent', {
+    get() {
+      return 'old';
+    },
+    set() {
+      throw new Error('text mutation denied');
+    },
+  });
+
+  assert.doesNotThrow(() => diffAndUpdate(existingText, new FakeTextNode('new')));
+});
+
+test('diffAndUpdate tolerates control restoration failures', () => {
+  const input = new FakeElementNode('input', { id: 'title', value: 'server-old' }, []);
+  input.value = 'draft value';
+  input.checked = true;
+  input.selectionStart = 2;
+  input.selectionEnd = 7;
+  input.selectionDirection = 'forward';
+  input.setSelectionRange = () => {
+    throw new Error('selection denied');
+  };
+  input.focus = () => {
+    throw new Error('focus denied');
+  };
+  globalThis.document = {
+    activeElement: input,
+  };
+
+  assert.doesNotThrow(() => {
+    diffAndUpdate(input, new FakeElementNode('input', { id: 'title', value: 'server-new' }, []));
+  });
+
+  const select = new FakeElementNode('select', {}, []);
+  const hostileOption = {};
+  Object.defineProperty(hostileOption, 'value', {
+    get() {
+      throw new Error('option value denied');
+    },
+  });
+  Object.defineProperty(hostileOption, 'selected', {
+    get() {
+      throw new Error('option selected denied');
+    },
+    set() {
+      throw new Error('option selected mutation denied');
+    },
+  });
+  select.options = [hostileOption];
+  globalThis.document = {
+    activeElement: select,
+  };
+
+  assert.doesNotThrow(() => {
+    diffAndUpdate(select, new FakeElementNode('select', {}, []));
+  });
+});
+
 test('performInnerHTMLUpdate skips identical content and diffs changed content', () => {
   const element = new FakeElementNode('div', {}, [new FakeTextNode('same')]);
   let rangeCreated = false;
@@ -290,4 +417,91 @@ test('performInnerHTMLUpdate skips identical content and diffs changed content',
   performInnerHTMLUpdate(element, 'changed');
   assert.equal(rangeCreated, true);
   assert.equal(element.innerHTML, 'changed');
+});
+
+test('performInnerHTMLUpdate and updateTarget fail closed for hostile mutation APIs', () => {
+  const hostileElement = {
+    get innerHTML() {
+      throw new Error('innerHTML read denied');
+    },
+    set innerHTML(_value) {
+      throw new Error('innerHTML write denied');
+    },
+  };
+  delete globalThis.document;
+
+  assert.doesNotThrow(() => performInnerHTMLUpdate(hostileElement, {
+    toString() {
+      throw new Error('html string denied');
+    },
+  }));
+
+  const target = {
+    parentElement: { id: 'parent' },
+    insertAdjacentHTML() {
+      throw new Error('insert denied');
+    },
+    remove() {
+      throw new Error('remove denied');
+    },
+    set outerHTML(_value) {
+      throw new Error('outerHTML denied');
+    },
+  };
+  globalThis.document = {
+    body: { id: 'body' },
+    querySelectorAll() {
+      return [target];
+    },
+  };
+
+  assert.doesNotThrow(() => updateTarget({ selector: '#target', strategy: 'append' }, '<b>append</b>'));
+  assert.doesNotThrow(() => updateTarget({ selector: '#target', strategy: 'before' }, '<b>before</b>'));
+  assert.doesNotThrow(() => updateTarget({ selector: '#target', strategy: 'remove' }, ''));
+  assert.doesNotThrow(() => updateTarget({ selector: '#target', strategy: 'outerHTML' }, '<section></section>'));
+  assert.doesNotThrow(() => updateTarget({ selector: '#target', strategy: 'unknown' }, '<p>fallback</p>'));
+
+  const hostileInstruction = {};
+  Object.defineProperty(hostileInstruction, 'selector', {
+    get() {
+      throw new Error('target selector denied');
+    },
+  });
+  Object.defineProperty(hostileInstruction, 'strategy', {
+    get() {
+      throw new Error('target strategy denied');
+    },
+  });
+  const hostileOptions = {};
+  Object.defineProperty(hostileOptions, 'forceResolvedElement', {
+    get() {
+      throw new Error('force resolved denied');
+    },
+  });
+
+  assert.doesNotThrow(() => updateTarget(hostileInstruction, {
+    toString() {
+      throw new Error('content string denied');
+    },
+  }, target, hostileOptions));
+});
+
+test('performInnerHTMLUpdate preserves intentional surrounding whitespace', () => {
+  const element = new FakeElementNode('div', {}, [new FakeTextNode('same')]);
+  globalThis.document = {
+    createRange() {
+      return {
+        selectNodeContents(node) {
+          this.node = node;
+        },
+        createContextualFragment(html) {
+          return createFragment([new FakeTextNode(html)]);
+        },
+      };
+    },
+  };
+
+  performInnerHTMLUpdate(element, '  padded  ');
+
+  assert.equal(element.innerHTML, '  padded  ');
 });

@@ -19,7 +19,10 @@ export const HTMLEX_ATTRIBUTE_NAMES = [
   'loading', 'onerror', 'extras', 'push', 'pull', 'path',
   'history', 'onbefore', 'onbeforeswap', 'onafterswap', 'onafter'
 ];
-const HTMLEX_MARKUP_PATTERN = /\s(?:get|post|put|delete|patch|socket|publish|timer)\b/i;
+const HTMLEX_MARKUP_PATTERN = new RegExp(
+  `\\s(?:${HTMLEX_ATTRIBUTE_NAMES.map(escapeRegExp).join('|')})(?=[\\s=>/])`,
+  'i'
+);
 const STRATEGY_BY_LOWERCASE = {
   innerhtml: 'innerHTML',
   outerhtml: 'outerHTML',
@@ -29,27 +32,188 @@ const STRATEGY_BY_LOWERCASE = {
   after: 'after',
   remove: 'remove'
 };
+const ELEMENT_NODE_TYPE = 1;
+const TEXT_NODE_TYPE = 3;
+
+function safeString(value, fallback = '') {
+  try {
+    return String(value ?? fallback);
+  } catch (error) {
+    Logger.system.warn('[DOM] Failed to coerce value to string.', error);
+    return fallback;
+  }
+}
+
+function getRuntimeDocument() {
+  try {
+    return typeof document === 'undefined' ? globalThis.document : document;
+  } catch (error) {
+    Logger.system.warn('[DOM] Failed to read document.', error);
+    return null;
+  }
+}
+
+function getNodeField(node, fieldName, fallback = undefined) {
+  try {
+    return node?.[fieldName] ?? fallback;
+  } catch (error) {
+    Logger.system.warn(`[DOM] Failed to read node field "${fieldName}".`, error);
+    return fallback;
+  }
+}
+
+function getTargetField(target, fieldName, fallback = undefined) {
+  try {
+    return target?.[fieldName] ?? fallback;
+  } catch (error) {
+    Logger.system.warn(`[DOM] Failed to read target field "${fieldName}".`, error);
+    return fallback;
+  }
+}
+
+function setNodeField(node, fieldName, value) {
+  try {
+    node[fieldName] = value;
+    return true;
+  } catch (error) {
+    Logger.system.warn(`[DOM] Failed to set node field "${fieldName}".`, error);
+    return false;
+  }
+}
+
+function getNodeList(node, fieldName) {
+  try {
+    return [...(node?.[fieldName] || [])];
+  } catch (error) {
+    Logger.system.warn(`[DOM] Failed to enumerate node ${fieldName}.`, error);
+    return [];
+  }
+}
+
+function getElementAttributes(element) {
+  return getNodeList(element, 'attributes');
+}
+
+function getChildNodes(node) {
+  return getNodeList(node, 'childNodes');
+}
+
+function hasElementAttribute(element, attributeName) {
+  try {
+    return Boolean(element?.hasAttribute?.(attributeName));
+  } catch (error) {
+    Logger.system.warn(`[DOM] Failed to check attribute "${attributeName}".`, error);
+    return false;
+  }
+}
+
+function getElementAttribute(element, attributeName) {
+  try {
+    return element?.getAttribute?.(attributeName) ?? null;
+  } catch (error) {
+    Logger.system.warn(`[DOM] Failed to read attribute "${attributeName}".`, error);
+    return null;
+  }
+}
+
+function setElementAttribute(element, attributeName, value) {
+  try {
+    element?.setAttribute?.(attributeName, value);
+  } catch (error) {
+    Logger.system.warn(`[DOM] Failed to set attribute "${attributeName}".`, error);
+  }
+}
+
+function removeElementAttribute(element, attributeName) {
+  try {
+    element?.removeAttribute?.(attributeName);
+  } catch (error) {
+    Logger.system.warn(`[DOM] Failed to remove attribute "${attributeName}".`, error);
+  }
+}
+
+function cloneNodeSafely(node, deep = false) {
+  try {
+    return node?.cloneNode?.(deep) || null;
+  } catch (error) {
+    Logger.system.warn('[DOM] Failed to clone node.', error);
+    return null;
+  }
+}
+
+function replaceNodeSafely(existingNode, replacementNode) {
+  try {
+    if (typeof existingNode?.replaceWith !== 'function') return false;
+    existingNode.replaceWith(replacementNode);
+    return true;
+  } catch (error) {
+    Logger.system.warn('[DOM] Failed to replace node.', error);
+    return false;
+  }
+}
+
+function removeNodeSafely(node) {
+  try {
+    node?.remove?.();
+  } catch (error) {
+    Logger.system.warn('[DOM] Failed to remove node.', error);
+  }
+}
+
+function getInnerHTML(element) {
+  return getNodeField(element, 'innerHTML', '');
+}
+
+function setInnerHTML(element, html) {
+  return setNodeField(element, 'innerHTML', html);
+}
+
+function getNodeType(name, fallback) {
+  try {
+    return getTargetField(getTargetField(globalThis, 'Node'), name, fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+function escapeRegExp(value) {
+  return safeString(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 function hasHTMLeXBehavior(node) {
-  return node.nodeType === Node.ELEMENT_NODE && HTMLEX_ATTRIBUTE_NAMES.some(attributeName => node.hasAttribute(attributeName));
+  return isElementNode(node) && HTMLEX_ATTRIBUTE_NAMES.some(attributeName => {
+    return hasElementAttribute(node, attributeName);
+  });
 }
 
 function getHTMLeXBehaviorSignature(element) {
   return HTMLEX_ATTRIBUTE_NAMES
-    .map(attributeName => `${attributeName}=${element.getAttribute(attributeName) ?? ''}`)
+    .map(attributeName => {
+      const value = getElementAttribute(element, attributeName);
+      return `${attributeName}=${safeString(value)}`;
+    })
     .join('|');
 }
 
 function isElementNode(node) {
-  return node?.nodeType === Node.ELEMENT_NODE;
+  return getNodeField(node, 'nodeType') === getNodeType('ELEMENT_NODE', ELEMENT_NODE_TYPE);
+}
+
+function isTextNode(node) {
+  return getNodeField(node, 'nodeType') === getNodeType('TEXT_NODE', TEXT_NODE_TYPE);
 }
 
 function getNodeKey(node) {
   if (!isElementNode(node)) return '';
 
   for (const attributeName of ['id', 'data-key', 'key', 'data-htmlex-key']) {
-    const value = node.getAttribute(attributeName);
-    if (value) return `${attributeName}:${value}`;
+    let value;
+    try {
+      value = getElementAttribute(node, attributeName);
+    } catch {
+      value = null;
+    }
+    if (value) return `${attributeName}:${safeString(value)}`;
   }
 
   return '';
@@ -57,63 +221,95 @@ function getNodeKey(node) {
 
 function getActiveElement() {
   try {
-    return document?.activeElement || null;
+    return getRuntimeDocument()?.activeElement || null;
   } catch {
     return null;
   }
 }
 
+function getControlOptions(element) {
+  try {
+    return [...(element.options || [])];
+  } catch {
+    return [];
+  }
+}
+
 function captureControlState(element) {
-  const tagName = element.tagName;
+  const tagName = safeString(getNodeField(element, 'tagName', '')).toUpperCase();
   const isActive = getActiveElement() === element;
 
   if (tagName === 'INPUT' || tagName === 'TEXTAREA') {
     const state = {
       tagName,
       isActive,
-      value: element.value,
-      checked: element.checked,
+      value: getNodeField(element, 'value'),
+      checked: getNodeField(element, 'checked'),
     };
-    if (isActive && typeof element.selectionStart === 'number' && typeof element.selectionEnd === 'number') {
-      state.selectionStart = element.selectionStart;
-      state.selectionEnd = element.selectionEnd;
-      state.selectionDirection = element.selectionDirection;
+    const selectionStart = getNodeField(element, 'selectionStart');
+    const selectionEnd = getNodeField(element, 'selectionEnd');
+    if (isActive && typeof selectionStart === 'number' && typeof selectionEnd === 'number') {
+      state.selectionStart = selectionStart;
+      state.selectionEnd = selectionEnd;
+      state.selectionDirection = getNodeField(element, 'selectionDirection');
     }
     return state;
   }
 
   if (tagName === 'SELECT') {
+    const options = getControlOptions(element);
     return {
       tagName,
       isActive,
-      selectedValues: [...(element.options || [])]
-        .filter(option => option.selected)
-        .map(option => option.value),
+      selectedValues: options
+        .filter(option => getNodeField(option, 'selected', false))
+        .map(option => getNodeField(option, 'value', '')),
     };
   }
 
   if (tagName === 'VIDEO' || tagName === 'AUDIO') {
     return {
       tagName,
-      currentTime: element.currentTime,
-      muted: element.muted,
-      paused: element.paused,
-      playbackRate: element.playbackRate,
-      volume: element.volume,
+      currentTime: getNodeField(element, 'currentTime'),
+      muted: getNodeField(element, 'muted'),
+      paused: getNodeField(element, 'paused', true),
+      playbackRate: getNodeField(element, 'playbackRate'),
+      volume: getNodeField(element, 'volume'),
     };
   }
 
   return null;
 }
 
-function restoreControlState(element, state) {
-  if (!state || element.tagName !== state.tagName) return;
+function restoreControlState(element, state, newNode = null) {
+  if (!state || safeString(getNodeField(element, 'tagName', '')).toUpperCase() !== state.tagName) return;
+
+  const setControlProperty = (propertyName, value) => {
+    try {
+      element[propertyName] = value;
+    } catch {
+      // Some controls, such as file inputs, reject programmatic value assignment.
+    }
+  };
 
   if (state.tagName === 'INPUT' || state.tagName === 'TEXTAREA') {
-    if ('value' in element) element.value = state.value;
-    if ('checked' in element && state.checked !== undefined) element.checked = state.checked;
+    if (!state.isActive) {
+      const nextValue = 'value' in (newNode || {}) ? getNodeField(newNode, 'value') : getElementAttribute(newNode, 'value');
+      if (nextValue !== undefined && nextValue !== null && 'value' in (element || {})) {
+        setControlProperty('value', nextValue);
+      }
+      const nextChecked = 'checked' in (newNode || {})
+        ? getNodeField(newNode, 'checked')
+        : hasElementAttribute(newNode, 'checked');
+      if (nextChecked !== undefined && 'checked' in (element || {})) {
+        setControlProperty('checked', Boolean(nextChecked));
+      }
+      return;
+    }
+
+    if ('value' in (element || {})) setControlProperty('value', state.value);
+    if ('checked' in (element || {}) && state.checked !== undefined) setControlProperty('checked', state.checked);
     if (
-      state.isActive &&
       typeof element.setSelectionRange === 'function' &&
       typeof state.selectionStart === 'number' &&
       typeof state.selectionEnd === 'number'
@@ -127,9 +323,12 @@ function restoreControlState(element, state) {
   }
 
   if (state.tagName === 'SELECT') {
+    if (!state.isActive) return;
+
     const selectedValues = new Set(state.selectedValues || []);
-    for (const option of element.options || []) {
-      option.selected = selectedValues.has(option.value);
+    const options = getControlOptions(element);
+    for (const option of options) {
+      setNodeField(option, 'selected', selectedValues.has(getNodeField(option, 'value', '')));
     }
   }
 
@@ -146,23 +345,33 @@ function restoreControlState(element, state) {
         // Media properties can reject invalid values depending on ready state.
       }
     }
-    if (!state.paused && typeof element.play === 'function') {
-      element.play().catch?.(() => {});
+    if (!state.paused && typeof getNodeField(element, 'play') === 'function') {
+      try {
+        const playResult = element.play();
+        playResult?.catch?.(() => {});
+      } catch (error) {
+        Logger.system.warn('[DOM] Failed to resume media playback.', error);
+      }
     }
   }
 
-  if (state.isActive && typeof element.focus === 'function') {
+  if (state.isActive && typeof getNodeField(element, 'focus') === 'function') {
     try {
       element.focus({ preventScroll: true });
-    } catch {
-      element.focus();
+    } catch (error) {
+      Logger.system.warn('[DOM] Focus with preventScroll failed; retrying without options.', error);
+      try {
+        element.focus();
+      } catch (fallbackError) {
+        Logger.system.warn('[DOM] Failed to restore focus.', fallbackError);
+      }
     }
   }
 }
 
 function findKeyedChild(parent, key, fromIndex) {
   if (!key) return null;
-  const children = [...parent.childNodes];
+  const children = getChildNodes(parent);
   for (let index = fromIndex; index < children.length; index += 1) {
     if (getNodeKey(children[index]) === key) return children[index];
   }
@@ -172,11 +381,16 @@ function findKeyedChild(parent, key, fromIndex) {
 function moveChildBefore(parent, child, referenceNode) {
   if (child === referenceNode) return;
   if (typeof parent.insertBefore === 'function') {
-    parent.insertBefore(child, referenceNode || null);
-    return;
+    try {
+      parent.insertBefore(child, referenceNode || null);
+      return;
+    } catch (error) {
+      Logger.system.warn('[DOM] insertBefore failed while moving keyed child; falling back to childNodes splice.', error);
+    }
   }
 
-  const children = parent.childNodes;
+  const children = getNodeField(parent, 'childNodes');
+  if (!children || typeof children.indexOf !== 'function' || typeof children.splice !== 'function') return;
   const currentIndex = children.indexOf(child);
   if (currentIndex < 0) return;
   children.splice(currentIndex, 1);
@@ -184,8 +398,32 @@ function moveChildBefore(parent, child, referenceNode) {
   children.splice(nextIndex < 0 ? children.length : nextIndex, 0, child);
 }
 
+export function dispatchHTMLeXDOMUpdated(root) {
+  const runtimeDocument = getRuntimeDocument();
+  if (typeof runtimeDocument?.dispatchEvent !== 'function') return;
+
+  try {
+    if (typeof CustomEvent === 'function') {
+      runtimeDocument.dispatchEvent(new CustomEvent('htmlex:dom-updated', {
+        detail: { root }
+      }));
+      return;
+    }
+
+    const event = typeof runtimeDocument.createEvent === 'function'
+      ? runtimeDocument.createEvent('CustomEvent')
+      : null;
+    if (event?.initCustomEvent) {
+      event.initCustomEvent('htmlex:dom-updated', false, false, { root });
+      runtimeDocument.dispatchEvent(event);
+    }
+  } catch (error) {
+    Logger.system.warn('[DOM] Failed to dispatch HTMLeX DOM update event.', error);
+  }
+}
+
 export function hasHTMLeXMarkup(content) {
-  return HTMLEX_MARKUP_PATTERN.test(String(content ?? ''));
+  return HTMLEX_MARKUP_PATTERN.test(safeString(content));
 }
 
 /**
@@ -195,7 +433,7 @@ export function hasHTMLeXMarkup(content) {
  */
 export function parseTargets(targetAttr) {
   Logger.system.debug("[DOM] Parsing target attribute:", targetAttr);
-  const input = String(targetAttr ?? '').trim();
+  const input = safeString(targetAttr).trim();
   if (!input) {
     return [];
   }
@@ -218,19 +456,23 @@ export function parseTargets(targetAttr) {
   return targets;
 }
 
-export function querySelectorSafe(selector, root = document) {
+function getDefaultQueryRoot() {
+  return getRuntimeDocument();
+}
+
+export function querySelectorSafe(selector, root = getDefaultQueryRoot()) {
   try {
-    return root.querySelector(selector);
+    return root?.querySelector?.(selector) || null;
   } catch (error) {
     Logger.system.warn(`[DOM] Invalid selector "${selector}"`, error);
     return null;
   }
 }
 
-export function querySelectorAllResult(selector, root = document) {
+export function querySelectorAllResult(selector, root = getDefaultQueryRoot()) {
   try {
     return {
-      matches: [...root.querySelectorAll(selector)],
+      matches: [...(root?.querySelectorAll?.(selector) || [])],
       valid: true,
     };
   } catch (error) {
@@ -242,7 +484,7 @@ export function querySelectorAllResult(selector, root = document) {
   }
 }
 
-export function querySelectorAllSafe(selector, root = document) {
+export function querySelectorAllSafe(selector, root = getDefaultQueryRoot()) {
   return querySelectorAllResult(selector, root).matches;
 }
 
@@ -253,56 +495,63 @@ export function querySelectorAllSafe(selector, root = document) {
  */
 export function diffAndUpdate(existingNode, newNode) {
   Logger.system.debug("[DOM] Diffing nodes:", existingNode, newNode);
+  if (!existingNode || !newNode) return;
   if (
-    existingNode.nodeType !== newNode.nodeType ||
-    (existingNode.nodeType === Node.ELEMENT_NODE && existingNode.nodeName !== newNode.nodeName)
+    getNodeField(existingNode, 'nodeType') !== getNodeField(newNode, 'nodeType') ||
+    (isElementNode(existingNode) && getNodeField(existingNode, 'nodeName') !== getNodeField(newNode, 'nodeName'))
   ) {
     Logger.system.debug("[DOM] Nodes differ in type or tag; replacing node.");
-    existingNode.replaceWith(newNode.cloneNode(true));
+    const clone = cloneNodeSafely(newNode, true);
+    if (clone) replaceNodeSafely(existingNode, clone);
     return;
   }
   if (
-    existingNode.nodeType === Node.ELEMENT_NODE &&
+    isElementNode(existingNode) &&
     (hasHTMLeXBehavior(existingNode) || hasHTMLeXBehavior(newNode)) &&
     getHTMLeXBehaviorSignature(existingNode) !== getHTMLeXBehaviorSignature(newNode)
   ) {
     Logger.system.debug("[DOM] HTMLeX behavior attributes changed; replacing node so it can be re-registered.");
-    existingNode.replaceWith(newNode.cloneNode(true));
+    const clone = cloneNodeSafely(newNode, true);
+    if (clone) replaceNodeSafely(existingNode, clone);
     return;
   }
-  if (existingNode.nodeType === Node.TEXT_NODE) {
-    if (existingNode.textContent !== newNode.textContent) {
+  if (isTextNode(existingNode)) {
+    const existingText = getNodeField(existingNode, 'textContent', '');
+    const newText = getNodeField(newNode, 'textContent', '');
+    if (existingText !== newText) {
       Logger.system.debug(
-        `[DOM] Updating text from "${existingNode.textContent}" to "${newNode.textContent}"`
+        `[DOM] Updating text from "${existingText}" to "${newText}"`
       );
-      existingNode.textContent = newNode.textContent;
+      setNodeField(existingNode, 'textContent', newText);
     }
     return;
   }
-  if (existingNode.nodeType === Node.ELEMENT_NODE) {
+  if (isElementNode(existingNode)) {
     const liveState = captureControlState(existingNode);
     Logger.system.debug("[DOM] Diffing attributes for element:", existingNode);
-    const existingAttrs = existingNode.attributes;
-    const newAttrs = newNode.attributes;
+    const existingAttrs = getElementAttributes(existingNode);
+    const newAttrs = getElementAttributes(newNode);
     for (let i = existingAttrs.length - 1; i >= 0; i--) {
       const attribute = existingAttrs[i];
-      if (!newNode.hasAttribute(attribute.name)) {
+      if (!attribute?.name) continue;
+      if (!hasElementAttribute(newNode, attribute.name)) {
         Logger.system.debug(`[DOM] Removing attribute "${attribute.name}" from element:`, existingNode);
-        existingNode.removeAttribute(attribute.name);
+        removeElementAttribute(existingNode, attribute.name);
       }
     }
     for (let i = 0; i < newAttrs.length; i++) {
       const attribute = newAttrs[i];
-      if (existingNode.getAttribute(attribute.name) !== attribute.value) {
+      if (!attribute?.name) continue;
+      if (getElementAttribute(existingNode, attribute.name) !== attribute.value) {
         Logger.system.debug(
           `[DOM] Updating attribute "${attribute.name}" to "${attribute.value}" on element:`,
           existingNode
         );
-        existingNode.setAttribute(attribute.name, attribute.value);
+        setElementAttribute(existingNode, attribute.name, attribute.value);
       }
     }
     diffChildren(existingNode, newNode);
-    restoreControlState(existingNode, liveState);
+    restoreControlState(existingNode, liveState, newNode);
   }
 }
 
@@ -318,29 +567,41 @@ export function diffChildren(existingParent, newParent) {
     "with new element:",
     newParent
   );
-  const newChildren = [...newParent.childNodes];
+  const newChildren = getChildNodes(newParent);
   for (let i = 0; i < newChildren.length; i++) {
     const newChild = newChildren[i];
     const newKey = getNodeKey(newChild);
     const keyedChild = findKeyedChild(existingParent, newKey, i);
-    if (keyedChild && keyedChild !== existingParent.childNodes[i]) {
+    const existingChildren = getChildNodes(existingParent);
+    if (keyedChild && keyedChild !== existingChildren[i]) {
       Logger.system.debug("[DOM] Moving keyed child into position:", newKey);
-      moveChildBefore(existingParent, keyedChild, existingParent.childNodes[i] || null);
+      moveChildBefore(existingParent, keyedChild, existingChildren[i] || null);
     }
 
-    const existingChild = existingParent.childNodes[i];
+    const existingChild = getChildNodes(existingParent)[i];
     if (!existingChild && newChild) {
       Logger.system.debug("[DOM] Appending new child:", newChild);
-      existingParent.appendChild(newChild.cloneNode(true));
+      const clone = cloneNodeSafely(newChild, true);
+      if (clone) {
+        try {
+          existingParent.appendChild?.(clone);
+        } catch (error) {
+          Logger.system.warn('[DOM] Failed to append cloned child.', error);
+        }
+      }
     } else if (existingChild && newChild) {
       diffAndUpdate(existingChild, newChild);
     }
   }
 
-  while (existingParent.childNodes.length > newChildren.length) {
-    const extraChild = existingParent.childNodes[existingParent.childNodes.length - 1];
+  let existingChildren = getChildNodes(existingParent);
+  while (existingChildren.length > newChildren.length) {
+    const extraChild = existingChildren[existingChildren.length - 1];
     Logger.system.debug("[DOM] Removing extra child:", extraChild);
-    extraChild.remove();
+    removeNodeSafely(extraChild);
+    const nextChildren = getChildNodes(existingParent);
+    if (nextChildren.length === existingChildren.length) break;
+    existingChildren = nextChildren;
   }
   Logger.system.debug("[DOM] Completed diffing children for element:", existingParent);
 }
@@ -352,20 +613,82 @@ export function diffChildren(existingParent, newParent) {
  */
 export function performInnerHTMLUpdate(element, newHTML) {
   Logger.system.debug("[DOM] Performing innerHTML update on element:", element);
-  const currentHTML = element.innerHTML.trim();
-  const newHTMLTrimmed = newHTML.trim();
-  if (currentHTML === newHTMLTrimmed) {
+  const currentHTML = getInnerHTML(element);
+  const newHTMLString = safeString(newHTML);
+  if (currentHTML === newHTMLString) {
     Logger.system.debug("[DOM] No differences detected in innerHTML; skipping update.");
     return;
   }
+  const runtimeDocument = getRuntimeDocument();
+  if (typeof runtimeDocument?.createRange !== 'function') {
+    Logger.system.debug("[DOM] Range API unavailable; falling back to direct innerHTML update.");
+    setInnerHTML(element, newHTMLString);
+    return;
+  }
   Logger.system.debug("[DOM] Differences detected; performing partial update using diffing algorithm.");
-  const range = document.createRange();
-  range.selectNodeContents(element);
-  const newFragment = range.createContextualFragment(newHTMLTrimmed);
-  diffChildren(element, newFragment);
-  if (element.innerHTML.trim() !== newHTMLTrimmed) {
+  try {
+    const range = runtimeDocument.createRange();
+    range.selectNodeContents(element);
+    const newFragment = range.createContextualFragment(newHTMLString);
+    diffChildren(element, newFragment);
+  } catch (error) {
+    Logger.system.warn("[DOM] Diff update failed; falling back to direct innerHTML update.", error);
+    setInnerHTML(element, newHTMLString);
+    return;
+  }
+  if (getInnerHTML(element) !== newHTMLString) {
     Logger.system.debug("[DOM] Fallback: innerHTML mismatch after diffing; updating innerHTML directly.");
-    element.innerHTML = newHTMLTrimmed;
+    setInnerHTML(element, newHTMLString);
+  }
+}
+
+function getDocumentBodyFallback() {
+  return getRuntimeDocument()?.body || null;
+}
+
+function replaceOuterHTML(targetElement, contentString) {
+  const parent = getNodeField(targetElement, 'parentElement', null);
+  const runtimeDocument = getRuntimeDocument();
+
+  if (typeof runtimeDocument?.createRange === 'function') {
+    try {
+      const range = runtimeDocument.createRange();
+      range.selectNode(targetElement);
+      const fragment = range.createContextualFragment(contentString);
+      const newNodes = getChildNodes(fragment);
+      if (!newNodes.length) {
+        Logger.system.warn("[DOM] outerHTML update failed: no new nodes generated from content.");
+        return targetElement;
+      }
+
+      Logger.system.debug("[DOM] Replacing element with outerHTML strategy. New node count:", newNodes.length);
+      if (!replaceNodeSafely(targetElement, fragment)) {
+        throw new Error('replaceWith failed');
+      }
+      return parent || newNodes.find(isElementNode) || getDocumentBodyFallback() || targetElement;
+    } catch (error) {
+      Logger.system.warn("[DOM] Range outerHTML update failed; falling back to direct outerHTML update.", error);
+    }
+  }
+
+  if ('outerHTML' in (targetElement || {})) {
+    if (!setNodeField(targetElement, 'outerHTML', contentString)) {
+      return targetElement;
+    }
+    return parent || getDocumentBodyFallback() || targetElement;
+  }
+
+  Logger.system.warn("[DOM] outerHTML update failed: no Range API or outerHTML fallback is available.");
+  return targetElement;
+}
+
+function insertAdjacentHTMLSafely(targetElement, position, contentString) {
+  try {
+    targetElement?.insertAdjacentHTML?.(position, contentString);
+    return true;
+  } catch (error) {
+    Logger.system.warn(`[DOM] Failed to insert adjacent HTML at "${position}".`, error);
+    return false;
   }
 }
 
@@ -378,75 +701,65 @@ export function performInnerHTMLUpdate(element, newHTML) {
  * @param {boolean} [options.forceResolvedElement=false] - Use the resolved element without querying the selector again.
  */
 export function updateTarget(target, content, resolvedElement = null, options = {}) {
+  const contentString = safeString(content);
+  const selector = safeString(getTargetField(target, 'selector', '')).trim();
+  const normalizedSelector = selector.toLowerCase();
+  const strategy = safeString(getTargetField(target, 'strategy', 'innerHTML'), 'innerHTML') || 'innerHTML';
   Logger.system.debug(
     "[DOM] Updating target with instruction:",
     target,
     "and content length:",
-    content.length
+    contentString.length
   );
   const useResolvedElement = resolvedElement && (
-    options.forceResolvedElement ||
-    target.selector.trim().toLowerCase() === 'this'
+    getTargetField(options, 'forceResolvedElement', false) ||
+    normalizedSelector === 'this'
   );
   const elements = useResolvedElement
     ? [resolvedElement]
-    : querySelectorAllSafe(target.selector);
+    : querySelectorAllSafe(selector);
   for (const targetElement of elements) {
     let registrationRoot = targetElement;
     Logger.system.debug(
-      `[DOM] Updating element(s) matching "${target.selector}" using strategy "${target.strategy}"`,
+      `[DOM] Updating element(s) matching "${selector}" using strategy "${strategy}"`,
       targetElement
     );
-    switch (target.strategy) {
+    switch (strategy) {
       case 'innerHTML':
-        performInnerHTMLUpdate(targetElement, content);
+        performInnerHTMLUpdate(targetElement, contentString);
         break;
-      case 'outerHTML': {
-        const range = document.createRange();
-        range.selectNode(targetElement);
-        const fragment = range.createContextualFragment(content);
-        const newNodes = [...fragment.childNodes];
-        if (newNodes.length > 0) {
-          const parent = targetElement.parentElement;
-          Logger.system.debug("[DOM] Replacing element with outerHTML strategy. New node count:", newNodes.length);
-          targetElement.replaceWith(fragment);
-          registrationRoot = parent || newNodes.find(node => node.nodeType === Node.ELEMENT_NODE) || document.body;
-        } else {
-          Logger.system.warn("[DOM] outerHTML update failed: no new nodes generated from content.");
-        }
+      case 'outerHTML':
+        registrationRoot = replaceOuterHTML(targetElement, contentString);
         break;
-      }
       case 'append':
         Logger.system.debug("[DOM] Appending content to element:", targetElement);
-        targetElement.insertAdjacentHTML('beforeend', content);
+        insertAdjacentHTMLSafely(targetElement, 'beforeend', contentString);
         break;
       case 'prepend':
         Logger.system.debug("[DOM] Prepending content to element:", targetElement);
-        targetElement.insertAdjacentHTML('afterbegin', content);
+        insertAdjacentHTMLSafely(targetElement, 'afterbegin', contentString);
         break;
       case 'before':
         Logger.system.debug("[DOM] Inserting content before element:", targetElement);
-        targetElement.insertAdjacentHTML('beforebegin', content);
-        registrationRoot = targetElement.parentElement || document.body;
+        insertAdjacentHTMLSafely(targetElement, 'beforebegin', contentString);
+        registrationRoot = getNodeField(targetElement, 'parentElement', null) || getDocumentBodyFallback() || targetElement;
         break;
       case 'after':
         Logger.system.debug("[DOM] Inserting content after element:", targetElement);
-        targetElement.insertAdjacentHTML('afterend', content);
-        registrationRoot = targetElement.parentElement || document.body;
+        insertAdjacentHTMLSafely(targetElement, 'afterend', contentString);
+        registrationRoot = getNodeField(targetElement, 'parentElement', null) || getDocumentBodyFallback() || targetElement;
         break;
       case 'remove':
         Logger.system.debug("[DOM] Removing element:", targetElement);
-        targetElement.remove();
-        registrationRoot = document.body;
+        removeNodeSafely(targetElement);
+        registrationRoot = getDocumentBodyFallback() || targetElement;
         break;
       default:
         Logger.system.debug("[DOM] Default update strategy; updating innerHTML of element:", targetElement);
-        targetElement.innerHTML = content;
+        setInnerHTML(targetElement, contentString);
     }
-    if (hasHTMLeXMarkup(content)) {
-      document.dispatchEvent(new CustomEvent('htmlex:dom-updated', {
-        detail: { root: registrationRoot }
-      }));
+    if (hasHTMLeXMarkup(contentString)) {
+      dispatchHTMLeXDOMUpdated(registrationRoot);
     }
   }
 }

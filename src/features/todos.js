@@ -17,12 +17,87 @@ import {
   TodoWidget,
 } from '../components/Components.js';
 import { render } from '../components/HTMLeX.js';
-import { sendFragmentResponse, sendServerError } from './responses.js';
+import { sendFragmentResponse, sendServerError, sendTextResponse } from './responses.js';
 import { logFeatureError, logRequestError, logRequestWarning } from '../serverLogger.js';
 
 const TODO_SEED_FILE = path.join(import.meta.dirname, '..', 'persistence/data.json');
 const DEFAULT_TODOS_FILE = path.join(import.meta.dirname, '..', '..', 'tmp', 'todos.json');
+const LOCK_CONTENTION_ERROR_CODES = new Set(['EACCES', 'EEXIST', 'EPERM']);
 let persistenceQueue = null;
+let tempFileSequence = 0;
+
+function safeString(value, fallback = '') {
+  try {
+    return String(value ?? fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+function getField(target, fieldName, fallback = undefined) {
+  try {
+    return target?.[fieldName] ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function getRequestBodyValue(req, fieldName) {
+  return getField(getField(req, 'body', {}), fieldName);
+}
+
+function getRequestParam(req, fieldName) {
+  return getField(getField(req, 'params', {}), fieldName);
+}
+
+function getCurrentTimeMs() {
+  try {
+    const timestamp = Date.now();
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  } catch {
+    try {
+      const timeOrigin = globalThis.performance?.timeOrigin || 0;
+      const timestamp = timeOrigin + globalThis.performance?.now?.();
+      return Number.isFinite(timestamp) ? Math.round(timestamp) : 0;
+    } catch {
+      return 0;
+    }
+  }
+}
+
+function getCurrentIsoTimestamp() {
+  try {
+    return new Date().toISOString();
+  } catch {
+    return '1970-01-01T00:00:00.000Z';
+  }
+}
+
+function parseTimestamp(value) {
+  try {
+    return Date.parse(safeString(value));
+  } catch {
+    return Number.NaN;
+  }
+}
+
+function createTempFileId() {
+  try {
+    return randomUUID();
+  } catch {
+    tempFileSequence = (tempFileSequence + 1) % Number.MAX_SAFE_INTEGER;
+    let randomPart = 'fallback';
+    try {
+      const randomValue = Math.random();
+      if (Number.isFinite(randomValue)) {
+        randomPart = randomValue.toString(36).slice(2, 12) || randomPart;
+      }
+    } catch {
+      randomPart = 'fallback';
+    }
+    return `${getCurrentTimeMs().toString(36)}-${randomPart}-${tempFileSequence.toString(36)}`;
+  }
+}
 
 function enqueuePersistence(operation) {
   const nextOperation = persistenceQueue ? persistenceQueue.then(operation, operation) : operation();
@@ -51,7 +126,8 @@ async function ensureDataFile() {
 }
 
 function getTodosFile() {
-  return path.resolve(process.env.HTMLEX_TODO_DATA_FILE || DEFAULT_TODOS_FILE);
+  const configuredFile = safeString(process.env.HTMLEX_TODO_DATA_FILE).trim();
+  return path.resolve(configuredFile || DEFAULT_TODOS_FILE);
 }
 
 function getTodoLockFile() {
@@ -66,19 +142,64 @@ async function getInitialTodosPayload() {
   }
 }
 
+function parsePositiveInteger(value, defaultValue) {
+  const normalizedValue = safeString(value).trim();
+  if (!/^[1-9]\d*$/.test(normalizedValue)) return defaultValue;
+
+  const parsedValue = Number.parseInt(normalizedValue, 10);
+  return Number.isSafeInteger(parsedValue) ? parsedValue : defaultValue;
+}
+
+function parsePositivePid(value) {
+  const parsedValue = parsePositiveInteger(value, null);
+  return Number.isSafeInteger(parsedValue) ? parsedValue : null;
+}
+
+function normalizeTodoItem(todo, index) {
+  if (!todo || typeof todo !== 'object' || Array.isArray(todo)) {
+    throw new TypeError(`Todo item ${index} must be an object.`);
+  }
+  const id = getField(todo, 'id');
+  const rawText = getField(todo, 'text');
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new TypeError(`Todo item ${index} has an invalid id.`);
+  }
+  if (typeof rawText !== 'string') {
+    throw new TypeError(`Todo item ${index} has invalid text.`);
+  }
+  const text = rawText.trim();
+  if (!text) {
+    throw new TypeError(`Todo item ${index} has blank text.`);
+  }
+
+  return {
+    id,
+    text,
+  };
+}
+
+function normalizeTodoArray(todos) {
+  const seenIds = new Set();
+  return todos.map((todo, index) => {
+    const normalizedTodo = normalizeTodoItem(todo, index);
+    if (seenIds.has(normalizedTodo.id)) {
+      throw new TypeError(`Todo item ${index} duplicates id ${normalizedTodo.id}.`);
+    }
+    seenIds.add(normalizedTodo.id);
+    return normalizedTodo;
+  });
+}
+
 function getLockTimeoutMs() {
-  const timeoutMs = Number.parseInt(process.env.HTMLEX_TODO_LOCK_TIMEOUT_MS || '5000', 10);
-  return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 5000;
+  return parsePositiveInteger(process.env.HTMLEX_TODO_LOCK_TIMEOUT_MS, 5000);
 }
 
 function getLockRetryMs() {
-  const retryMs = Number.parseInt(process.env.HTMLEX_TODO_LOCK_RETRY_MS || '10', 10);
-  return Number.isFinite(retryMs) && retryMs > 0 ? retryMs : 10;
+  return parsePositiveInteger(process.env.HTMLEX_TODO_LOCK_RETRY_MS, 10);
 }
 
 function getLockStaleMs() {
-  const staleMs = Number.parseInt(process.env.HTMLEX_TODO_LOCK_STALE_MS || '30000', 10);
-  return Number.isFinite(staleMs) && staleMs > 0 ? staleMs : 30000;
+  return parsePositiveInteger(process.env.HTMLEX_TODO_LOCK_STALE_MS, 30000);
 }
 
 function isProcessAlive(pid) {
@@ -109,11 +230,11 @@ async function isTodoLockStale(lockFile) {
   ]);
   if (!lockStats) return false;
 
-  const createdAtMs = Date.parse(metadata?.createdAt || '');
-  const metadataAgeMs = Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : 0;
-  const lockAgeMs = Date.now() - lockStats.mtimeMs;
+  const createdAtMs = parseTimestamp(getField(metadata, 'createdAt'));
+  const metadataAgeMs = Number.isFinite(createdAtMs) ? getCurrentTimeMs() - createdAtMs : 0;
+  const lockAgeMs = getCurrentTimeMs() - getField(lockStats, 'mtimeMs', 0);
   const lockIsOld = Math.max(lockAgeMs, metadataAgeMs) >= getLockStaleMs();
-  const ownerAlive = isProcessAlive(Number.parseInt(metadata?.pid, 10));
+  const ownerAlive = isProcessAlive(parsePositivePid(getField(metadata, 'pid')));
 
   return lockIsOld && !ownerAlive;
 }
@@ -139,7 +260,7 @@ async function syncDirectory(directoryPath) {
 
 async function acquireTodoLock() {
   const lockFile = getTodoLockFile();
-  const startedAt = Date.now();
+  const startedAt = getCurrentTimeMs();
   const timeoutMs = getLockTimeoutMs();
   const retryMs = getLockRetryMs();
 
@@ -150,7 +271,7 @@ async function acquireTodoLock() {
       try {
         await lockHandle.writeFile(JSON.stringify({
           pid: process.pid,
-          createdAt: new Date().toISOString()
+          createdAt: getCurrentIsoTimestamp()
         }));
         await lockHandle.sync();
       } catch (error) {
@@ -164,9 +285,9 @@ async function acquireTodoLock() {
         await rm(lockFile, { force: true }).catch(() => {});
       };
     } catch (error) {
-      if (error?.code !== 'EEXIST') throw error;
+      if (!LOCK_CONTENTION_ERROR_CODES.has(error?.code)) throw error;
       if (await removeStaleTodoLockIfSafe(lockFile)) continue;
-      if (Date.now() - startedAt >= timeoutMs) {
+      if (getCurrentTimeMs() - startedAt >= timeoutMs) {
         throw new Error(`Timed out acquiring todo persistence lock after ${timeoutMs}ms.`, { cause: error });
       }
       await delay(retryMs);
@@ -190,13 +311,15 @@ function withTodoLock(operation) {
  * @async
  * @returns {Promise<Array<Object>>} Array of todo objects.
  */
-export async function loadTodos({ failClosed = false } = {}) {
+export async function loadTodos(options = {}) {
+  const failClosed = getField(options && typeof options === 'object' ? options : {}, 'failClosed', false) === true;
   await persistenceQueue?.catch(() => {});
   await ensureDataFile();
   const todosFile = getTodosFile();
   try {
     const data = await readFile(todosFile, 'utf8');
-    return JSON.parse(data);
+    const todos = JSON.parse(data);
+    return Array.isArray(todos) ? normalizeTodoArray(todos) : todos;
   } catch (error) {
     logFeatureError('todos', 'Failed to load todos from disk.', error, { file: todosFile });
     if (failClosed) return [];
@@ -242,7 +365,7 @@ export async function writeTodos(todos) {
 
 async function writeTodosAtomic(todos) {
   const todosFile = getTodosFile();
-  const tempFile = `${todosFile}.${process.pid}.${randomUUID()}.tmp`;
+  const tempFile = `${todosFile}.${process.pid}.${createTempFileId()}.tmp`;
   let tempHandle;
   try {
     tempHandle = await open(tempFile, 'w');
@@ -268,24 +391,53 @@ async function loadTodosForMutation() {
     throw new TypeError(`Expected todo data to be an array but received ${typeof todos}.`);
   }
 
-  return todos;
+  return normalizeTodoArray(todos);
 }
 
 function createTodoId(todos) {
   const highestExistingId = todos.reduce((highestId, todo) => (
-    Number.isSafeInteger(todo.id) ? Math.max(highestId, todo.id) : highestId
+    Number.isSafeInteger(getField(todo, 'id')) ? Math.max(highestId, getField(todo, 'id')) : highestId
   ), 0);
-  return Math.max(Date.now(), highestExistingId + 1);
+  const usedIds = new Set(todos.map(todo => getField(todo, 'id')).filter(Number.isSafeInteger));
+  let nextId = getCurrentTimeMs();
+  if (highestExistingId < Number.MAX_SAFE_INTEGER) {
+    nextId = Math.max(nextId, highestExistingId + 1);
+  }
+
+  while (usedIds.has(nextId) && nextId < Number.MAX_SAFE_INTEGER) {
+    nextId += 1;
+  }
+  if (!Number.isSafeInteger(nextId) || usedIds.has(nextId)) {
+    throw new RangeError('Unable to allocate a safe todo id.');
+  }
+
+  return nextId;
+}
+
+function parseTodoId(rawId) {
+  const value = safeString(rawId).trim();
+  if (!/^[1-9]\d*$/.test(value)) return null;
+
+  const id = Number.parseInt(value, 10);
+  return Number.isSafeInteger(id) ? id : null;
+}
+
+function sendTodoNotFound(req, res, logMessage, id) {
+  logRequestWarning(req, logMessage, { id, statusCode: 404 });
+  return sendTextResponse(res, 404, 'Todo not found');
 }
 
 function mutateTodos(mutator) {
   return withTodoLock(async () => {
     const todos = await loadTodosForMutation();
     const result = await mutator(todos);
-    if (result?.write !== false) {
+    if (getField(result, 'write') !== false) {
       await writeTodosAtomic(todos);
     }
-    return { ...result, todos };
+    return {
+      ...(result && typeof result === 'object' ? result : {}),
+      todos
+    };
   });
 }
 
@@ -300,13 +452,12 @@ function mutateTodos(mutator) {
  */
 export async function createTodo(req, res) {
   try {
-    const submittedText = Array.isArray(req.body.todo) ? req.body.todo[0] : req.body.todo;
-    const normalizedText = String(submittedText ?? '').trim();
+    const submittedTodo = getRequestBodyValue(req, 'todo');
+    const submittedText = Array.isArray(submittedTodo) ? submittedTodo[0] : submittedTodo;
+    const normalizedText = safeString(submittedText).trim();
     if (!normalizedText) {
       logRequestWarning(req, 'Rejected todo create request without text.', { statusCode: 400 });
-      if (!res.headersSent) {
-        res.status(400).send('Missing todo text');
-      }
+      sendTextResponse(res, 400, 'Missing todo text');
       return;
     }
     const { todos } = await mutateTodos((todos) => {
@@ -353,12 +504,17 @@ export async function listTodos(req, res) {
  */
 export async function getTodoItem(req, res) {
   try {
+    const rawId = getRequestParam(req, 'id');
+    const id = parseTodoId(rawId);
+    if (id === null) {
+      sendTodoNotFound(req, res, 'Todo item request used an invalid id.', rawId);
+      return;
+    }
+
     const todos = await loadTodos();
-    const id = Number.parseInt(req.params.id, 10);
-    const todo = todos.find(t => t.id === id);
+    const todo = todos.find(todo => getField(todo, 'id') === id);
     if (!todo) {
-      logRequestWarning(req, 'Todo item was not found.', { id, statusCode: 404 });
-      if (!res.headersSent) return res.status(404).send('Todo not found');
+      sendTodoNotFound(req, res, 'Todo item was not found.', id);
       return;
     }
     sendFragmentResponse(res, `#editForm-${id}(outerHTML)`, render(renderTodoItem(todo)));
@@ -377,12 +533,17 @@ export async function getTodoItem(req, res) {
  */
 export async function getEditTodoForm(req, res) {
   try {
+    const rawId = getRequestParam(req, 'id');
+    const id = parseTodoId(rawId);
+    if (id === null) {
+      sendTodoNotFound(req, res, 'Todo edit request used an invalid id.', rawId);
+      return;
+    }
+
     const todos = await loadTodos();
-    const id = Number.parseInt(req.params.id, 10);
-    const todo = todos.find(t => t.id === id);
+    const todo = todos.find(todo => getField(todo, 'id') === id);
     if (!todo) {
-      logRequestWarning(req, 'Todo edit target was not found.', { id, statusCode: 404 });
-      if (!res.headersSent) return res.status(404).send('Todo not found');
+      sendTodoNotFound(req, res, 'Todo edit target was not found.', id);
       return;
     }
     sendFragmentResponse(res, `#todo-${id}(outerHTML)`, renderEditForm(todo));
@@ -402,16 +563,23 @@ export async function getEditTodoForm(req, res) {
  */
 export async function updateTodo(req, res) {
   try {
-    const id = Number.parseInt(req.params.id, 10);
-    const submittedText = Array.isArray(req.body.todo) ? req.body.todo[0] : req.body.todo;
-    const normalizedText = String(submittedText ?? '').trim();
+    const rawId = getRequestParam(req, 'id');
+    const id = parseTodoId(rawId);
+    if (id === null) {
+      sendTodoNotFound(req, res, 'Todo update request used an invalid id.', rawId);
+      return;
+    }
+
+    const submittedTodo = getRequestBodyValue(req, 'todo');
+    const submittedText = Array.isArray(submittedTodo) ? submittedTodo[0] : submittedTodo;
+    const normalizedText = safeString(submittedText).trim();
     if (!normalizedText) {
       logRequestWarning(req, 'Rejected todo update request without text.', { id, statusCode: 400 });
-      if (!res.headersSent) return res.status(400).send('Missing updated todo text');
+      sendTextResponse(res, 400, 'Missing updated todo text');
       return;
     }
     const result = await mutateTodos((todos) => {
-      const index = todos.findIndex(todo => todo.id === id);
+      const index = todos.findIndex(todo => getField(todo, 'id') === id);
       if (index === -1) {
         return { found: false, write: false };
       }
@@ -421,8 +589,7 @@ export async function updateTodo(req, res) {
     });
 
     if (!result.found) {
-      logRequestWarning(req, 'Todo update target was not found.', { id, statusCode: 404 });
-      if (!res.headersSent) return res.status(404).send('Todo not found');
+      sendTodoNotFound(req, res, 'Todo update target was not found.', id);
       return;
     }
 
@@ -443,9 +610,15 @@ export async function updateTodo(req, res) {
  */
 export async function deleteTodo(req, res) {
   try {
-    const id = Number.parseInt(req.params.id, 10);
+    const rawId = getRequestParam(req, 'id');
+    const id = parseTodoId(rawId);
+    if (id === null) {
+      sendTodoNotFound(req, res, 'Todo delete request used an invalid id.', rawId);
+      return;
+    }
+
     const result = await mutateTodos((todos) => {
-      const index = todos.findIndex(todo => todo.id === id);
+      const index = todos.findIndex(todo => getField(todo, 'id') === id);
       if (index === -1) {
         return { found: false, write: false };
       }
@@ -455,8 +628,7 @@ export async function deleteTodo(req, res) {
     });
 
     if (!result.found) {
-      logRequestWarning(req, 'Todo delete target was not found.', { id, statusCode: 404 });
-      if (!res.headersSent) return res.status(404).send('Todo not found');
+      sendTodoNotFound(req, res, 'Todo delete target was not found.', id);
       return;
     }
 
@@ -466,4 +638,3 @@ export async function deleteTodo(req, res) {
     sendServerError(res);
   }
 }
-

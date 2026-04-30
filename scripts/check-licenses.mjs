@@ -1,5 +1,5 @@
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { getField, getObjectEntries, getObjectKeys, readJsonFile, safeString } from './check-utils.mjs';
 
 const ROOT = process.cwd();
 const ALLOWED_LICENSES = new Set([
@@ -27,7 +27,7 @@ const LICENSE_OVERRIDES = {
 };
 
 function packageNameFromLockPath(lockPath) {
-  const withoutPrefix = lockPath.replace(/^node_modules\//u, '');
+  const withoutPrefix = safeString(lockPath).replace(/^node_modules\//u, '');
   if (!withoutPrefix.startsWith('@')) return withoutPrefix.split('/')[0];
 
   const [scope, name] = withoutPrefix.split('/');
@@ -35,23 +35,23 @@ function packageNameFromLockPath(lockPath) {
 }
 
 function normalizeLicenseExpression(license) {
-  return String(license ?? '')
+  return safeString(license)
     .replace(/[()]/gu, ' ')
     .split(/\s+(?:OR|AND)\s+/iu)
     .map(part => part.trim())
     .filter(Boolean);
 }
 
-const packageLock = JSON.parse(await readFile(path.join(ROOT, 'package-lock.json'), 'utf8'));
+const packageLock = await readJsonFile(path.join(ROOT, 'package-lock.json'), 'package-lock.json');
 const failures = [];
 const seenOverrides = new Set();
 
-for (const [lockPath, packageMetadata] of Object.entries(packageLock.packages ?? {})) {
-  if (!lockPath.startsWith('node_modules/')) continue;
+for (const [lockPath, packageMetadata] of getObjectEntries(getField(packageLock, 'packages'))) {
+  if (!safeString(lockPath).startsWith('node_modules/')) continue;
 
   const packageName = packageNameFromLockPath(lockPath);
   const override = LICENSE_OVERRIDES[packageName];
-  const license = packageMetadata.license ?? override?.license ?? '';
+  const license = getField(packageMetadata, 'license') ?? getField(override, 'license', '');
   if (override) seenOverrides.add(packageName);
 
   if (!license) {
@@ -71,7 +71,7 @@ for (const [lockPath, packageMetadata] of Object.entries(packageLock.packages ??
   }
 }
 
-for (const packageName of Object.keys(LICENSE_OVERRIDES)) {
+for (const packageName of getObjectKeys(LICENSE_OVERRIDES)) {
   if (!seenOverrides.has(packageName)) {
     failures.push(`License override is stale and should be removed: ${packageName}`);
   }

@@ -3,8 +3,14 @@ import test from 'node:test';
 import {
   endResponse,
   endServerError,
+  sendEmptyResponse,
   sendFragmentResponse,
+  sendHtmlResponse,
   sendServerError,
+  sendTextResponse,
+  sendTypedResponse,
+  setHtmlResponse,
+  setResponseHeader,
   writeFragmentResponse,
 } from '../../src/features/responses.js';
 
@@ -42,6 +48,10 @@ function createResponse({ headersSent = false, writableEnded = false } = {}) {
     },
     status(code) {
       this.statusCode = code;
+      return this;
+    },
+    type(value) {
+      this.headers['Content-Type'] = value;
       return this;
     },
   };
@@ -104,4 +114,135 @@ test('endResponse is idempotent for already-ended responses', () => {
   endResponse(res);
 
   assert.equal(res.writableEnded, true);
+});
+
+test('text, empty, and header response helpers guard response state', () => {
+  const textResponse = createResponse();
+  const typedResponse = createResponse();
+  const htmlResponse = createResponse();
+  const emptyResponse = createResponse();
+  const headerResponse = createResponse();
+  const sentResponse = createResponse({ headersSent: true });
+
+  assert.equal(setResponseHeader(headerResponse, 'Emit', 'unit:update'), true);
+  assert.equal(sendTextResponse(textResponse, 400, 'Bad input'), true);
+  assert.equal(sendTypedResponse(typedResponse, 202, 'Accepted', 'application/custom'), true);
+  assert.equal(sendHtmlResponse(htmlResponse, 200, '<main>Ready</main>'), true);
+  assert.equal(sendEmptyResponse(emptyResponse), true);
+  assert.equal(setResponseHeader(sentResponse, 'Late', 'nope'), false);
+  assert.equal(sendTextResponse(sentResponse, 409, 'Too late'), false);
+  assert.equal(sendTypedResponse(sentResponse, 409, 'Too late', 'text/plain'), false);
+  assert.equal(sendHtmlResponse(sentResponse, 409, '<main>Too late</main>'), false);
+  assert.equal(sendEmptyResponse(sentResponse, 204), false);
+
+  assert.equal(headerResponse.headers.Emit, 'unit:update');
+  assert.equal(textResponse.statusCode, 400);
+  assert.equal(textResponse.headers['Content-Type'], 'text/plain');
+  assert.equal(textResponse.body, 'Bad input');
+  assert.equal(typedResponse.statusCode, 202);
+  assert.equal(typedResponse.headers['Content-Type'], 'application/custom');
+  assert.equal(typedResponse.body, 'Accepted');
+  assert.equal(htmlResponse.statusCode, 200);
+  assert.equal(htmlResponse.headers['Content-Type'], 'html');
+  assert.equal(htmlResponse.body, '<main>Ready</main>');
+  assert.equal(emptyResponse.statusCode, 204);
+  assert.equal(emptyResponse.writableEnded, true);
+  assert.equal(sentResponse.body, '');
+});
+
+test('response helpers tolerate hostile response state and methods', () => {
+  const hostileStateResponse = {};
+  Object.defineProperties(hostileStateResponse, {
+    headersSent: {
+      get() {
+        throw new Error('headers state denied');
+      },
+    },
+    req: {
+      get() {
+        throw new Error('request denied');
+      },
+    },
+    writableEnded: {
+      get() {
+        throw new Error('writable state denied');
+      },
+    },
+  });
+
+  assert.doesNotThrow(() => setHtmlResponse(hostileStateResponse));
+  assert.doesNotThrow(() => setResponseHeader(hostileStateResponse, 'Emit', 'unit:update'));
+  assert.doesNotThrow(() => sendTextResponse(hostileStateResponse, 400, 'Ignored'));
+  assert.doesNotThrow(() => sendTypedResponse(hostileStateResponse, 400, 'Ignored', 'text/plain'));
+  assert.doesNotThrow(() => sendHtmlResponse(hostileStateResponse, 400, '<main>Ignored</main>'));
+  assert.doesNotThrow(() => sendEmptyResponse(hostileStateResponse));
+  assert.doesNotThrow(() => sendServerError(hostileStateResponse, 'Ignored'));
+  assert.doesNotThrow(() => endServerError(hostileStateResponse));
+  assert.doesNotThrow(() => endResponse(hostileStateResponse));
+
+  const throwingMethodsResponse = {
+    headersSent: false,
+    writableEnded: false,
+    end() {
+      throw new Error('end denied');
+    },
+    send() {
+      throw new Error('send denied');
+    },
+    setHeader() {
+      throw new Error('set header denied');
+    },
+    status() {
+      throw new Error('status denied');
+    },
+    write() {
+      throw new Error('write denied');
+    },
+  };
+
+  assert.doesNotThrow(() => setResponseHeader(throwingMethodsResponse, 'Emit', 'unit:update'));
+  assert.doesNotThrow(() => sendTextResponse(throwingMethodsResponse, 400, {
+    toString() {
+      throw new Error('text denied');
+    },
+  }));
+  assert.doesNotThrow(() => sendTypedResponse(throwingMethodsResponse, 400, 'Ignored', {
+    toString() {
+      throw new Error('type denied');
+    },
+  }));
+  assert.doesNotThrow(() => sendHtmlResponse(throwingMethodsResponse, 400, {
+    toString() {
+      throw new Error('html denied');
+    },
+  }));
+  assert.doesNotThrow(() => sendEmptyResponse(throwingMethodsResponse));
+  assert.doesNotThrow(() => sendFragmentResponse(throwingMethodsResponse, '#target(innerHTML)', '<b>Ready</b>'));
+  assert.doesNotThrow(() => writeFragmentResponse(throwingMethodsResponse, '#target(append)', '<b>Ready</b>'));
+  assert.doesNotThrow(() => sendServerError(throwingMethodsResponse, {
+    toString() {
+      throw new Error('message denied');
+    },
+  }));
+  assert.doesNotThrow(() => endServerError(throwingMethodsResponse));
+  assert.doesNotThrow(() => endResponse(throwingMethodsResponse));
+});
+
+test('fragment response helpers fail closed for invalid fragment metadata', () => {
+  const sendResponse = createResponse();
+  const writeResponse = createResponse();
+
+  assert.equal(
+    sendFragmentResponse(sendResponse, '#target(innerHTML)', '<b>Ready</b>', { 'bad attr': 'nope' }),
+    false
+  );
+  assert.equal(
+    writeFragmentResponse(writeResponse, '#target(append)', '<b>Ready</b>', { 'bad attr': 'nope' }),
+    false
+  );
+
+  assert.equal(sendResponse.body, '');
+  assert.equal(writeResponse.body, '');
+  assert.equal(sendResponse.writableEnded, false);
+  assert.equal(writeResponse.writableEnded, false);
 });

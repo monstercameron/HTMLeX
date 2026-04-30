@@ -31,9 +31,12 @@ beforeEach(() => {
         content: {},
         set innerHTML(html) {
           const targetMatch = html.match(/\starget="([^"]+)"/i);
+          const statusMatch = html.match(/\sstatus="([^"]+)"/i);
           this.content.firstElementChild = {
             getAttribute(name) {
-              return name === 'target' ? targetMatch?.[1] || null : null;
+              if (name === 'target') return targetMatch?.[1] || null;
+              if (name === 'status') return statusMatch?.[1] || null;
+              return null;
             },
           };
         },
@@ -115,6 +118,89 @@ test('processFragmentBuffer lets caller targets override this fragments', () => 
   assert.equal(element.innerHTML, '<strong>Override</strong>');
 });
 
+test('processFragmentBuffer applies caller target overrides to every caller target', () => {
+  const element = new FakeElement({ target: '#first(append) #second(append)' });
+  const first = new FakeElement();
+  const second = new FakeElement();
+  document.querySelectorAll = (selector) => {
+    if (selector === '#first') return [first];
+    if (selector === '#second') return [second];
+    return [];
+  };
+
+  processFragmentBuffer(
+    '<fragment target="this(innerHTML)"><strong>Override all</strong></fragment>',
+    element
+  );
+
+  assert.deepEqual(first.appended, [{ position: 'beforeend', content: '<strong>Override all</strong>' }]);
+  assert.deepEqual(second.appended, [{ position: 'beforeend', content: '<strong>Override all</strong>' }]);
+});
+
+test('processFragmentBuffer ignores malformed fragment status values', () => {
+  const element = new FakeElement();
+
+  processFragmentBuffer(
+    '<fragment target="this(innerHTML)" status="500abc"><strong>Malformed status</strong></fragment>',
+    element
+  );
+
+  assert.equal(element._htmlexFragmentErrorStatus, undefined);
+
+  processFragmentBuffer(
+    '<fragment target="this(innerHTML)" status="500"><strong>Failed status</strong></fragment>',
+    element
+  );
+
+  assert.equal(element._htmlexFragmentErrorStatus, 500);
+});
+
+test('processFragmentBuffer tolerates unstringifiable buffers and missing template parsing APIs', () => {
+  const element = new FakeElement();
+
+  assert.equal(processFragmentBuffer({
+    toString() {
+      throw new Error('buffer string denied');
+    },
+  }, element), '');
+
+  delete globalThis.document;
+
+  assert.doesNotThrow(() => {
+    const remaining = processFragmentBuffer(
+      '<fragment target="this(innerHTML)"><span>Skipped</span></fragment>tail',
+      element
+    );
+    assert.equal(remaining, 'tail');
+  });
+
+  assert.equal(element.innerHTML, '');
+});
+
+test('processFragmentBuffer defaults hostile fragment attributes safely', () => {
+  const element = new FakeElement();
+  document.createElement = () => ({
+    content: {
+      firstElementChild: {
+        getAttribute() {
+          throw new Error('fragment attribute denied');
+        },
+      },
+    },
+    set innerHTML(_html) {},
+  });
+
+  assert.doesNotThrow(() => {
+    processFragmentBuffer(
+      '<fragment target="this(innerHTML)" status="500"><strong>Fallback</strong></fragment>',
+      element
+    );
+  });
+
+  assert.equal(element.innerHTML, '<strong>Fallback</strong>');
+  assert.equal(element._htmlexFragmentErrorStatus, undefined);
+});
+
 test('processFragmentBuffer updates each resolved selector target exactly once', () => {
   const first = new FakeElement();
   const second = new FakeElement();
@@ -141,6 +227,51 @@ test('processFragmentBuffer falls back missing explicit targets to the triggerin
   assert.deepEqual(element.appended, [{ position: 'beforeend', content: '<span>Fallback</span>' }]);
 });
 
+test('processFragmentBuffer skips invalid explicit target selectors', () => {
+  const element = new FakeElement();
+  document.querySelectorAll = () => {
+    throw new Error('bad selector');
+  };
+
+  const remaining = processFragmentBuffer(
+    '<fragment target="[(append)"><span>Skipped</span></fragment>',
+    element
+  );
+
+  assert.equal(remaining, '');
+  assert.deepEqual(element.appended, []);
+  assert.equal(element.innerHTML, '');
+});
+
+test('processFragmentBuffer isolates caller target and lifecycle failures', () => {
+  const element = new FakeElement({ target: '#ignored(append)' });
+  element.hasAttribute = () => {
+    throw new Error('caller target check denied');
+  };
+  element.getAttribute = () => {
+    throw new Error('caller target read denied');
+  };
+  const lifecycleCalls = [];
+  const swapLifecycle = {
+    createUpdateCallback() {
+      lifecycleCalls.push('create');
+      throw new Error('lifecycle denied');
+    },
+  };
+
+  assert.doesNotThrow(() => {
+    processFragmentBuffer(
+      '<fragment target="this(innerHTML)"><span>Self fallback</span></fragment>',
+      element,
+      null,
+      swapLifecycle
+    );
+  });
+
+  assert.equal(element.innerHTML, '<span>Self fallback</span>');
+  assert.deepEqual(lifecycleCalls, ['create']);
+});
+
 test('processFragmentBuffer applies streaming fragments immediately through resolved targets', () => {
   const output = new FakeElement();
   const triggeringElement = new FakeElement();
@@ -163,6 +294,54 @@ test('processFragmentBuffer applies streaming fragments immediately through reso
   assert.deepEqual(output.appended, [{ position: 'beforeend', content: '<span GET="/next">Stream</span>' }]);
   assert.deepEqual(afterUpdateCalls, ['after']);
   assert.equal(document.dispatchedEvents.at(-1).type, 'htmlex:dom-updated');
+});
+
+test('processFragmentBuffer completes swap callbacks for streaming sequential fragments', () => {
+  const output = new FakeElement();
+  const triggeringElement = new FakeElement();
+  triggeringElement._htmlexStreaming = true;
+  triggeringElement._htmlexSequentialMode = true;
+  const afterUpdateCalls = [];
+  const swapLifecycle = {
+    createUpdateCallback() {
+      return () => afterUpdateCalls.push('after');
+    },
+  };
+  document.querySelectorAll = selector => selector === '#streamOut' ? [output] : [];
+
+  processFragmentBuffer(
+    '<fragment target="#streamOut(append)"><span>Stream</span></fragment>',
+    triggeringElement,
+    { updates: [] },
+    swapLifecycle
+  );
+
+  assert.deepEqual(output.appended, [{ position: 'beforeend', content: '<span>Stream</span>' }]);
+  assert.deepEqual(afterUpdateCalls, ['after']);
+});
+
+test('processFragmentBuffer tolerates hostile sequential queues', () => {
+  const element = new FakeElement();
+  element._htmlexSequentialMode = true;
+  const sequentialEntry = {};
+  Object.defineProperty(sequentialEntry, 'updates', {
+    get() {
+      throw new Error('queue read denied');
+    },
+    set() {
+      throw new Error('queue write denied');
+    },
+  });
+
+  assert.doesNotThrow(() => {
+    processFragmentBuffer(
+      '<fragment target="this(innerHTML)"><em>Not queued</em></fragment>',
+      element,
+      sequentialEntry
+    );
+  });
+
+  assert.equal(element.innerHTML, '');
 });
 
 test('processFragmentBuffer queues sequential updates without mutating immediately', () => {

@@ -44,6 +44,84 @@ const PRIMARY_BUTTON = 'btn btn-primary';
 const SECONDARY_BUTTON = 'btn btn-outline-light';
 const DANGER_BUTTON = 'btn btn-outline-danger';
 
+function safeString(value, fallback = '') {
+  try {
+    return String(value ?? fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+function safeIsArray(value) {
+  try {
+    return Array.isArray(value);
+  } catch {
+    return false;
+  }
+}
+
+function getObjectField(value, fieldName, fallback = undefined) {
+  try {
+    return value?.[fieldName] ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function getArrayLength(value) {
+  try {
+    const length = value?.length;
+    return Number.isSafeInteger(length) && length > 0 ? length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function toArray(value) {
+  if (!safeIsArray(value)) return [];
+
+  const items = [];
+  for (let index = 0; index < getArrayLength(value); index += 1) {
+    const item = getObjectField(value, index, undefined);
+    if (item !== undefined) items.push(item);
+  }
+  return items;
+}
+
+function classSuffix(value) {
+  const className = safeString(value).trim();
+  return className ? ` ${className}` : '';
+}
+
+function normalizeDemo(demo) {
+  return {
+    icon: getObjectField(demo, 'icon', ''),
+    title: getObjectField(demo, 'title', ''),
+    subtitle: getObjectField(demo, 'subtitle', ''),
+    description: getObjectField(demo, 'description', ''),
+    highlights: toArray(getObjectField(demo, 'highlights', [])),
+    launchButtonText: getObjectField(demo, 'launchButtonText', 'Launch'),
+    learnMoreText: getObjectField(demo, 'learnMoreText', 'Learn more'),
+    learnMoreHref: getObjectField(demo, 'learnMoreHref', '#'),
+    initDemoHref: getObjectField(demo, 'initDemoHref', '#')
+  };
+}
+
+function normalizeProjectLink(projectLink) {
+  return {
+    href: getObjectField(projectLink, 'href', '#'),
+    icon: getObjectField(projectLink, 'icon', ''),
+    text: getObjectField(projectLink, 'text', '')
+  };
+}
+
+function normalizeTodo(todo) {
+  return {
+    id: safeString(getObjectField(todo, 'id', '')),
+    text: getObjectField(todo, 'text', '')
+  };
+}
+
 export const DEMO_SNIPPETS = {
   todo: `<form POST="/todos/create" target="#todoList(outerHTML)" publish="todoCreated" sequential="150">
   <input id="todoInput" name="todo" required>
@@ -100,7 +178,10 @@ export const DEMO_SNIPPETS = {
 <div id="hoverOutput"></div>`
 };
 
-export function HtmlSnippet({ title: snippetTitle = 'HTML pattern', snippet }) {
+export function HtmlSnippet(props = {}) {
+  const snippetTitle = getObjectField(props, 'title', 'HTML pattern');
+  const snippet = safeString(getObjectField(props, 'snippet', '')).trim();
+
   return div(
     { class: 'snippet-panel mt-4 p-3' },
     div(
@@ -108,7 +189,7 @@ export function HtmlSnippet({ title: snippetTitle = 'HTML pattern', snippet }) {
       h3({ class: 'h6 mb-0' }, snippetTitle),
       span({ class: 'badge rounded-pill text-bg-secondary' }, 'HTML')
     ),
-    pre({}, code({}, snippet.trim()))
+    pre({}, code({}, snippet))
   );
 }
 
@@ -116,9 +197,12 @@ export function HtmlSnippet({ title: snippetTitle = 'HTML pattern', snippet }) {
    Header Component
    =========================== */
 
-export function Header({ title, subtitle = '', className = '' } = {}) {
+export function Header(props = {}) {
+  const title = getObjectField(props, 'title', '');
+  const subtitle = getObjectField(props, 'subtitle', '');
+
   return header(
-    { class: `app-header border-bottom ${className}` },
+    { class: `app-header border-bottom${classSuffix(getObjectField(props, 'className', ''))}` },
     div(
       { class: 'container-fluid d-flex flex-wrap align-items-center justify-content-between gap-3 py-3' },
       div(
@@ -145,7 +229,11 @@ export function DemoBackground() {
   return [];
 }
 
-export function DemoHeader({ icon, title: demoTitle, subtitle }) {
+export function DemoHeader(props = {}) {
+  const icon = getObjectField(props, 'icon', '');
+  const demoTitle = getObjectField(props, 'title', '');
+  const subtitle = getObjectField(props, 'subtitle', '');
+
   return div(
     { class: 'd-flex align-items-start gap-3' },
     div(
@@ -167,13 +255,16 @@ export function DemoDescription(description) {
 export function DemoHighlights(highlights) {
   return div(
     { class: 'd-flex flex-wrap gap-2' },
-    ...highlights.map(highlight => span({ class: 'demo-chip' }, highlight))
+    ...toArray(highlights).map(highlight => span({ class: 'demo-chip' }, highlight))
   );
 }
 
-export function DemoActions(
-  { launchButtonText, learnMoreText, learnMoreHref, initDemoHref }
-) {
+export function DemoActions(props = {}) {
+  const launchButtonText = getObjectField(props, 'launchButtonText', 'Launch');
+  const learnMoreText = getObjectField(props, 'learnMoreText', 'Learn more');
+  const learnMoreHref = getObjectField(props, 'learnMoreHref', '#');
+  const initDemoHref = getObjectField(props, 'initDemoHref', '#');
+
   return div(
     { class: 'd-flex align-items-center justify-content-between gap-3 pt-1' },
     button(
@@ -195,23 +286,25 @@ export function DemoActions(
    =========================== */
 
 export function DemoItem(demo) {
+  const normalizedDemo = normalizeDemo(demo);
+
   return li(
     { class: 'demo-card' },
     div(
       { class: 'd-grid gap-3' },
       DemoHeader({
-        icon: demo.icon,
-        title: demo.title,
-        subtitle: demo.subtitle
+        icon: normalizedDemo.icon,
+        title: normalizedDemo.title,
+        subtitle: normalizedDemo.subtitle
       }),
-      DemoDescription(demo.description),
-      DemoHighlights(demo.highlights),
+      DemoDescription(normalizedDemo.description),
+      DemoHighlights(normalizedDemo.highlights),
       DemoActions(
         {
-          launchButtonText: demo.launchButtonText,
-          learnMoreText: demo.learnMoreText,
-          learnMoreHref: demo.learnMoreHref,
-          initDemoHref: demo.initDemoHref
+          launchButtonText: normalizedDemo.launchButtonText,
+          learnMoreText: normalizedDemo.learnMoreText,
+          learnMoreHref: normalizedDemo.learnMoreHref,
+          initDemoHref: normalizedDemo.initDemoHref
         }
       )
     )
@@ -219,13 +312,13 @@ export function DemoItem(demo) {
 }
 
 export function DemoList(demos) {
-  const items = demos.map((demo) => DemoItem(demo));
+  const items = toArray(demos).map((demo) => DemoItem(demo));
   return ul({ class: 'catalog-list list-unstyled mb-0 d-grid gap-3' }, ...items);
 }
 
-export function Aside({ demos, asideClass = '' } = {}) {
+export function Aside(props = {}) {
   return aside(
-    { class: `catalog-pane ${PANE} ${asideClass}` },
+    { class: `catalog-pane ${PANE}${classSuffix(getObjectField(props, 'asideClass', ''))}` },
     div(
       { class: 'pane-header d-flex align-items-end justify-content-between gap-3' },
       div(
@@ -235,7 +328,7 @@ export function Aside({ demos, asideClass = '' } = {}) {
       ),
       span({ class: 'badge rounded-pill text-bg-primary' }, 'Live')
     ),
-    DemoList(demos)
+    DemoList(getObjectField(props, 'demos', []))
   );
 }
 
@@ -243,9 +336,12 @@ export function Aside({ demos, asideClass = '' } = {}) {
    Canvas Component
    =========================== */
 
-export function Canvas({ headerText, clickCount = 0, sectionClass = '' } = {}) {
+export function Canvas(props = {}) {
+  const headerText = getObjectField(props, 'headerText', '');
+  const clickCount = getObjectField(props, 'clickCount', 0);
+
   return section(
-    { class: `workspace-pane ${PANE} ${sectionClass}` },
+    { class: `workspace-pane ${PANE}${classSuffix(getObjectField(props, 'sectionClass', ''))}` },
     div(
       { class: 'pane-header d-flex flex-wrap align-items-center justify-content-between gap-3' },
       div(
@@ -261,7 +357,7 @@ export function Canvas({ headerText, clickCount = 0, sectionClass = '' } = {}) {
         { id: 'clicker', class: 'workspace-empty d-flex flex-column align-items-center justify-content-center text-center p-4' },
         p(
           { id: 'clickCount', class: 'display-4 fw-semibold mb-4' },
-          String(clickCount)
+          safeString(clickCount)
         ),
         button(
           { id: 'clickButton', class: PRIMARY_BUTTON },
@@ -276,20 +372,25 @@ export function Canvas({ headerText, clickCount = 0, sectionClass = '' } = {}) {
    Footer Component
    =========================== */
 
-export function Footer({ year, copyText, projectLinks, footerClass = '' } = {}) {
-  const links = projectLinks.map((projectLink) =>
+export function Footer(props = {}) {
+  const year = getObjectField(props, 'year', '');
+  const copyText = getObjectField(props, 'copyText', '');
+  const links = toArray(getObjectField(props, 'projectLinks', [])).map((projectLink) => {
+    const normalizedProjectLink = normalizeProjectLink(projectLink);
+    return (
     a(
-      { href: projectLink.href, class: 'd-inline-flex align-items-center text-decoration-none' },
-      span({ class: 'me-1' }, projectLink.icon),
-      projectLink.text
+      { href: normalizedProjectLink.href, class: 'd-inline-flex align-items-center text-decoration-none' },
+      span({ class: 'me-1' }, normalizedProjectLink.icon),
+      normalizedProjectLink.text
     )
-  );
+    );
+  });
 
   return footer(
-    { class: `app-footer border-top ${footerClass}` },
+    { class: `app-footer border-top${classSuffix(getObjectField(props, 'footerClass', ''))}` },
     div(
       { class: 'container-fluid d-flex flex-column flex-sm-row align-items-sm-center justify-content-between gap-2 py-3 small text-subtle' },
-      p({ class: 'mb-0' }, `Copyright ${year} ${copyText}`),
+      p({ class: 'mb-0' }, `Copyright ${safeString(year)} ${safeString(copyText)}`),
       div({ class: 'd-flex gap-3' }, ...links)
     )
   );
@@ -299,7 +400,12 @@ export function Footer({ year, copyText, projectLinks, footerClass = '' } = {}) 
    Full HTML Document Composition
    =========================== */
 
-export function FullHTML({ headerProps, demos, canvasProps, footerProps }) {
+export function FullHTML(props = {}) {
+  const headerProps = getObjectField(props, 'headerProps', {});
+  const demos = getObjectField(props, 'demos', []);
+  const canvasProps = getObjectField(props, 'canvasProps', {});
+  const footerProps = getObjectField(props, 'footerProps', {});
+
   return html(
     { lang: 'en', 'data-bs-theme': 'dark' },
     head(
@@ -340,9 +446,11 @@ export function FullHTML({ headerProps, demos, canvasProps, footerProps }) {
    =========================== */
 
 export function renderTodoItem(todo) {
+  const normalizedTodo = normalizeTodo(todo);
+
   const editButton = button(
     {
-      GET: `/todos/edit/${todo.id}`,
+      GET: `/todos/edit/${normalizedTodo.id}`,
       class: `edit-button ${SECONDARY_BUTTON} btn-sm`
     },
     'Edit'
@@ -350,7 +458,7 @@ export function renderTodoItem(todo) {
 
   const deleteButton = button(
     {
-      DELETE: `/todos/${todo.id}`,
+      DELETE: `/todos/${normalizedTodo.id}`,
       class: `delete-button ${DANGER_BUTTON} btn-sm`
     },
     'Delete'
@@ -364,12 +472,12 @@ export function renderTodoItem(todo) {
 
   const todoText = span(
     { class: 'todo-text flex-grow-1 fw-medium' },
-    todo.text
+    normalizedTodo.text
   );
 
   return div(
     {
-      id: `todo-${todo.id}`,
+      id: `todo-${normalizedTodo.id}`,
       class: 'todo-item surface-muted d-flex align-items-center justify-content-between gap-3 p-3 mb-2'
     },
     todoText,
@@ -378,14 +486,16 @@ export function renderTodoItem(todo) {
 }
 
 export function renderTodoList(todos) {
-  if (!todos.length) {
+  const normalizedTodos = toArray(todos).map(todo => normalizeTodo(todo));
+
+  if (!normalizedTodos.length) {
     return div(
       { id: 'todoList', class: 'no-todos workspace-empty d-flex align-items-center justify-content-center text-center p-4 small text-subtle' },
       'No todos available.'
     );
   }
 
-  const todoNodes = todos.map(todo => renderTodoItem(todo));
+  const todoNodes = normalizedTodos.map(todo => renderTodoItem(todo));
 
   return div(
     { id: 'todoList', class: 'todo-list surface p-3' },
@@ -394,14 +504,16 @@ export function renderTodoList(todos) {
 }
 
 export function renderTodoItems(todos) {
-  return todos.map(todo => render(renderTodoItem(todo))).join('');
+  return toArray(todos).map(todo => render(renderTodoItem(todo))).join('');
 }
 
 export function renderEditForm(todo) {
+  const normalizedTodo = normalizeTodo(todo);
+
   const inputField = input({
     type: 'text',
     name: 'todo',
-    value: todo.text,
+    value: normalizedTodo.text,
     required: 'true',
     class: `edit-input ${FIELD}`
   });
@@ -413,9 +525,9 @@ export function renderEditForm(todo) {
 
   const cancelButton = button(
     {
-      GET: `/todos/item/${todo.id}`,
+      GET: `/todos/item/${normalizedTodo.id}`,
       class: `cancel-button ${DANGER_BUTTON} btn-sm`,
-      target: `#editForm-${todo.id}(outerHTML)`,
+      target: `#editForm-${normalizedTodo.id}(outerHTML)`,
       type: 'button'
     },
     'Cancel'
@@ -423,10 +535,10 @@ export function renderEditForm(todo) {
 
   const editForm = form(
     {
-      id: `editForm-${todo.id}`,
+      id: `editForm-${normalizedTodo.id}`,
       class: 'edit-form surface p-3',
-      PUT: `/todos/${todo.id}`,
-      target: `#todo-${todo.id}(innerHTML)`
+      PUT: `/todos/${normalizedTodo.id}`,
+      target: `#todo-${normalizedTodo.id}(innerHTML)`
     },
     div({ class: 'mb-3' }, inputField),
     div({ class: 'd-flex flex-wrap gap-2' }, saveButton, cancelButton)
@@ -487,7 +599,7 @@ export function TodoWidget(todos) {
    =========================== */
 
 export function renderCounter(counter) {
-  return `Counter: ${counter}`;
+  return `Counter: ${safeString(counter)}`;
 }
 
 export function renderLoadingMessage(message) {

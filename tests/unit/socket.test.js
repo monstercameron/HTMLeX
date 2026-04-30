@@ -78,9 +78,27 @@ test('setupChatNamespace sends history and broadcasts normalized messages', () =
   assert.equal(namespace.emitted[0].eventName, 'chatMessage');
   assert.equal(namespace.emitted[0].payload.username, 'u'.repeat(50));
   assert.equal(namespace.emitted[0].payload.text.length, 1000);
+  assert.match(namespace.emitted[0].payload.id, /^.+-socket-1-\d+$/);
 
   socket.handlers.get('chatMessage')({ username: 'Ada', text: '   ' });
   assert.equal(namespace.emitted.length, 1);
+});
+
+test('socket chat ids fall back when Date.now is unusable', () => {
+  const originalDateNow = Date.now;
+  const server = new FakeSocketServer();
+  setupChatNamespace(server, () => []);
+  const namespace = server.of('/chat');
+  const socket = new FakeSocket();
+  namespace.handlers.get('connection')(socket);
+  Date.now = () => Infinity;
+
+  try {
+    socket.handlers.get('chatMessage')({ username: 'Ada', text: 'Hello' });
+    assert.match(namespace.emitted[0].payload.id, /^0-socket-1-\d+$/u);
+  } finally {
+    Date.now = originalDateNow;
+  }
 });
 
 test('setupChatNamespace persists direct socket messages into later connection history', () => {
@@ -127,6 +145,156 @@ test('setupChatNamespace persists direct socket messages into later connection h
   }]);
 });
 
+test('setupChatNamespace falls back when history loading or broadcast emits fail', () => {
+  class ThrowingNamespace extends FakeNamespace {
+    emit(eventName, payload) {
+      super.emit(eventName, payload);
+      throw new Error('broadcast failed');
+    }
+  }
+  class ThrowingServer extends FakeSocketServer {
+    of(name) {
+      if (!this.namespaces.has(name)) {
+        this.namespaces.set(name, new ThrowingNamespace(name));
+      }
+      return this.namespaces.get(name);
+    }
+  }
+
+  const server = new ThrowingServer();
+  setupChatNamespace(
+    server,
+    () => {
+      throw new Error('history unavailable');
+    },
+    message => ({ id: 1, ...message })
+  );
+  const namespace = server.of('/chat');
+  const socket = new FakeSocket();
+
+  assert.doesNotThrow(() => namespace.handlers.get('connection')(socket));
+  assert.deepEqual(socket.emitted, [{
+    eventName: 'chatHistory',
+    payload: { history: [] }
+  }]);
+
+  assert.doesNotThrow(() => socket.handlers.get('chatMessage')({ username: 'Ada', text: 'Hello' }));
+  assert.deepEqual(namespace.emitted, [{
+    eventName: 'chatMessage',
+    payload: {
+      id: 1,
+      username: 'Ada',
+      text: 'Hello'
+    }
+  }]);
+});
+
+test('setupChatNamespace defers socket message storage until broadcast succeeds', () => {
+  class ThrowingNamespace extends FakeNamespace {
+    emit(eventName, payload) {
+      super.emit(eventName, payload);
+      throw new Error('broadcast failed');
+    }
+  }
+  class ThrowingServer extends FakeSocketServer {
+    of(name) {
+      if (!this.namespaces.has(name)) {
+        this.namespaces.set(name, new ThrowingNamespace(name));
+      }
+      return this.namespaces.get(name);
+    }
+  }
+
+  const history = [];
+  const server = new ThrowingServer();
+  setupChatNamespace(
+    server,
+    () => history,
+    message => ({ id: 'prepared-1', ...message }),
+    message => {
+      history.push(message);
+      return message;
+    }
+  );
+  const namespace = server.of('/chat');
+  const socket = new FakeSocket();
+
+  namespace.handlers.get('connection')(socket);
+  assert.doesNotThrow(() => socket.handlers.get('chatMessage')({ username: 'Ada', text: 'Hello' }));
+
+  assert.deepEqual(namespace.emitted, [{
+    eventName: 'chatMessage',
+    payload: {
+      id: 'prepared-1',
+      username: 'Ada',
+      text: 'Hello'
+    }
+  }]);
+  assert.deepEqual(history, []);
+});
+
+test('setupChatNamespace isolates message recorder failures', () => {
+  const server = new FakeSocketServer();
+  setupChatNamespace(
+    server,
+    () => [],
+    () => {
+      throw new Error('record failed');
+    }
+  );
+  const namespace = server.of('/chat');
+  const socket = new FakeSocket();
+
+  namespace.handlers.get('connection')(socket);
+
+  assert.doesNotThrow(() => socket.handlers.get('chatMessage')({ username: 'Ada', text: 'Hello' }));
+  assert.deepEqual(namespace.emitted, []);
+});
+
+test('setupChatNamespace tolerates hostile message fields and socket ids', () => {
+  const server = new FakeSocketServer();
+  setupChatNamespace(
+    server,
+    () => [],
+    message => ({ id: 'prepared', ...message })
+  );
+  const namespace = server.of('/chat');
+  const socket = new FakeSocket();
+  Object.defineProperty(socket, 'id', {
+    get() {
+      throw new Error('socket id denied');
+    },
+  });
+  namespace.handlers.get('connection')(socket);
+
+  const hostileMessage = {};
+  Object.defineProperties(hostileMessage, {
+    message: {
+      value: ' Hello through fallback ',
+    },
+    text: {
+      get() {
+        throw new Error('text denied');
+      },
+    },
+    username: {
+      get() {
+        throw new Error('username denied');
+      },
+    },
+  });
+
+  assert.doesNotThrow(() => socket.handlers.get('chatMessage')(hostileMessage));
+  assert.deepEqual(namespace.emitted, [{
+    eventName: 'chatMessage',
+    payload: {
+      id: 'prepared',
+      username: 'Anonymous',
+      text: 'Hello through fallback',
+    },
+  }]);
+});
+
 test('setupSocketNamespaces registers all expected namespaces', () => {
   const server = new FakeSocketServer();
 
@@ -136,6 +304,78 @@ test('setupSocketNamespaces registers all expected namespaces', () => {
   assert.equal(typeof server.of('/counter').handlers.get('connection'), 'function');
   assert.equal(typeof server.of('/chat').handlers.get('connection'), 'function');
   assert.equal(typeof server.of('/updates').handlers.get('connection'), 'function');
+});
+
+test('setupSocketNamespaces tolerates namespace initialization failures', () => {
+  const server = {
+    of() {
+      throw new Error('namespace denied');
+    },
+  };
+
+  assert.doesNotThrow(() => setupSocketNamespaces(server, () => []));
+});
+
+test('socket namespaces tolerate listener registration and interval failures', () => {
+  class ThrowingSocket extends FakeSocket {
+    on() {
+      throw new Error('listener denied');
+    }
+  }
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  globalThis.setInterval = () => {
+    throw new Error('interval denied');
+  };
+  globalThis.clearInterval = () => {
+    throw new Error('clear denied');
+  };
+
+  try {
+    const server = new FakeSocketServer();
+    setupCounterNamespace(server);
+    setupUpdatesNamespace(server);
+
+    assert.doesNotThrow(() => server.of('/counter').handlers.get('connection')(new ThrowingSocket()));
+    assert.doesNotThrow(() => server.of('/updates').handlers.get('connection')(new ThrowingSocket()));
+  } finally {
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
+});
+
+test('counter and updates namespaces clear intervals when socket emits fail', () => {
+  class ThrowingSocket extends FakeSocket {
+    emit() {
+      throw new Error('emit failed');
+    }
+  }
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  const intervals = [];
+  globalThis.setInterval = (callback, intervalMs) => {
+    intervals.push({ callback, intervalMs, cleared: false });
+    return intervals.length - 1;
+  };
+  globalThis.clearInterval = (intervalId) => {
+    intervals[intervalId].cleared = true;
+  };
+
+  try {
+    const server = new FakeSocketServer();
+    setupCounterNamespace(server);
+    setupUpdatesNamespace(server);
+    server.of('/counter').handlers.get('connection')(new ThrowingSocket());
+    server.of('/updates').handlers.get('connection')(new ThrowingSocket());
+
+    assert.doesNotThrow(() => intervals[0].callback());
+    assert.doesNotThrow(() => intervals[1].callback());
+    assert.equal(intervals[0].cleared, true);
+    assert.equal(intervals[1].cleared, true);
+  } finally {
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
 });
 
 test('counter namespace emits increments and clears its interval on disconnect', () => {
@@ -150,7 +390,7 @@ test('counter namespace emits increments and clears its interval on disconnect',
   globalThis.clearInterval = (intervalId) => {
     intervals[intervalId].cleared = true;
   };
-  process.env.HTMLEX_TEST_FAST = '1';
+  process.env.HTMLEX_TEST_FAST = ' 1 ';
 
   try {
     const server = new FakeSocketServer();

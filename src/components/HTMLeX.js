@@ -39,6 +39,87 @@
  */
 
 const RAW_HTML = Symbol('HTMLeX.rawHTML');
+const VALID_TAG_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9._:-]*$/u;
+const VALID_ATTRIBUTE_NAME_PATTERN = /^[^\s"'<>/=`]+$/u;
+const VOID_TAG_NAMES = new Set([
+  'area',
+  'base',
+  'br',
+  'col',
+  'embed',
+  'hr',
+  'img',
+  'input',
+  'link',
+  'meta',
+  'param',
+  'source',
+  'track',
+  'wbr'
+]);
+
+function formatNameForError(name) {
+  try {
+    return String(name);
+  } catch {
+    return '[Unstringifiable]';
+  }
+}
+
+function safeString(value, fallback = '') {
+  try {
+    return String(value ?? fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+function safeIsArray(value) {
+  try {
+    return Array.isArray(value);
+  } catch {
+    return false;
+  }
+}
+
+function getObjectField(value, fieldName, fallback = undefined) {
+  try {
+    return value?.[fieldName] ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function getObjectKeys(value) {
+  if (!value || typeof value !== 'object') return [];
+
+  try {
+    return Object.keys(value);
+  } catch {
+    return [];
+  }
+}
+
+function getArrayLength(value) {
+  try {
+    const length = value?.length;
+    return Number.isSafeInteger(length) && length > 0 ? length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function assertValidHtmlName(name, kind) {
+  const pattern = kind === 'tag' ? VALID_TAG_NAME_PATTERN : VALID_ATTRIBUTE_NAME_PATTERN;
+  const hasControlCharacter = typeof name === 'string' &&
+    [...name].some(character => {
+      const codePoint = character.codePointAt(0);
+      return codePoint <= 0x1F || codePoint === 0x7F;
+    });
+  if (typeof name !== 'string' || hasControlCharacter || !pattern.test(name)) {
+    throw new TypeError(`Invalid HTML ${kind} name "${formatNameForError(name)}".`);
+  }
+}
 
 /**
  * Escapes text inserted into an HTML text node.
@@ -46,7 +127,7 @@ const RAW_HTML = Symbol('HTMLeX.rawHTML');
  * @returns {string}
  */
 export function escapeHtml(value) {
-  return String(value ?? '')
+  return safeString(value)
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
@@ -65,11 +146,68 @@ export function escapeAttribute(value) {
 
 /**
  * Marks server-owned HTML as intentionally raw. Do not wrap user input with this.
- * @param {string} html
+ * @param {unknown} html
  * @returns {Object}
  */
 export function rawHtml(html) {
-  return { [RAW_HTML]: true, html: String(html ?? '') };
+  return { [RAW_HTML]: true, html: safeString(html) };
+}
+
+function isVirtualNode(value) {
+  try {
+    return value && typeof value === 'object' && typeof getObjectField(value, 'tag') === 'string';
+  } catch {
+    return false;
+  }
+}
+
+function normalizeTagArguments(attrs, children) {
+  if (
+    attrs === undefined ||
+    attrs === null ||
+    typeof attrs !== 'object' ||
+    safeIsArray(attrs) ||
+    isRawHtmlNode(attrs) ||
+    isVirtualNode(attrs)
+  ) {
+    return [{}, attrs === undefined || attrs === null ? children : [attrs, ...children]];
+  }
+
+  return [attrs, children];
+}
+
+function getAttributeEntries(attributes) {
+  if (!attributes || typeof attributes !== 'object') return [];
+
+  return getObjectKeys(attributes).flatMap(key => {
+    const value = getObjectField(attributes, key, undefined);
+    return value === undefined ? [] : [[key, value]];
+  });
+}
+
+function normalizeChildren(children) {
+  if (children === undefined || children === null) return [];
+  return safeIsArray(children) ? children : [children];
+}
+
+function isRawHtmlNode(node) {
+  try {
+    return Boolean(node?.[RAW_HTML]);
+  } catch {
+    return false;
+  }
+}
+
+function renderChildList(children) {
+  const normalizedChildren = normalizeChildren(children);
+  if (!safeIsArray(normalizedChildren)) return render(normalizedChildren);
+
+  let html = '';
+  for (let index = 0; index < getArrayLength(normalizedChildren); index += 1) {
+    const child = getObjectField(normalizedChildren, index, undefined);
+    if (child !== undefined) html += render(child);
+  }
+  return html;
 }
 
 /**
@@ -77,14 +215,18 @@ export function rawHtml(html) {
  *
  * @param {string} tagName - The HTML tag name (e.g., "div", "span").
  * @param {HTMLeXAttrs} [attrs={}] - An object of attributes conforming to the HTMLeX specification.
- * @param {...(string|Object)} children - Child nodes, which can be strings or other virtual nodes.
+ * @param {...(string|number|bigint|boolean|Object|Array)} children - Child nodes, primitives, raw HTML nodes, arrays, or virtual nodes.
  * @returns {Object} A virtual node.
  */
-export const tag = (tagName, attrs = {}, ...children) => ({
-  tag: tagName,
-  attrs,
-  children
-});
+export const tag = (tagName, attrs = {}, ...children) => {
+  assertValidHtmlName(tagName, 'tag');
+  const [normalizedAttrs, normalizedChildren] = normalizeTagArguments(attrs, children);
+  return {
+    tag: tagName,
+    attrs: normalizedAttrs,
+    children: normalizedChildren
+  };
+};
 
 /**
  * An array of common HTML tag names.
@@ -131,22 +273,35 @@ export const { div, button, span, p, a } = tags;
 /**
  * Recursively renders a virtual node or string into an HTML string.
  *
- * @param {Object|string} node - The virtual node or string to render.
+ * @param {Object|string|number|bigint|boolean|Array|null|undefined} node - The value to render.
  * @returns {string} The resulting HTML string.
  */
 export const render = (node) => {
-  if (Array.isArray(node)) return node.map(render).join('');
+  if (safeIsArray(node)) return renderChildList(node);
   if (typeof node === 'string' || typeof node === 'number' || typeof node === 'boolean') {
     return escapeHtml(node);
   }
+  if (typeof node === 'bigint') {
+    return escapeHtml(safeString(node));
+  }
   if (!node || typeof node !== 'object') return '';
-  if (node[RAW_HTML]) return node.html;
-  const { tag: tagName, attrs: attributes, children } = node;
-  const attributeHtml = Object.entries(attributes || {})
+  if (isRawHtmlNode(node)) return safeString(getObjectField(node, 'html', ''));
+  const tagName = getObjectField(node, 'tag', null);
+  if (typeof tagName !== 'string') return '';
+  const attributes = getObjectField(node, 'attrs', {});
+  const children = getObjectField(node, 'children', []);
+  assertValidHtmlName(tagName, 'tag');
+  const attributeHtml = getAttributeEntries(attributes)
     .filter(([, value]) => value !== undefined && value !== null && value !== false)
-    .map(([key, value]) => value === true ? `${key}` : `${key}="${escapeAttribute(value)}"`)
+    .map(([key, value]) => {
+      assertValidHtmlName(key, 'attribute');
+      return value === true ? `${key}` : `${key}="${escapeAttribute(value)}"`;
+    })
     .join(' ');
-  const childHtml = (children || []).map(render).join('');
+  if (VOID_TAG_NAMES.has(tagName.toLowerCase())) {
+    return `<${tagName}${attributeHtml ? ' ' + attributeHtml : ''}>`;
+  }
+  const childHtml = renderChildList(children);
   return `<${tagName}${attributeHtml ? ' ' + attributeHtml : ''}>${childHtml}</${tagName}>`;
 };
 
@@ -162,8 +317,8 @@ export const render = (node) => {
  * A fragment is a container element that may include an optional status attribute
  * (e.g., "500" for an error) and wraps provided content.
  *
- * @param {Object|string} content - The content to be included in the fragment.
- * @param {string} [status] - Optional status code for the fragment.
+ * @param {Object|string|number|bigint|boolean|Array|null|undefined} content - The content to be included in the fragment.
+ * @param {string|number|bigint|boolean|null|undefined} [status] - Optional status code for the fragment.
  * @returns {Object} A virtual fragment node.
  *
  * @example
@@ -182,8 +337,8 @@ export const createFragment = (content, status) => {
  * content should be applied. Useful for progressive updates to the DOM.
  *
  * @param {string} target - A CSS selector representing the target element.
- * @param {Object|string} content - The content to be wrapped in the fragment.
- * @param {string} [status] - Optional status code for the fragment.
+ * @param {Object|string|number|bigint|boolean|Array|null|undefined} content - The content to be wrapped in the fragment.
+ * @param {string|number|bigint|boolean|null|undefined} [status] - Optional status code for the fragment.
  * @returns {Object} A virtual fragment node with a target attribute.
  *
  * @example
@@ -202,10 +357,15 @@ function normalizeFragmentAttributes(target, fragmentAttributes) {
     return { target };
   }
 
-  if (typeof fragmentAttributes === 'object' && !Array.isArray(fragmentAttributes)) {
-    const attributes = { ...fragmentAttributes };
-    delete attributes.target;
-    return { ...attributes, target };
+  if (typeof fragmentAttributes === 'object' && !safeIsArray(fragmentAttributes)) {
+    const attributes = {};
+    for (const key of getObjectKeys(fragmentAttributes)) {
+      if (key === 'target') continue;
+      const value = getObjectField(fragmentAttributes, key, undefined);
+      if (value !== undefined) attributes[key] = value;
+    }
+    attributes.target = target;
+    return attributes;
   }
 
   return {
@@ -218,8 +378,8 @@ function normalizeFragmentAttributes(target, fragmentAttributes) {
  * Wraps HTML content into an HTMLeX fragment for progressive updates.
  *
  * @param {string} target - A CSS selector that identifies the target element.
- * @param {string} htmlContent - The HTML content to be injected.
- * @param {string|Object} [fragmentAttributes] - Optional fragment attributes or status code.
+ * @param {unknown} htmlContent - The HTML content to be injected.
+ * @param {string|number|bigint|boolean|Object|null|undefined} [fragmentAttributes] - Optional fragment attributes or status code.
  * @returns {string} HTML string representing the fragment.
  *
  * @example

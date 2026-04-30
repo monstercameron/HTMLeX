@@ -80,7 +80,10 @@ const HOVER_MESSAGE_ROUTE = '/hover/message';
 const SOCKET_NS_COUNTER = '/counter';
 const SOCKET_NS_CHAT = '/chat';
 const SOCKET_NS_UPDATES = '/updates';
-const SLOW_REQUEST_THRESHOLD_MS = Number.parseInt(process.env.HTMLEX_SLOW_REQUEST_MS || '1000', 10);
+const SLOW_REQUEST_THRESHOLD_MS = parseBoundedInteger(
+  process.env.HTMLEX_SLOW_REQUEST_MS || '1000',
+  { min: 1, defaultValue: 1000 }
+);
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5000;
 const MULTIPART_FIELD_SIZE_LIMIT_BYTES = 32 * 1024;
 const MULTIPART_FIELD_COUNT_LIMIT = 50;
@@ -115,46 +118,190 @@ const SECURITY_HEADERS = {
 
 let sharedRuntime = null;
 let processHandlersInstalled = false;
+let fallbackRequestIdSequence = 0;
+
+function safeString(value, fallback = '') {
+  try {
+    return String(value ?? fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+function getField(target, fieldName, fallback = undefined) {
+  try {
+    return target?.[fieldName] ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function setField(target, fieldName, value) {
+  try {
+    if (target && typeof target === 'object') {
+      target[fieldName] = value;
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function deleteField(target, fieldName) {
+  try {
+    if (target && typeof target === 'object') {
+      delete target[fieldName];
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function callMethod(target, methodName, args = [], fallback = undefined) {
+  try {
+    const method = target?.[methodName];
+    if (typeof method !== 'function') return fallback;
+    return method.apply(target, args);
+  } catch {
+    return fallback;
+  }
+}
+
+function getMethod(target, methodName) {
+  try {
+    const method = target?.[methodName];
+    return typeof method === 'function' ? method : null;
+  } catch {
+    return null;
+  }
+}
+
+function safeCall(callback, args = [], fallback = undefined) {
+  try {
+    return typeof callback === 'function' ? callback(...args) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function safeNow() {
+  const timestamp = callMethod(globalThis.performance, 'now');
+  if (Number.isFinite(timestamp)) return timestamp;
+
+  const epochTimestamp = callMethod(Date, 'now');
+  return Number.isFinite(epochTimestamp) ? epochTimestamp : 0;
+}
+
+function safeRandomUUID() {
+  const generatedId = safeCall(randomUUID);
+  if (typeof generatedId === 'string' && REQUEST_ID_PATTERN.test(generatedId)) {
+    return generatedId;
+  }
+
+  fallbackRequestIdSequence = (fallbackRequestIdSequence + 1) % Number.MAX_SAFE_INTEGER;
+  const timestampPart = Math.trunc(safeNow()).toString(36);
+  const randomValue = safeCall(Math.random, [], 0);
+  const randomPart = Number.isFinite(randomValue)
+    ? randomValue.toString(36).slice(2, 12)
+    : 'fallback';
+
+  return `${timestampPart}-${randomPart}-${fallbackRequestIdSequence.toString(36)}`;
+}
+
+function parseBoundedInteger(value, { min = 0, max = Number.MAX_SAFE_INTEGER, defaultValue = null } = {}) {
+  const normalizedValue = safeString(value).trim();
+  if (!/^\d+$/u.test(normalizedValue)) return defaultValue;
+
+  const parsed = Number.parseInt(normalizedValue, 10);
+  return Number.isSafeInteger(parsed) && parsed >= min && parsed <= max
+    ? parsed
+    : defaultValue;
+}
 
 function getShutdownTimeoutMs() {
-  const shutdownTimeoutMs = Number.parseInt(
-    process.env.HTMLEX_SHUTDOWN_TIMEOUT_MS || String(DEFAULT_SHUTDOWN_TIMEOUT_MS),
-    10
+  return parseBoundedInteger(
+    process.env.HTMLEX_SHUTDOWN_TIMEOUT_MS || safeString(DEFAULT_SHUTDOWN_TIMEOUT_MS),
+    { min: 1, defaultValue: DEFAULT_SHUTDOWN_TIMEOUT_MS }
   );
-  return Number.isFinite(shutdownTimeoutMs) && shutdownTimeoutMs > 0
-    ? shutdownTimeoutMs
-    : DEFAULT_SHUTDOWN_TIMEOUT_MS;
+}
+
+function getRequestHeader(req, headerName) {
+  return safeString(callMethod(req, 'get', [headerName])).trim();
 }
 
 function getRequestId(req) {
-  const incomingRequestId = req.get('x-request-id')?.trim();
+  const incomingRequestId = getRequestHeader(req, 'x-request-id');
   return incomingRequestId && REQUEST_ID_PATTERN.test(incomingRequestId)
     ? incomingRequestId
-    : randomUUID();
+    : safeRandomUUID();
+}
+
+function getRequestIdForResponse(req) {
+  return safeString(getField(req, 'requestId', 'unknown'), 'unknown');
+}
+
+function setResponseHeader(res, name, value) {
+  callMethod(res, 'setHeader', [name, value]);
+}
+
+function onResponseFinish(res, callback) {
+  callMethod(res, 'on', ['finish', callback]);
+}
+
+function getResponseStatusCode(res, fallback = 500) {
+  const statusCode = getField(res, 'statusCode', fallback);
+  return Number.isInteger(statusCode) ? statusCode : fallback;
+}
+
+function hasLoggedRequestIssue(req) {
+  return getField(req, '_htmlexIssueLogged', false) === true;
+}
+
+function headersWereSent(res) {
+  return getField(res, 'headersSent', false) === true;
+}
+
+function safeNext(next, error = undefined) {
+  if (error === undefined) {
+    safeCall(next);
+    return;
+  }
+  safeCall(next, [error]);
+}
+
+function sendPlainText(res, statusCode, body) {
+  const statusResult = callMethod(res, 'status', [statusCode], res);
+  const typeResult = callMethod(statusResult || res, 'type', ['text/plain'], statusResult || res);
+  callMethod(typeResult || res, 'send', [body]);
 }
 
 function requestContext(req, res, next) {
-  req.requestId = getRequestId(req);
-  res.setHeader('X-Request-Id', req.requestId);
+  const requestId = getRequestId(req);
+  setField(req, 'requestId', requestId);
+  setResponseHeader(res, 'X-Request-Id', requestId);
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
-    res.setHeader(name, value);
+    setResponseHeader(res, name, value);
   }
 
-  const startedAt = performance.now();
-  res.on('finish', () => {
-    const durationMs = Math.round(performance.now() - startedAt);
+  const startedAt = safeNow();
+  onResponseFinish(res, () => {
+    const durationMs = Math.max(0, Math.round(safeNow() - startedAt));
+    const statusCode = getResponseStatusCode(res);
     const details = {
-      statusCode: res.statusCode,
+      statusCode,
       durationMs,
     };
 
-    if (res.statusCode >= 500 && !req._htmlexIssueLogged) {
-      logRequestError(req, `Request completed with HTTP ${res.statusCode}.`, null, details);
+    if (statusCode >= 500 && !hasLoggedRequestIssue(req)) {
+      logRequestError(req, `Request completed with HTTP ${statusCode}.`, null, details);
       return;
     }
 
-    if (res.statusCode >= 400 && !req._htmlexIssueLogged) {
-      logRequestWarning(req, `Request completed with HTTP ${res.statusCode}.`, details);
+    if (statusCode >= 400 && !hasLoggedRequestIssue(req)) {
+      logRequestWarning(req, `Request completed with HTTP ${statusCode}.`, details);
       return;
     }
 
@@ -163,91 +310,128 @@ function requestContext(req, res, next) {
     }
   });
 
-  next();
+  safeNext(next);
 }
 
 function routeBoundary(routeName, handler) {
   return async (req, res, next) => {
-    req.routeName = routeName;
+    setField(req, 'routeName', routeName);
     try {
       await handler(req, res, next);
     } catch (error) {
-      next(error);
+      safeNext(next, error);
     }
   };
 }
 
 function markRoute(routeName) {
   return (req, res, next) => {
-    req.routeName = routeName;
-    next();
+    setField(req, 'routeName', routeName);
+    safeNext(next);
   };
 }
 
 function notFoundBoundary(req, res) {
   logRequestWarning(req, 'No route matched request.', { statusCode: 404 });
-  res.status(404).type('text/plain').send(`Not found. Request ID: ${req.requestId}`);
+  sendPlainText(res, 404, `Not found. Request ID: ${getRequestIdForResponse(req)}`);
 }
 
 function expressErrorBoundary(error, req, res, next) {
   if (error instanceof multer.MulterError) {
-    const statusCode = MULTIPART_PAYLOAD_LIMIT_CODES.has(error.code) ? 413 : 400;
+    const errorCode = getField(error, 'code');
+    const statusCode = MULTIPART_PAYLOAD_LIMIT_CODES.has(errorCode) ? 413 : 400;
     logRequestWarning(req, 'Rejected multipart form payload.', {
-      code: error.code,
-      field: error.field,
+      code: errorCode,
+      field: getField(error, 'field'),
       statusCode,
     });
 
-    if (res.headersSent) {
-      next(error);
+    if (headersWereSent(res)) {
+      safeNext(next, error);
       return;
     }
 
-    res.status(statusCode).type('text/plain').send(`Invalid form payload. Request ID: ${req.requestId}`);
+    sendPlainText(res, statusCode, `Invalid form payload. Request ID: ${getRequestIdForResponse(req)}`);
     return;
   }
 
   logRequestError(req, 'Unhandled Express route error.', error, {
-    statusCode: res.headersSent ? res.statusCode : 500,
+    statusCode: headersWereSent(res) ? getResponseStatusCode(res) : 500,
   });
 
-  if (res.headersSent) {
-    next(error);
+  if (headersWereSent(res)) {
+    safeNext(next, error);
     return;
   }
 
-  res.status(500).type('text/plain').send(`Internal server error. Request ID: ${req.requestId}`);
+  sendPlainText(res, 500, `Internal server error. Request ID: ${getRequestIdForResponse(req)}`);
+}
+
+function registerServerHandler(server, eventName, handler) {
+  callMethod(server, 'on', [eventName, handler]);
+}
+
+function unregisterServerHandler(server, eventName, handler) {
+  callMethod(server, 'off', [eventName, handler]);
+}
+
+function registerOneTimeServerHandler(server, eventName, handler) {
+  callMethod(server, 'once', [eventName, handler]);
+}
+
+function isSocketDestroyed(socket) {
+  return getField(socket, 'destroyed', true) === true;
+}
+
+function destroySocket(socket) {
+  if (!socket || isSocketDestroyed(socket)) return;
+  try {
+    const destroy = getMethod(socket, 'destroy');
+    if (destroy) destroy.call(socket);
+  } catch (destroyError) {
+    serverLogger.error('server', 'Error destroying client socket.', destroyError);
+  }
+}
+
+function endSocket(socket, payload) {
+  if (!socket || isSocketDestroyed(socket)) return;
+  if (getField(socket, 'writable', false) === true) {
+    const result = callMethod(socket, 'end', [payload], false);
+    if (result !== false) return;
+  }
+  destroySocket(socket);
 }
 
 function attachServerErrorHandlers(server) {
-  server.on('error', (error) => {
+  registerServerHandler(server, 'error', (error) => {
     serverLogger.error('server', 'HTTPS server error.', error);
   });
 
-  server.on('clientError', (error, socket) => {
-    if (error?.code === 'ERR_SSL_SSL/TLS_ALERT_CERTIFICATE_UNKNOWN' || error?.code === 'ECONNRESET') {
-      if (socket && !socket.destroyed) socket.destroy();
+  registerServerHandler(server, 'clientError', (error, socket) => {
+    const errorCode = getField(error, 'code');
+    if (errorCode === 'ERR_SSL_SSL/TLS_ALERT_CERTIFICATE_UNKNOWN' || errorCode === 'ECONNRESET') {
+      destroySocket(socket);
       return;
     }
 
     serverLogger.warn('server', 'Client connection error.', {
-      code: error?.code,
-      message: error?.message,
+      code: errorCode,
+      message: getField(error, 'message'),
     });
-    if (socket && socket.writable && !socket.destroyed) {
-      socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
-    } else if (socket && !socket.destroyed) {
-      try {
-        socket.destroy();
-      } catch (destroyError) {
-        serverLogger.error('server', 'Error destroying client socket.', destroyError);
-      }
-    }
+    endSocket(socket, 'HTTP/1.1 400 Bad Request\r\n\r\n');
   });
 }
 
+function serverIsListening(server) {
+  return getField(server, 'listening', false) === true;
+}
+
+function getServerAddress(server) {
+  return callMethod(server, 'address', [], null);
+}
+
 function listen(server, port) {
-  if (server.listening) {
+  if (serverIsListening(server)) {
     return server;
   }
 
@@ -257,38 +441,85 @@ function listen(server, port) {
       reject(error);
     };
 
-    server.once('error', onError);
-    server.listen(port, () => {
-      server.off('error', onError);
-      const address = server.address();
-      const actualPort = typeof address === 'object' && address ? address.port : port;
-      serverLogger.info('server', `Express HTTPS server listening on https://localhost:${actualPort}`, {
-        features: [
-          'HTTPS',
-          `Socket.IO namespaces: ${SOCKET_NS_COUNTER}, ${SOCKET_NS_CHAT}, ${SOCKET_NS_UPDATES}`,
-          'Todo API endpoints',
-          'Streaming support',
-        ],
+    registerOneTimeServerHandler(server, 'error', onError);
+    const serverListen = getMethod(server, 'listen');
+    if (!serverListen) {
+      unregisterServerHandler(server, 'error', onError);
+      reject(new Error('HTTPS server does not expose a listen method.'));
+      return;
+    }
+
+    try {
+      serverListen.call(server, port, () => {
+        unregisterServerHandler(server, 'error', onError);
+        const address = getServerAddress(server);
+        const actualPort = typeof address === 'object' && address ? address.port : port;
+        serverLogger.info('server', `Express HTTPS server listening on https://localhost:${actualPort}`, {
+          features: [
+            'HTTPS',
+            `Socket.IO namespaces: ${SOCKET_NS_COUNTER}, ${SOCKET_NS_CHAT}, ${SOCKET_NS_UPDATES}`,
+            'Todo API endpoints',
+            'Streaming support',
+          ],
+        });
+        resolve(server);
       });
-      resolve(server);
-    });
+    } catch (error) {
+      unregisterServerHandler(server, 'error', onError);
+      reject(error);
+    }
   });
 }
 
 function getListeningPort(server) {
-  const address = server.address();
+  const address = getServerAddress(server);
   return typeof address === 'object' && address ? address.port : null;
 }
 
 function getRequestedPort(port) {
-  const requestedPort = Number.parseInt(port, 10);
-  return Number.isFinite(requestedPort) ? requestedPort : null;
+  return parseBoundedInteger(port, { min: 0, max: 65535, defaultValue: null });
+}
+
+function normalizeListenTarget(port) {
+  const requestedPort = getRequestedPort(port);
+  if (requestedPort !== null) return requestedPort;
+
+  throw new TypeError(`Invalid port "${safeString(port, '[Unstringifiable]')}". Expected an integer from 0 through 65535.`);
+}
+
+function safeClearTimer(timerId) {
+  try {
+    clearTimeout(timerId);
+  } catch (error) {
+    serverLogger.warn('server', 'Failed to clear shutdown timeout.', { message: getField(error, 'message') });
+  }
+}
+
+function safeSetTimer(callback, delayMs) {
+  try {
+    return setTimeout(callback, delayMs);
+  } catch (error) {
+    serverLogger.error('server', 'Failed to schedule shutdown timeout.', error);
+    return null;
+  }
+}
+
+function closeAllHttpConnections(server) {
+  callMethod(server, 'closeAllConnections');
+}
+
+function closeIdleHttpConnections(server) {
+  callMethod(server, 'closeIdleConnections');
+}
+
+function safeExit(exit, exitCode) {
+  safeCall(exit, [exitCode]);
 }
 
 function closeSharedServer(exit) {
   const runtime = sharedRuntime;
-  if (!runtime?.server) {
-    exit(0);
+  if (!getField(runtime, 'server')) {
+    safeExit(exit, 0);
     return;
   }
 
@@ -298,29 +529,36 @@ function closeSharedServer(exit) {
   const finish = (exitCode = 0) => {
     if (settled) return;
     settled = true;
-    clearTimeout(timeoutId);
+    safeClearTimer(timeoutId);
     if (sharedRuntime === runtime) {
       sharedRuntime = null;
     }
-    exit(exitCode);
+    safeExit(exit, exitCode);
   };
 
-  const timeoutId = setTimeout(() => {
+  const timeoutId = safeSetTimer(() => {
     serverLogger.warn('server', 'Timed out waiting for graceful shutdown. Forcing open HTTP connections closed.', {
       timeoutMs: getShutdownTimeoutMs(),
     });
-    server.closeAllConnections?.();
+    closeAllHttpConnections(server);
     finish(1);
   }, getShutdownTimeoutMs());
 
   const closeHttpServer = () => {
-    if (!server.listening) {
+    if (!serverIsListening(server)) {
       finish(0);
       return;
     }
 
     try {
-      server.close((error) => {
+      const closeServer = getMethod(server, 'close');
+      if (!closeServer) {
+        serverLogger.error('server', 'HTTP server does not expose a close method.');
+        finish(1);
+        return;
+      }
+
+      closeServer.call(server, (error) => {
         if (error) {
           serverLogger.error('server', 'HTTP server close failed.', error);
           finish(1);
@@ -330,9 +568,9 @@ function closeSharedServer(exit) {
         serverLogger.info('server', 'HTTP server closed.');
         finish(0);
       });
-      server.closeIdleConnections?.();
+      closeIdleHttpConnections(server);
     } catch (error) {
-      if (error?.code === 'ERR_SERVER_NOT_RUNNING') {
+      if (getField(error, 'code') === 'ERR_SERVER_NOT_RUNNING') {
         finish(0);
         return;
       }
@@ -344,7 +582,14 @@ function closeSharedServer(exit) {
 
   if (socketServer) {
     try {
-      socketServer.close(() => {
+      const closeSocketServer = getMethod(socketServer, 'close');
+      if (!closeSocketServer) {
+        serverLogger.error('server', 'Socket.IO server does not expose a close method.');
+        closeHttpServer();
+        return;
+      }
+
+      closeSocketServer.call(socketServer, () => {
         serverLogger.info('server', 'Socket.IO server closed.');
         closeHttpServer();
       });
@@ -392,10 +637,12 @@ export function createApp({ getSocketServer = null } = {}) {
     const indexPath = path.join(SRC_DIR, PUBLIC_DIR, INDEX_FILE);
     try {
       await access(indexPath);
-      return res.sendFile(indexPath);
+      const sendFileResult = callMethod(res, 'sendFile', [indexPath], false);
+      if (sendFileResult !== false) return sendFileResult;
     } catch {
-      return res.send(renderDefaultIndexPage());
+      // Fall through to the rendered fallback page.
     }
+    return callMethod(res, 'send', [renderDefaultIndexPage()]);
   }));
 
   // Demo management route.
@@ -476,16 +723,16 @@ export async function createHttpsServer({ app: expressApp = null, projectRoot = 
   const serverApp = expressApp || createApp({ getSocketServer: () => socketServer });
   const server = https.createServer(httpsOptions, serverApp);
   socketServer = new SocketIOServer(server);
-  serverApp.locals.htmlexSocketServer = socketServer;
-  setupSocketNamespaces(socketServer, chat.getChatHistory, chat.recordChatMessage);
+  setField(serverApp.locals, 'htmlexSocketServer', socketServer);
+  setupSocketNamespaces(socketServer, chat.getChatHistory, chat.createChatMessage, chat.storeChatMessage);
   attachServerErrorHandlers(server);
 
-  server.on('close', () => {
-    if (sharedRuntime?.server === server) {
+  registerServerHandler(server, 'close', () => {
+    if (getField(sharedRuntime, 'server') === server) {
       sharedRuntime = null;
     }
-    if (serverApp.locals.htmlexSocketServer === socketServer) {
-      delete serverApp.locals.htmlexSocketServer;
+    if (getField(serverApp.locals, 'htmlexSocketServer') === socketServer) {
+      deleteField(serverApp.locals, 'htmlexSocketServer');
     }
   });
 
@@ -498,22 +745,24 @@ export const app = createApp();
 // Start Server
 // ------------------------------
 export async function startServer(port = PORT) {
-  if (sharedRuntime?.server?.listening) {
-    const currentPort = getListeningPort(sharedRuntime.server);
-    const requestedPort = getRequestedPort(port);
-    if (requestedPort && currentPort !== requestedPort) {
+  const listenTarget = normalizeListenTarget(port);
+  const currentServer = getField(sharedRuntime, 'server');
+  if (serverIsListening(currentServer)) {
+    const currentPort = getListeningPort(currentServer);
+    const requestedPort = getRequestedPort(listenTarget);
+    if (requestedPort !== null && requestedPort !== 0 && currentPort !== requestedPort) {
       throw new Error(
         `HTMLeX server is already listening on port ${currentPort}; requested port ${requestedPort}.`
       );
     }
-    return sharedRuntime.server;
+    return currentServer;
   }
 
   if (!sharedRuntime) {
     sharedRuntime = await createHttpsServer({ app });
   }
 
-  return listen(sharedRuntime.server, port);
+  return listen(sharedRuntime.server, listenTarget);
 }
 
 export function stopServer({ exit = process.exit } = {}) {
@@ -524,18 +773,18 @@ export function installProcessHandlers({ exit = process.exit } = {}) {
   if (processHandlersInstalled) return;
   processHandlersInstalled = true;
 
-  process.on('uncaughtException', (error) => {
+  registerServerHandler(process, 'uncaughtException', (error) => {
     serverLogger.fatal('process', 'Uncaught exception. Exiting process.', error);
-    exit(1);
+    safeExit(exit, 1);
   });
-  process.on('unhandledRejection', (reason, promise) => {
+  registerServerHandler(process, 'unhandledRejection', (reason, promise) => {
     serverLogger.error('process', 'Unhandled promise rejection.', reason, { promise });
   });
-  process.on('SIGTERM', () => {
+  registerServerHandler(process, 'SIGTERM', () => {
     serverLogger.info('process', 'SIGTERM received. Closing HTTP server.');
     closeSharedServer(exit);
   });
-  process.on('SIGINT', () => {
+  registerServerHandler(process, 'SIGINT', () => {
     serverLogger.info('process', 'SIGINT received. Closing HTTP server.');
     closeSharedServer(exit);
   });
@@ -547,7 +796,7 @@ if (process.argv[1] === import.meta.filename) {
     await startServer();
   } catch (error) {
     serverLogger.fatal('server', 'Failed to start server.', error);
-    process.exit(1);
+    safeExit(process.exit, 1);
   }
 }
 

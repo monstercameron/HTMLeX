@@ -5,6 +5,7 @@ import {
   Aside,
   Canvas,
   DEMO_SNIPPETS,
+  DemoActions,
   DemoItem,
   DemoList,
   Footer,
@@ -44,6 +45,26 @@ const sampleDemo = {
   learnMoreHref: 'https://example.test/docs',
   initDemoHref: '/test/init',
 };
+
+function valueWithThrowingString() {
+  return {
+    toString() {
+      throw new Error('string unavailable');
+    },
+  };
+}
+
+function arrayWithHostileSlot(firstItem) {
+  return new Proxy([firstItem], {
+    get(target, property, receiver) {
+      if (property === 'length') return 2;
+      if (property === '1') {
+        throw new Error('array slot unavailable');
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
+}
 
 test('todo list escapes persisted todo text', () => {
   const html = render(renderTodoList([
@@ -156,4 +177,75 @@ test('demo widgets expose their expected HTMLeX declarative attributes', () => {
   assert.match(html, /sequential="2500"/);
   assert.match(html, /GET="\/demo\/loading"/);
   assert.match(html, /target="#loadingDemoOutput\(innerHTML\)"/);
+});
+
+test('layout and demo helpers tolerate missing props, hostile arrays, and hostile getters', () => {
+  const hostileClass = valueWithThrowingString();
+  const hostileDemo = {
+    icon: '!',
+    title: 'Hostile Demo',
+    subtitle: 'Still renders',
+    get description() {
+      throw new Error('description unavailable');
+    },
+    highlights: arrayWithHostileSlot('Safe highlight'),
+    launchButtonText: 'Launch',
+    learnMoreText: 'Docs',
+    learnMoreHref: '/docs',
+    initDemoHref: '/demo/init',
+  };
+  const hostileHeaderProps = {};
+  Object.defineProperty(hostileHeaderProps, 'title', {
+    enumerable: true,
+    get() {
+      throw new Error('title unavailable');
+    },
+  });
+
+  const html = render([
+    HtmlSnippet(),
+    DemoActions(),
+    DemoItem(hostileDemo),
+    DemoList(arrayWithHostileSlot(hostileDemo)),
+    Aside({ demos: arrayWithHostileSlot(hostileDemo), asideClass: hostileClass }),
+    Canvas({ headerText: 'Canvas', clickCount: hostileClass, sectionClass: hostileClass }),
+    Footer({
+      year: hostileClass,
+      copyText: hostileClass,
+      projectLinks: arrayWithHostileSlot({ href: '/docs', icon: '?', text: 'Docs' }),
+      footerClass: hostileClass,
+    }),
+    FullHTML({
+      headerProps: hostileHeaderProps,
+      demos: arrayWithHostileSlot(hostileDemo),
+      canvasProps: { clickCount: hostileClass },
+      footerProps: { projectLinks: arrayWithHostileSlot({ href: '/docs', icon: '?', text: 'Docs' }) },
+    }),
+  ]);
+
+  assert.match(html, /HTML pattern/);
+  assert.match(html, /Hostile Demo/);
+  assert.match(html, /Safe highlight/);
+  assert.match(html, /GET="\/demo\/init"/);
+  assert.match(html, /catalog-list/);
+  assert.match(html, /Copyright/);
+  assert.match(html, /^<div class="snippet-panel|[\s\S]*<html lang="en"/);
+});
+
+test('todo and utility renderers tolerate malformed data without throwing', () => {
+  const hostileText = valueWithThrowingString();
+  const hostileTodo = {
+    id: 9,
+    get text() {
+      throw new Error('todo text unavailable');
+    },
+  };
+  const hostileTodos = arrayWithHostileSlot(hostileTodo);
+
+  assert.match(render(renderTodoList(undefined)), /No todos available/);
+  assert.match(render(renderTodoList(hostileTodos)), /id="todo-9"/);
+  assert.match(renderTodoItems(hostileTodos), /id="todo-9"/);
+  assert.equal(renderTodoItems(undefined), '');
+  assert.match(renderEditForm({ id: hostileText, text: hostileText }), /id="editForm-"/);
+  assert.equal(renderCounter(hostileText), 'Counter: ');
 });

@@ -6,32 +6,98 @@
  */
 
 import { logRequestError, logRequestWarning } from '../serverLogger.js';
+import { sendEmptyResponse, sendServerError, sendTextResponse } from './responses.js';
 
 /**
  * In-memory storage for chat messages.
  * @type {Array<Object>}
  */
 let chatMessages = [];
+let chatMessageSequence = 0;
 const MAX_CHAT_MESSAGES = 100;
 const MAX_USERNAME_LENGTH = 50;
 const MAX_MESSAGE_LENGTH = 1000;
 
+function safeString(value, fallback = '') {
+  try {
+    return String(value ?? fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+function getObjectField(value, fieldName, fallback = undefined) {
+  try {
+    return value?.[fieldName] ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function getCurrentTimestamp() {
+  try {
+    const timestamp = Date.now();
+    return Number.isSafeInteger(timestamp) ? timestamp : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function normalizeMessageInput(messageInput) {
+  return messageInput && typeof messageInput === 'object' ? messageInput : {};
+}
+
 function normalizeText(value, maxLength) {
-  return String(value ?? '').trim().slice(0, maxLength);
+  return safeString(value).trim().slice(0, maxLength);
+}
+
+function createChatMessageId() {
+  chatMessageSequence += 1;
+  return `${getCurrentTimestamp()}-${chatMessageSequence}`;
+}
+
+function normalizeMessageId(value) {
+  const normalizedValue = safeString(value).trim();
+  return normalizedValue || createChatMessageId();
+}
+
+function getMessageTextValue(input) {
+  const message = getObjectField(input, 'message', undefined);
+  return message ?? getObjectField(input, 'text', '');
+}
+
+function cloneChatMessage(message) {
+  const input = normalizeMessageInput(message);
+  return {
+    id: normalizeMessageId(getObjectField(input, 'id', '')),
+    username: normalizeText(getObjectField(input, 'username', ''), MAX_USERNAME_LENGTH) || 'Anonymous',
+    text: normalizeText(getMessageTextValue(input), MAX_MESSAGE_LENGTH)
+  };
+}
+
+export function createChatMessage(messageInput = {}) {
+  const input = normalizeMessageInput(messageInput);
+  const message = normalizeText(getMessageTextValue(input), MAX_MESSAGE_LENGTH);
+  if (!message) return null;
+
+  return {
+    id: normalizeMessageId(getObjectField(input, 'id', '')),
+    username: normalizeText(getObjectField(input, 'username', ''), MAX_USERNAME_LENGTH) || 'Anonymous',
+    text: message
+  };
+}
+
+export function storeChatMessage(chatMessage) {
+  const normalizedMessage = createChatMessage(chatMessage);
+  if (!normalizedMessage) return null;
+  chatMessages.push(normalizedMessage);
+  chatMessages = chatMessages.slice(-MAX_CHAT_MESSAGES);
+  return normalizedMessage;
 }
 
 export function recordChatMessage(messageInput = {}) {
-  const message = normalizeText(messageInput.message ?? messageInput.text, MAX_MESSAGE_LENGTH);
-  if (!message) return null;
-
-  const chatMessage = {
-    id: Date.now(),
-    username: normalizeText(messageInput.username, MAX_USERNAME_LENGTH) || 'Anonymous',
-    text: message
-  };
-  chatMessages.push(chatMessage);
-  chatMessages = chatMessages.slice(-MAX_CHAT_MESSAGES);
-  return chatMessage;
+  const chatMessage = createChatMessage(messageInput);
+  return chatMessage ? storeChatMessage(chatMessage) : null;
 }
 
 /**
@@ -45,19 +111,18 @@ export function recordChatMessage(messageInput = {}) {
  */
 export async function sendChatMessage(req, res, chatNamespace) {
   try {
-    const chatMessage = recordChatMessage(req.body);
+    const chatMessage = createChatMessage(getObjectField(req, 'body', {}));
     if (!chatMessage) {
       logRequestWarning(req, 'Rejected chat message without text.', { statusCode: 400 });
-      if (!res.headersSent) {
-        res.status(400).send('Missing chat message');
-      }
+      sendTextResponse(res, 400, 'Missing chat message');
       return;
     }
     chatNamespace.emit('chatMessage', chatMessage);
-    res.status(204).end();
+    storeChatMessage(chatMessage);
+    sendEmptyResponse(res, 204);
   } catch (error) {
     logRequestError(req, 'Failed to send chat message.', error);
-    if (!res.headersSent) res.status(500).send('Internal server error');
+    sendServerError(res);
   }
 }
 
@@ -66,5 +131,5 @@ export async function sendChatMessage(req, res, chatNamespace) {
  * @returns {Array<Object>} Array of chat messages.
  */
 export function getChatHistory() {
-  return chatMessages;
+  return chatMessages.map(cloneChatMessage);
 }

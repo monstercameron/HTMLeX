@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { getField, readJsonFile, safeString } from './check-utils.mjs';
 
 const SEMVER_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
 
@@ -7,33 +8,30 @@ function fail(message) {
   process.exit(1);
 }
 
-async function readJson(relativePath) {
-  const source = await readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8');
-  return JSON.parse(source);
-}
-
-const packageJson = await readJson('package.json');
-const packageLock = await readJson('package-lock.json');
+const packageJson = await readJsonFile(new URL('../package.json', import.meta.url), 'package.json');
+const packageLock = await readJsonFile(new URL('../package-lock.json', import.meta.url), 'package-lock.json');
 const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8');
-const version = packageJson.version;
+const version = getField(packageJson, 'version');
+const lockVersion = getField(packageLock, 'version');
+const lockRootVersion = getField(getField(getField(packageLock, 'packages'), ''), 'version');
 
 if (typeof version !== 'string' || !SEMVER_PATTERN.test(version)) {
   fail(`package.json version must be valid semver. Found "${version}".`);
 }
 
-if (packageLock.version !== version) {
-  fail(`package-lock.json version "${packageLock.version}" does not match package.json version "${version}".`);
+if (lockVersion !== version) {
+  fail(`package-lock.json version "${lockVersion}" does not match package.json version "${version}".`);
 }
 
-if (packageLock.packages?.['']?.version !== version) {
-  fail(`package-lock root package version "${packageLock.packages?.['']?.version}" does not match package.json version "${version}".`);
+if (lockRootVersion !== version) {
+  fail(`package-lock root package version "${lockRootVersion}" does not match package.json version "${version}".`);
 }
 
 if (!readme.includes(`Version ${version} `)) {
   fail(`README.md must include the current package version "${version}".`);
 }
 
-const releaseTag = process.argv[2] || process.env.RELEASE_TAG || '';
+const releaseTag = safeString(getField(process.argv, 2) || process.env.RELEASE_TAG).trim();
 const expectedTag = `v${version}`;
 
 if (releaseTag && releaseTag !== expectedTag) {

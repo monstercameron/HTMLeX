@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-04-30
+
+Repository hardening and quality follow-up:
+
+- Hardened browser runtime boundaries across actions, DOM updates, fragments, hooks, registration, URL state, cache, fetch helpers, websocket handling, scheduling, and diagnostics so hostile browser APIs, malformed attributes, stale elements, broken collection methods, and unstringifiable values fail closed instead of breaking app flows.
+- Hardened server and feature routes for request IDs, typed/html response helpers, streaming writes, Socket.IO namespaces, chat history, demo catalog loading, todo persistence locks, TLS certificate generation, shutdown handling, and structured logging.
+- Expanded diagnostics serialization on both browser and server paths for circular objects, `BigInt`, dates, buffers, typed arrays, DOM/event-like payloads, deep payloads, and hostile getters.
+- Strengthened sequential behavior and cleanup for queued API calls, DOM swap queues, delayed signals, abort controllers, timers, subscriptions, custom elements, and mutation-observer registration churn.
+- Hardened render/component helpers and TypeScript declarations so malformed props, hostile arrays/getters, invalid routes, and unsafe target metadata normalize safely.
+- Extracted shared script-check utilities and hardened repository quality gates for syntax, modernization, dependency, license, package, pack, release-version, safety, and text hygiene checks.
+- Added broad unit coverage for the hardened surfaces, including actions, app bootstrap, browser helpers, websocket payloads, certificates, chat, components, demos, DOM diffing, fragments, hooks, rate limiting, registration, rendering, responses, server logging, sockets, streaming routes, todo routes, and custom elements.
+- Re-ran the complete quality gate after the hardening passes: text, lockfile, release, dependency, license, syntax, modern JavaScript, safety, package, pack, publint, type resolution, lint, audit, unit coverage, and Playwright e2e checks.
+
 ## 2026-04-29
 
 Reviewed prior repository history before this release. The earlier commits built the demo catalog, todo demo, arbitrary targeting and removal strategies, multi-fragment updates, click counter, signal chaining, loading states, websocket/live-update demos, sequential queuing fixes, debounce behavior, non-sequential cancellation, target removal handling, logger revisions, and README updates.

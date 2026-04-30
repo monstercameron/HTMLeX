@@ -4,59 +4,173 @@
  */
 
 import { HTMLEX_ATTRIBUTE_NAMES } from './dom.js';
+import { Logger } from './logger.js';
 import { registerElement, unregisterElement } from './registration.js';
 
-function scheduleRegistration(element) {
-  if (element._htmlexAdapterRegistrationQueued) return;
+function getDefaultBaseElement() {
+  try {
+    if (typeof globalThis.HTMLElement === 'function') return globalThis.HTMLElement;
+  } catch (error) {
+    Logger.system.warn('[HTMLeX] Failed to read HTMLElement; using fallback base class.', error);
+  }
+  return class HTMLeXBaseElement {};
+}
 
-  element._htmlexAdapterRegistrationQueued = true;
-  queueMicrotask(() => {
-    element._htmlexAdapterRegistrationQueued = false;
-    if (element.isConnected) {
-      registerElement(element);
+function safeString(value, fallback = '[Unstringifiable]') {
+  try {
+    return String(value ?? fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+function getField(target, fieldName, fallback = undefined) {
+  try {
+    return target?.[fieldName] ?? fallback;
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to read custom element field "${fieldName}".`, error);
+    return fallback;
+  }
+}
+
+function setField(target, fieldName, value) {
+  try {
+    if (target && typeof target === 'object') {
+      target[fieldName] = value;
+      return true;
+    }
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to set custom element field "${fieldName}".`, error);
+  }
+  return false;
+}
+
+function isConnected(element) {
+  try {
+    return Boolean(element?.isConnected);
+  } catch {
+    return false;
+  }
+}
+
+function queueTask(callback) {
+  const runSafely = () => {
+    try {
+      callback();
+    } catch (error) {
+      Logger.system.error('[HTMLeX] Custom element registration task failed.', error);
+    }
+  };
+
+  if (typeof globalThis.queueMicrotask === 'function') {
+    try {
+      globalThis.queueMicrotask(runSafely);
+      return;
+    } catch (error) {
+      Logger.system.warn('[HTMLeX] queueMicrotask failed; falling back for custom element registration.', error);
+    }
+  }
+
+  if (typeof globalThis.setTimeout === 'function') {
+    try {
+      globalThis.setTimeout(runSafely, 0);
+      return;
+    } catch (error) {
+      Logger.system.warn('[HTMLeX] setTimeout failed; running custom element registration synchronously.', error);
+    }
+  }
+
+  runSafely();
+}
+
+function scheduleRegistration(element) {
+  if (getField(element, '_htmlexAdapterRegistrationQueued', false)) return;
+
+  setField(element, '_htmlexAdapterRegistrationQueued', true);
+  queueTask(() => {
+    setField(element, '_htmlexAdapterRegistrationQueued', false);
+    if (isConnected(element)) {
+      safelyRunLifecycle('register queued custom element', () => registerElement(element));
     }
   });
 }
 
-export function createHTMLeXElementClass(BaseElement = HTMLElement) {
+function safelyRunLifecycle(description, callback) {
+  try {
+    callback();
+  } catch (error) {
+    Logger.system.error(`[HTMLeX] Failed to ${description}.`, error);
+  }
+}
+
+function getCustomElementsRegistry() {
+  try {
+    return globalThis.customElements;
+  } catch (error) {
+    throw new Error('customElements is not available in this environment.', { cause: error });
+  }
+}
+
+function getOptionField(options, fieldName) {
+  try {
+    return options?.[fieldName];
+  } catch (error) {
+    Logger.system.warn(`[HTMLeX] Failed to read custom element option "${fieldName}".`, error);
+    return undefined;
+  }
+}
+
+export function createHTMLeXElementClass(BaseElement = getDefaultBaseElement()) {
   return class HTMLeXElement extends BaseElement {
     static get observedAttributes() {
-      return HTMLEX_ATTRIBUTE_NAMES;
+      return [...HTMLEX_ATTRIBUTE_NAMES];
     }
 
     connectedCallback() {
-      registerElement(this);
+      safelyRunLifecycle('register connected custom element', () => registerElement(this));
     }
 
     disconnectedCallback() {
-      unregisterElement(this);
+      safelyRunLifecycle('unregister disconnected custom element', () => unregisterElement(this));
     }
 
     attributeChangedCallback() {
-      if (this.isConnected) {
+      if (isConnected(this)) {
         scheduleRegistration(this);
       }
     }
 
     htmlexRegister() {
-      registerElement(this);
+      safelyRunLifecycle('manually register custom element', () => registerElement(this));
     }
 
     htmlexUnregister() {
-      unregisterElement(this);
+      safelyRunLifecycle('manually unregister custom element', () => unregisterElement(this));
     }
   };
 }
 
 export function defineHTMLeXElement(name = 'htmlex-element', options = {}) {
-  if (typeof customElements === 'undefined') {
+  const registry = getCustomElementsRegistry();
+  if (!registry || typeof registry.get !== 'function' || typeof registry.define !== 'function') {
     throw new Error('customElements is not available in this environment.');
   }
+  const elementOptions = options && typeof options === 'object' ? options : {};
 
-  const existingElement = customElements.get(name);
+  let existingElement;
+  try {
+    existingElement = registry.get(name);
+  } catch (error) {
+    throw new Error(`Invalid custom element name "${safeString(name)}".`, { cause: error });
+  }
   if (existingElement) return existingElement;
 
-  const ElementClass = options.elementClass || createHTMLeXElementClass(options.baseClass);
-  customElements.define(name, ElementClass);
+  const ElementClass = getOptionField(elementOptions, 'elementClass') ||
+    createHTMLeXElementClass(getOptionField(elementOptions, 'baseClass'));
+  try {
+    registry.define(name, ElementClass);
+  } catch (error) {
+    throw new Error(`Unable to define custom element "${safeString(name)}".`, { cause: error });
+  }
   return ElementClass;
 }

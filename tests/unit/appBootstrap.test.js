@@ -97,6 +97,142 @@ test('importing app.js does not install process handlers or start network servic
   assert.deepEqual(listenerCounts(), beforeImport);
 });
 
+test('server entrypoint imports without installing process handlers', async () => {
+  const beforeImport = listenerCounts();
+  const serverUrl = pathToFileURL(path.resolve(import.meta.dirname, '../../src/server.js'));
+
+  const serverModule = await import(`${serverUrl.href}?side-effect-check=${Date.now()}`);
+
+  assert.equal(typeof serverModule.runServer, 'function');
+  assert.deepEqual(listenerCounts(), beforeImport);
+});
+
+test('browser entrypoint imports safely without DOM globals', async () => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  delete globalThis.window;
+  delete globalThis.document;
+  const mainUrl = pathToFileURL(path.resolve(import.meta.dirname, '../../src/public/src/main.js'));
+
+  try {
+    await assert.doesNotReject(() => import(`${mainUrl.href}?no-dom=${Date.now()}`));
+  } finally {
+    if (originalWindow === undefined) {
+      delete globalThis.window;
+    } else {
+      globalThis.window = originalWindow;
+    }
+    if (originalDocument === undefined) {
+      delete globalThis.document;
+    } else {
+      globalThis.document = originalDocument;
+    }
+  }
+});
+
+test('browser entrypoint initializes ready documents and lifecycle markers', async () => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const originalMutationObserver = globalThis.MutationObserver;
+  globalThis.window = {};
+  globalThis.document = {
+    readyState: 'complete',
+    body: {},
+    addEventListener() {},
+    removeEventListener() {},
+    querySelectorAll() {
+      return [];
+    },
+  };
+  delete globalThis.MutationObserver;
+  const mainUrl = pathToFileURL(path.resolve(import.meta.dirname, '../../src/public/src/main.js'));
+
+  try {
+    await import(`${mainUrl.href}?ready-document=${Date.now()}`);
+    const { runLifecycleHook } = await import('../../src/public/src/hooks.js');
+    const element = {
+      hasAttribute(name) {
+        return name === 'onbefore';
+      },
+      getAttribute(name) {
+        return name === 'onbefore' ? 'todo:create:before' : null;
+      },
+      dispatchEvent() {},
+    };
+
+    runLifecycleHook(element, 'onbefore');
+
+    assert.equal(globalThis.window.__htmlexLifecycle, 'beforeTodoCreate');
+  } finally {
+    if (originalWindow === undefined) {
+      delete globalThis.window;
+    } else {
+      globalThis.window = originalWindow;
+    }
+    if (originalDocument === undefined) {
+      delete globalThis.document;
+    } else {
+      globalThis.document = originalDocument;
+    }
+    if (originalMutationObserver === undefined) {
+      delete globalThis.MutationObserver;
+    } else {
+      globalThis.MutationObserver = originalMutationObserver;
+    }
+  }
+});
+
+test('browser entrypoint registers DOMContentLoaded for loading documents', async () => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const originalMutationObserver = globalThis.MutationObserver;
+  const listeners = [];
+  globalThis.window = {};
+  globalThis.document = {
+    readyState: 'loading',
+    body: {},
+    addEventListener(eventName, callback, options) {
+      listeners.push({ eventName, callback, options });
+    },
+    removeEventListener() {},
+    querySelectorAll() {
+      return [];
+    },
+  };
+  delete globalThis.MutationObserver;
+  const mainUrl = pathToFileURL(path.resolve(import.meta.dirname, '../../src/public/src/main.js'));
+
+  try {
+    await import(`${mainUrl.href}?loading-document=${Date.now()}`);
+
+    assert.equal(listeners.length, 1);
+    assert.deepEqual({
+      eventName: listeners[0].eventName,
+      options: listeners[0].options,
+    }, {
+      eventName: 'DOMContentLoaded',
+      options: { once: true },
+    });
+    assert.doesNotThrow(() => listeners[0].callback());
+  } finally {
+    if (originalWindow === undefined) {
+      delete globalThis.window;
+    } else {
+      globalThis.window = originalWindow;
+    }
+    if (originalDocument === undefined) {
+      delete globalThis.document;
+    } else {
+      globalThis.document = originalDocument;
+    }
+    if (originalMutationObserver === undefined) {
+      delete globalThis.MutationObserver;
+    } else {
+      globalThis.MutationObserver = originalMutationObserver;
+    }
+  }
+});
+
 test('createHttpsServer wires its generated app to the local Socket.IO server', async () => {
   const appUrl = pathToFileURL(path.resolve(import.meta.dirname, '../../src/app.js'));
   const { createHttpsServer } = await import(`${appUrl.href}?standalone-server=${Date.now()}`);
@@ -180,6 +316,26 @@ test('invalid incoming request ids are replaced before being echoed', async () =
   }
 });
 
+test('valid incoming request ids are preserved in headers and text responses', async () => {
+  const appUrl = pathToFileURL(path.resolve(import.meta.dirname, '../../src/app.js'));
+  const { createHttpsServer } = await import(`${appUrl.href}?valid-request-id=${Date.now()}`);
+  const { server } = await createHttpsServer();
+  const requestId = 'unit.request:123';
+
+  try {
+    await listen(server);
+    const response = await getPath(server.address().port, '/missing', {
+      'x-request-id': requestId,
+    });
+
+    assert.equal(response.statusCode, 404);
+    assert.equal(response.headers['x-request-id'], requestId);
+    assert.match(response.body, new RegExp(`Request ID: ${requestId}`));
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test('multipart payload limits return client errors with request ids', async () => {
   const appUrl = pathToFileURL(path.resolve(import.meta.dirname, '../../src/app.js'));
   const { createHttpsServer } = await import(`${appUrl.href}?multipart-limit=${Date.now()}`);
@@ -211,6 +367,79 @@ test('stopServer gracefully closes the shared HTTPS and Socket.IO runtime', asyn
   assert.equal(server.listening, false);
 });
 
+test('stopServer exits after closing even when shutdown timeout cleanup throws', async () => {
+  const appUrl = pathToFileURL(path.resolve(import.meta.dirname, '../../src/app.js'));
+  const { startServer, stopServer } = await import(`${appUrl.href}?shutdown-clear-timeout=${Date.now()}`);
+  const server = await startServer(0);
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  let captureShutdownTimer = true;
+  let shutdownTimer = null;
+
+  globalThis.setTimeout = (callback, delay, ...args) => {
+    const timerId = originalSetTimeout(callback, delay, ...args);
+    if (captureShutdownTimer) {
+      shutdownTimer = timerId;
+      captureShutdownTimer = false;
+    }
+    return timerId;
+  };
+  globalThis.clearTimeout = (timerId) => {
+    if (timerId === shutdownTimer) {
+      shutdownTimer = null;
+      throw new Error('clearTimeout denied');
+    }
+    return originalClearTimeout(timerId);
+  };
+
+  try {
+    const exitCode = await new Promise(resolve => {
+      stopServer({ exit: resolve });
+    });
+
+    assert.equal(exitCode, 0);
+    assert.equal(server.listening, false);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+    if (server.listening) {
+      await new Promise(resolve => server.close(resolve));
+    }
+  }
+});
+
+test('client connection errors close sockets without crashing the server', async () => {
+  const appUrl = pathToFileURL(path.resolve(import.meta.dirname, '../../src/app.js'));
+  const { createHttpsServer } = await import(`${appUrl.href}?client-error=${Date.now()}`);
+  const { server, socketServer } = await createHttpsServer();
+  const endedPayloads = [];
+  const writableSocket = {
+    destroyed: false,
+    writable: true,
+    end(payload) {
+      endedPayloads.push(payload);
+      this.destroyed = true;
+    },
+  };
+  const resetSocket = {
+    destroyed: false,
+    destroyCalled: false,
+    destroy() {
+      this.destroyCalled = true;
+      this.destroyed = true;
+    },
+  };
+
+  try {
+    assert.equal(server.emit('clientError', { code: 'HTTP_PARSE_ERROR', message: 'Bad request' }, writableSocket), true);
+    assert.deepEqual(endedPayloads, ['HTTP/1.1 400 Bad Request\r\n\r\n']);
+    assert.equal(server.emit('clientError', { code: 'ECONNRESET' }, resetSocket), true);
+    assert.equal(resetSocket.destroyCalled, true);
+  } finally {
+    socketServer.close();
+  }
+});
+
 test('startServer rejects conflicting port requests for the shared runtime', async () => {
   const appUrl = pathToFileURL(path.resolve(import.meta.dirname, '../../src/app.js'));
   const { startServer, stopServer } = await import(`${appUrl.href}?conflicting-port=${Date.now()}`);
@@ -226,4 +455,40 @@ test('startServer rejects conflicting port requests for the shared runtime', asy
   } finally {
     await new Promise(resolve => stopServer({ exit: resolve }));
   }
+});
+
+test('startServer rejects malformed numeric ports before binding', async () => {
+  const appUrl = pathToFileURL(path.resolve(import.meta.dirname, '../../src/app.js'));
+  const { startServer } = await import(`${appUrl.href}?invalid-port=${Date.now()}`);
+
+  await assert.rejects(
+    () => startServer('5500abc'),
+    /Invalid port/
+  );
+  await assert.rejects(
+    () => startServer(65536),
+    /Invalid port/
+  );
+  await assert.rejects(
+    () => startServer(-1),
+    /Invalid port/
+  );
+});
+
+test('startServer rejects unstringifiable ports before binding', async () => {
+  const appUrl = pathToFileURL(path.resolve(import.meta.dirname, '../../src/app.js'));
+  const { startServer } = await import(`${appUrl.href}?unstringifiable-port=${Date.now()}`);
+  const hostilePort = {
+    toString() {
+      throw new Error('toString denied');
+    },
+    valueOf() {
+      throw new Error('valueOf denied');
+    },
+  };
+
+  await assert.rejects(
+    () => startServer(hostilePort),
+    /Invalid port "\[Unstringifiable\]"/
+  );
 });

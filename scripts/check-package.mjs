@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { getField, hasOwn, readJsonFile, safeString } from './check-utils.mjs';
 
 const ROOT = process.cwd();
 const execFileAsync = promisify(execFile);
@@ -44,8 +45,7 @@ const DISALLOWED_TODO_SEED_PATTERNS = [
 ];
 
 async function readJson(relativePath) {
-  const source = await readFile(path.join(ROOT, relativePath), 'utf8');
-  return JSON.parse(source);
+  return readJsonFile(path.join(ROOT, relativePath), relativePath);
 }
 
 async function exists(relativePath) {
@@ -140,19 +140,20 @@ async function checkSeedData(failures) {
   requireField(failures, seedTodos.length > 0, 'Todo seed data must include at least one useful demo item.');
   const seenIds = new Set();
   for (const [index, todo] of seedTodos.entries()) {
+    const id = getField(todo, 'id');
     requireField(
       failures,
-      Number.isSafeInteger(todo?.id) && todo.id > 0,
+      Number.isSafeInteger(id) && id > 0,
       `Todo seed item ${index + 1} must have a positive integer id.`
     );
     requireField(
       failures,
-      !seenIds.has(todo?.id),
-      `Todo seed item ${index + 1} duplicates id ${todo?.id}.`
+      !seenIds.has(id),
+      `Todo seed item ${index + 1} duplicates id ${id}.`
     );
-    seenIds.add(todo?.id);
+    seenIds.add(id);
 
-    const text = String(todo?.text ?? '').trim();
+    const text = safeString(getField(todo, 'text')).trim();
     requireField(failures, text.length >= 10, `Todo seed item ${index + 1} needs descriptive text.`);
     for (const pattern of DISALLOWED_TODO_SEED_PATTERNS) {
       requireField(failures, !pattern.test(text), `Todo seed item ${index + 1} looks like leftover test data: "${text}".`);
@@ -168,22 +169,28 @@ async function checkDemoCatalog(failures) {
   const seenIds = new Set();
   for (const [index, demo] of demos.entries()) {
     const label = `Demo catalog item ${index + 1}`;
-    requireField(failures, hasValue(demo?.id), `${label} must have an id.`);
-    requireField(failures, !seenIds.has(demo?.id), `${label} duplicates id "${demo?.id}".`);
-    seenIds.add(demo?.id);
+    const id = getField(demo, 'id');
+    const title = getField(demo, 'title');
+    const description = getField(demo, 'description');
+    const initDemoHref = getField(demo, 'initDemoHref');
+    const learnMoreHref = getField(demo, 'learnMoreHref');
 
-    requireField(failures, hasValue(demo?.title), `${label} must have a title.`);
-    requireField(failures, hasValue(demo?.description), `${label} must have a description.`);
-    requireField(failures, hasValue(demo?.initDemoHref), `${label} must have an initDemoHref.`);
-    requireField(failures, hasValue(demo?.learnMoreHref), `${label} must have a learnMoreHref.`);
+    requireField(failures, hasValue(id), `${label} must have an id.`);
+    requireField(failures, !seenIds.has(id), `${label} duplicates id "${id}".`);
+    seenIds.add(id);
+
+    requireField(failures, hasValue(title), `${label} must have a title.`);
+    requireField(failures, hasValue(description), `${label} must have a description.`);
+    requireField(failures, hasValue(initDemoHref), `${label} must have an initDemoHref.`);
+    requireField(failures, hasValue(learnMoreHref), `${label} must have a learnMoreHref.`);
     requireField(
       failures,
-      /^\/[A-Za-z][\w-]*\/details$/u.test(String(demo?.learnMoreHref ?? '')),
-      `${label} has an invalid learnMoreHref: "${demo?.learnMoreHref}".`
+      /^\/[A-Za-z][\w-]*\/details$/u.test(safeString(learnMoreHref)),
+      `${label} has an invalid learnMoreHref: "${learnMoreHref}".`
     );
     requireField(
       failures,
-      !Object.hasOwn(demo ?? {}, 'gradients'),
+      !hasOwn(demo, 'gradients'),
       `${label} contains stale Tailwind-era gradients metadata.`
     );
   }

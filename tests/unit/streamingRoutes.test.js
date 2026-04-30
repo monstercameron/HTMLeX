@@ -9,6 +9,7 @@ import {
   incrementCounter,
   incrementCounterDemoInit,
   infiniteScrollDemoInit,
+  loadMoreItems,
   multiFragment,
   multiFragmentDemoInit,
   notificationsDemoInit,
@@ -41,7 +42,6 @@ function createResponse() {
     writableEnded: false,
     setHeader(name, value) {
       this.headers[name] = value;
-      this.headersSent = true;
     },
     status(code) {
       this.statusCode = code;
@@ -146,6 +146,103 @@ test('streaming delayed handlers render final payloads with expected targets', a
   assert.match(sequentialResponse.body, /target="#sequentialOutput\(append\)"/);
   assert.match(sequentialResponse.body, /\d{4}-\d{2}-\d{2}T/);
   assert.equal(sequentialResponse.writableEnded, true);
+});
+
+test('streaming fast-mode environment flag is trimmed before delays', async () => {
+  const originalFastMode = process.env.HTMLEX_TEST_FAST;
+  process.env.HTMLEX_TEST_FAST = ' 1 ';
+  const response = createResponse();
+  const startedAt = performance.now();
+
+  try {
+    await fetchNotification(createRequest(), response);
+  } finally {
+    process.env.HTMLEX_TEST_FAST = originalFastMode;
+  }
+
+  assert.ok(performance.now() - startedAt < 500);
+  assert.match(response.body, /You have a new notification/);
+});
+
+test('streaming handlers use fallback timestamps when Date APIs fail', async () => {
+  const OriginalDate = globalThis.Date;
+  class ThrowingDate {
+    constructor() {
+      return {
+        toISOString() {
+          throw new Error('iso denied');
+        },
+        toLocaleTimeString() {
+          throw new Error('time denied');
+        },
+      };
+    }
+
+    static now() {
+      throw new Error('now denied');
+    }
+  }
+
+  globalThis.Date = ThrowingDate;
+
+  try {
+    const loadMoreResponse = createResponse();
+    await loadMoreItems(createRequest(), loadMoreResponse);
+    assert.match(loadMoreResponse.body, /Item 0/);
+    assert.equal(loadMoreResponse.writableEnded, true);
+
+    const sequentialResponse = createResponse();
+    await sequentialNext(createRequest(), sequentialResponse);
+    assert.match(sequentialResponse.body, /1970-01-01T00:00:00\.000Z/);
+
+    const processResponse = createResponse();
+    await processStep1(createRequest(), processResponse);
+    assert.match(processResponse.body, /Step 1: Data received at now/);
+
+    const pollingResponse = createResponse();
+    await pollingTick(createRequest(), pollingResponse);
+    assert.match(pollingResponse.body, /Polling update at 1970-01-01T00:00:00\.000Z/);
+  } finally {
+    globalThis.Date = OriginalDate;
+  }
+});
+
+test('sseSubscribe fails closed when response methods throw', async () => {
+  const response = {
+    headersSent: false,
+    req: createRequest('streaming.sseSubscribe'),
+    writableEnded: false,
+    end() {
+      throw new Error('end denied');
+    },
+    send() {
+      throw new Error('send denied');
+    },
+    setHeader() {
+      throw new Error('header denied');
+    },
+    status() {
+      throw new Error('status denied');
+    },
+  };
+
+  await assert.doesNotReject(() => sseSubscribe(createRequest(), response));
+
+  const hostileStateResponse = {};
+  Object.defineProperties(hostileStateResponse, {
+    headersSent: {
+      get() {
+        throw new Error('headers denied');
+      },
+    },
+    writableEnded: {
+      get() {
+        throw new Error('ended denied');
+      },
+    },
+  });
+
+  await assert.doesNotReject(() => sseSubscribe(createRequest(), hostileStateResponse));
 });
 
 test('process step handlers use innerHTML for step one and append afterwards', async () => {

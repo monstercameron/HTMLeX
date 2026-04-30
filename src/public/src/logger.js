@@ -19,16 +19,108 @@ const MAX_DIAGNOSTIC_ARRAY_ITEMS = 50;
 const MAX_DIAGNOSTIC_OBJECT_KEYS = 50;
 const LOG_EVENT_NAME = 'htmlex:log';
 const DIAGNOSTICS_GLOBAL = '__HTMLEX_DIAGNOSTICS__';
+let logEntrySequence = 0;
+
+function safeString(value, fallback = '[Unstringifiable]') {
+  try {
+    return String(value ?? fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+function getObjectField(value, fieldName, fallback = undefined) {
+  try {
+    return value?.[fieldName] ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function setObjectField(value, fieldName, fieldValue) {
+  try {
+    if (value && typeof value === 'object') {
+      value[fieldName] = fieldValue;
+      return true;
+    }
+  } catch {
+    // Diagnostics and startup logging configuration are best-effort.
+  }
+  return false;
+}
+
+function isKnownLogLevel(value) {
+  return (
+    value === LogLevel.DEBUG ||
+    value === LogLevel.INFO ||
+    value === LogLevel.WARN ||
+    value === LogLevel.ERROR
+  );
+}
+
+function getWindow() {
+  try {
+    return typeof window !== 'undefined' ? window : null;
+  } catch {
+    return null;
+  }
+}
+
+function readStoredLogLevel(runtimeWindow) {
+  try {
+    return getObjectField(runtimeWindow, 'localStorage', null)?.getItem?.('HTMLEX_LOG_LEVEL') ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function readLocationSearch(runtimeWindow) {
+  try {
+    return getObjectField(getObjectField(runtimeWindow, 'location', null), 'search', '');
+  } catch {
+    return '';
+  }
+}
+
+function decodeSearchPart(value) {
+  try {
+    return decodeURIComponent(safeString(value).replace(/\+/g, ' '));
+  } catch {
+    return safeString(value);
+  }
+}
+
+function searchHasDebugFlag(search) {
+  const searchText = safeString(search, '');
+  try {
+    if (typeof globalThis.URLSearchParams === 'function') {
+      const params = new globalThis.URLSearchParams(searchText);
+      if (params.get('htmlexDebug') === '1') return true;
+    }
+  } catch {
+    // Fall back to manual parsing below.
+  }
+
+  const queryText = searchText.startsWith('?') ? searchText.slice(1) : searchText;
+  if (!queryText) return false;
+
+  for (const pair of queryText.split('&')) {
+    const separatorIndex = pair.indexOf('=');
+    const name = decodeSearchPart(separatorIndex >= 0 ? pair.slice(0, separatorIndex) : pair);
+    const value = decodeSearchPart(separatorIndex >= 0 ? pair.slice(separatorIndex + 1) : '');
+    if (name === 'htmlexDebug' && value === '1') return true;
+  }
+  return false;
+}
 
 function getInitialLogLevel() {
-  try {
-    const configured = typeof window !== 'undefined'
-      ? window.localStorage?.getItem('HTMLEX_LOG_LEVEL')
-      : null;
-    if (Object.values(LogLevel).includes(configured)) return configured;
+  const runtimeWindow = getWindow();
 
-    const params = new URLSearchParams(typeof window !== 'undefined' ? window.location?.search || '' : '');
-    if (params.get('htmlexDebug') === '1') return LogLevel.DEBUG;
+  const normalizedConfigured = safeString(readStoredLogLevel(runtimeWindow), '').trim().toLowerCase();
+  if (isKnownLogLevel(normalizedConfigured)) return normalizedConfigured;
+
+  try {
+    if (searchHasDebugFlag(readLocationSearch(runtimeWindow))) return LogLevel.DEBUG;
   } catch {
     // Logging configuration should never block app startup.
   }
@@ -36,21 +128,281 @@ function getInitialLogLevel() {
   return LogLevel.WARN;
 }
 
-function getWindow() {
-  return typeof window !== 'undefined' ? window : null;
+function getDiagnosticsStoreField(runtimeWindow) {
+  return getObjectField(runtimeWindow, DIAGNOSTICS_GLOBAL, null);
+}
+
+function setDiagnosticsStoreField(runtimeWindow, store) {
+  return setObjectField(runtimeWindow, DIAGNOSTICS_GLOBAL, store);
+}
+
+function isDiagnosticsStore(value) {
+  if (!value || typeof value !== 'object') return false;
+  return Array.isArray(getObjectField(value, 'entries', null));
+}
+
+function ensureDiagnosticsClear(store) {
+  if (typeof getObjectField(store, 'clear') === 'function') return;
+  setObjectField(store, 'clear', clearDiagnosticsStore);
+}
+
+function getDiagnosticsEntries(store) {
+  const entries = getObjectField(store, 'entries', null);
+  return Array.isArray(entries) ? entries : [];
 }
 
 function getDiagnosticsStore() {
   const runtimeWindow = getWindow();
   if (!runtimeWindow) return null;
 
-  runtimeWindow[DIAGNOSTICS_GLOBAL] ||= {
-    entries: [],
-    clear() {
-      this.entries.length = 0;
+  let store = getDiagnosticsStoreField(runtimeWindow);
+  if (!isDiagnosticsStore(store)) {
+    store = createEmptyDiagnosticsStore();
+    if (!setDiagnosticsStoreField(runtimeWindow, store)) {
+      return null;
     }
+  }
+
+  ensureDiagnosticsClear(store);
+  return isDiagnosticsStore(store) ? store : null;
+}
+
+function appendArrayItem(array, value) {
+  try {
+    array[array.length] = value;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearArray(array) {
+  try {
+    array.length = 0;
+  } catch {
+    // Diagnostics are best-effort and must not throw.
+  }
+}
+
+function clearDiagnosticsStore() {
+  clearArray(getDiagnosticsEntries(this));
+}
+
+function trimArrayToLastItems(array, maxItems) {
+  const length = getArrayLength(array);
+  if (length <= maxItems) return;
+
+  const startIndex = length - maxItems;
+  try {
+    for (let index = 0; index < maxItems; index += 1) {
+      array[index] = array[index + startIndex];
+    }
+    array.length = maxItems;
+  } catch {
+    try {
+      array.length = maxItems;
+    } catch {
+      // Diagnostics are best-effort and must not throw.
+    }
+  }
+}
+
+function cloneSerializedValue(value, seen = new WeakMap()) {
+  if (!value || typeof value !== 'object') return value;
+  if (seen.has(value)) return '[Circular]';
+
+  if (Array.isArray(value)) {
+    const clonedArray = [];
+    seen.set(value, clonedArray);
+    const length = getArrayLength(value);
+    for (let index = 0; index < length; index += 1) {
+      appendArrayItem(clonedArray, cloneSerializedValue(getArrayItem(value, index), seen));
+    }
+    return clonedArray;
+  }
+
+  const clonedObject = {};
+  seen.set(value, clonedObject);
+
+  let keys;
+  try {
+    keys = Object.keys(value);
+  } catch (error) {
+    return `[Unserializable: ${safeErrorMessage(error)}]`;
+  }
+
+  for (const key of keys) {
+    try {
+      clonedObject[key] = cloneSerializedValue(value[key], seen);
+    } catch (error) {
+      clonedObject[key] = `[Unserializable: ${safeErrorMessage(error)}]`;
+    }
+  }
+
+  return clonedObject;
+}
+
+function cloneDiagnosticEntry(entry) {
+  return cloneSerializedValue(entry);
+}
+
+function createDiagnosticsSnapshot() {
+  const entries = getDiagnosticsEntries(getDiagnosticsStore());
+  const snapshot = [];
+  const length = getArrayLength(entries);
+  for (let index = 0; index < length; index += 1) {
+    appendArrayItem(snapshot, cloneDiagnosticEntry(getArrayItem(entries, index)));
+  }
+  return snapshot;
+}
+
+function serializeDate(date) {
+  try {
+    const timestamp = date.getTime();
+    return Number.isFinite(timestamp) ? date.toISOString() : '[Invalid Date]';
+  } catch {
+    return '[Invalid Date]';
+  }
+}
+
+function getCurrentTimestampMs() {
+  try {
+    const timestamp = Date.now();
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function getCurrentIsoTimestamp() {
+  try {
+    return new Date().toISOString();
+  } catch {
+    return '1970-01-01T00:00:00.000Z';
+  }
+}
+
+function createLogEntryId() {
+  logEntrySequence = (logEntrySequence + 1) % Number.MAX_SAFE_INTEGER;
+  let randomPart = 'fallback';
+  try {
+    const randomValue = Math.random();
+    if (Number.isFinite(randomValue)) {
+      randomPart = randomValue.toString(36).slice(2) || randomPart;
+    }
+  } catch {
+    randomPart = 'fallback';
+  }
+  return `${getCurrentTimestampMs()}-${randomPart}-${logEntrySequence}`;
+}
+
+function safeErrorMessage(error) {
+  try {
+    return safeString(error?.message || error, 'Unknown error');
+  } catch {
+    return 'Unknown error';
+  }
+}
+
+function getArrayLength(value) {
+  try {
+    const length = value?.length;
+    return Number.isSafeInteger(length) && length > 0 ? length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function getArrayItem(value, index) {
+  try {
+    return value[index];
+  } catch (error) {
+    return `[Unserializable: ${safeErrorMessage(error)}]`;
+  }
+}
+
+function arrayIncludesValue(array, expectedValue) {
+  const length = getArrayLength(array);
+  for (let index = 0; index < length; index += 1) {
+    if (getArrayItem(array, index) === expectedValue) return true;
+  }
+  return false;
+}
+
+function isInstanceOf(value, constructorValue) {
+  if (typeof constructorValue !== 'function') return false;
+  try {
+    return value instanceof constructorValue;
+  } catch {
+    return false;
+  }
+}
+
+function isElementLike(value) {
+  if (!value || typeof value !== 'object') return false;
+  if (isInstanceOf(value, globalThis.Element) || isInstanceOf(value, globalThis.HTMLElement)) return true;
+  try {
+    return getObjectField(value, 'nodeType') === (globalThis.Node?.ELEMENT_NODE ?? 1) &&
+      typeof getObjectField(value, 'hasAttribute') === 'function';
+  } catch {
+    return false;
+  }
+}
+
+function isEventLike(value) {
+  if (!value || typeof value !== 'object') return false;
+  if (isInstanceOf(value, globalThis.Event)) return true;
+  return typeof getObjectField(value, 'type') === 'string' &&
+    (
+      typeof getObjectField(value, 'preventDefault') === 'function' ||
+      typeof getObjectField(value, 'stopPropagation') === 'function' ||
+      typeof getObjectField(value, 'stopImmediatePropagation') === 'function'
+    );
+}
+
+function getElementSummary(element) {
+  return {
+    element: safeString(getObjectField(element, 'tagName'), 'element').toLowerCase(),
+    id: safeString(getObjectField(element, 'id', ''), '') || undefined,
+    classes: safeString(getObjectField(element, 'className', ''), '') || undefined,
   };
-  return runtimeWindow[DIAGNOSTICS_GLOBAL];
+}
+
+function hasDebugAttribute(element) {
+  try {
+    return Boolean(element?.hasAttribute?.('debug'));
+  } catch {
+    return false;
+  }
+}
+
+function getConstructorName(value) {
+  try {
+    return value?.constructor?.name || 'Object';
+  } catch {
+    return 'Object';
+  }
+}
+
+function findLastDiagnosticEntry(level = null) {
+  const entries = getDiagnosticsStore()?.entries || [];
+  const normalizedLevel = safeString(level, '').trim().toLowerCase();
+  const length = getArrayLength(entries);
+  if (!normalizedLevel) return length > 0 ? getArrayItem(entries, length - 1) : null;
+
+  for (let index = length - 1; index >= 0; index -= 1) {
+    const entry = getArrayItem(entries, index);
+    if (getObjectField(entry, 'level') === normalizedLevel) return entry;
+  }
+
+  return null;
+}
+
+function createEmptyDiagnosticsStore() {
+  return {
+    entries: [],
+    clear: clearDiagnosticsStore
+  };
 }
 
 function serializeArg(arg, seen = new WeakSet(), depth = 0) {
@@ -61,137 +413,170 @@ function serializeArg(arg, seen = new WeakSet(), depth = 0) {
     return arg;
   }
   if (argType === 'bigint') {
-    return `${arg.toString()}n`;
+    return `${safeString(arg)}n`;
   }
   if (argType === 'symbol' || argType === 'function') {
-    return String(arg);
+    return safeString(arg);
   }
-  if (arg instanceof Error) {
+  if (isInstanceOf(arg, globalThis.Error)) {
     return {
-      name: arg.name,
-      message: arg.message,
-      stack: arg.stack
+      name: safeString(getObjectField(arg, 'name'), 'Error'),
+      message: safeString(getObjectField(arg, 'message'), ''),
+      stack: safeString(getObjectField(arg, 'stack'), '')
     };
   }
-  if (typeof Element !== 'undefined' && arg instanceof Element) {
-    return {
-      element: arg.tagName.toLowerCase(),
-      id: arg.id || undefined,
-      classes: String(arg.className || '') || undefined,
-    };
+  if (isElementLike(arg)) {
+    return getElementSummary(arg);
   }
-  if (typeof Event !== 'undefined' && arg instanceof Event) {
+  if (isEventLike(arg)) {
     return {
-      event: arg.type,
-      target: typeof Element !== 'undefined' && arg.target instanceof Element
-        ? serializeArg(arg.target, seen, depth + 1)
+      event: safeString(getObjectField(arg, 'type'), ''),
+      target: isElementLike(getObjectField(arg, 'target'))
+        ? serializeArg(getObjectField(arg, 'target'), seen, depth + 1)
         : undefined,
     };
   }
-  if (arg instanceof Date) {
-    return arg.toISOString();
+  if (isInstanceOf(arg, globalThis.Date)) {
+    return serializeDate(arg);
   }
   if (argType !== 'object') {
-    return String(arg);
+    return safeString(arg);
   }
   if (seen.has(arg)) {
     return '[Circular]';
   }
   if (depth >= MAX_DIAGNOSTIC_DEPTH) {
-    return `[MaxDepth:${arg.constructor?.name || 'Object'}]`;
+    return `[MaxDepth:${getConstructorName(arg)}]`;
   }
 
   seen.add(arg);
 
   if (Array.isArray(arg)) {
-    const normalized = arg
-      .slice(0, MAX_DIAGNOSTIC_ARRAY_ITEMS)
-      .map(item => serializeArg(item, seen, depth + 1));
-    if (arg.length > MAX_DIAGNOSTIC_ARRAY_ITEMS) {
-      normalized.push(`[${arg.length - MAX_DIAGNOSTIC_ARRAY_ITEMS} more item(s)]`);
+    const length = getArrayLength(arg);
+    const normalized = [];
+    for (let index = 0; index < Math.min(length, MAX_DIAGNOSTIC_ARRAY_ITEMS); index += 1) {
+      appendArrayItem(normalized, serializeArg(getArrayItem(arg, index), seen, depth + 1));
     }
+    if (length > MAX_DIAGNOSTIC_ARRAY_ITEMS) {
+      appendArrayItem(normalized, `[${length - MAX_DIAGNOSTIC_ARRAY_ITEMS} more item(s)]`);
+    }
+    seen.delete(arg);
     return normalized;
   }
 
-  const keys = Object.keys(arg);
+  let keys;
+  try {
+    keys = Object.keys(arg);
+  } catch (error) {
+    seen.delete(arg);
+    return `[Unserializable: ${safeErrorMessage(error)}]`;
+  }
   const normalized = {};
-  for (const key of keys.slice(0, MAX_DIAGNOSTIC_OBJECT_KEYS)) {
+  const keyCount = getArrayLength(keys);
+  const keyLimit = Math.min(keyCount, MAX_DIAGNOSTIC_OBJECT_KEYS);
+  for (let index = 0; index < keyLimit; index += 1) {
+    const key = getArrayItem(keys, index);
     try {
       normalized[key] = serializeArg(arg[key], seen, depth + 1);
     } catch (error) {
-      normalized[key] = `[Unserializable: ${error.message}]`;
+      normalized[key] = `[Unserializable: ${safeErrorMessage(error)}]`;
     }
   }
-  if (keys.length > MAX_DIAGNOSTIC_OBJECT_KEYS) {
-    normalized.__truncatedKeys = keys.length - MAX_DIAGNOSTIC_OBJECT_KEYS;
+  if (keyCount > MAX_DIAGNOSTIC_OBJECT_KEYS) {
+    normalized.__truncatedKeys = keyCount - MAX_DIAGNOSTIC_OBJECT_KEYS;
   }
 
+  seen.delete(arg);
   return normalized;
 }
 
 function recordLog(level, scope, message, args) {
   const store = getDiagnosticsStore();
   if (!store) return;
+  const runtimeWindow = getWindow();
 
   const entry = {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    timestamp: new Date().toISOString(),
+    id: createLogEntryId(),
+    timestamp: getCurrentIsoTimestamp(),
     level,
     scope,
-    message,
-    args: args.map(arg => serializeArg(arg)),
+    message: safeString(message),
+    args: serializeLogArgs(args),
   };
 
-  store.entries.push(entry);
-  if (store.entries.length > MAX_LOG_ENTRIES) {
-    store.entries.splice(0, store.entries.length - MAX_LOG_ENTRIES);
+  const entries = getDiagnosticsEntries(store);
+  if (appendArrayItem(entries, entry)) {
+    trimArrayToLastItems(entries, MAX_LOG_ENTRIES);
   }
 
-  getWindow()?.dispatchEvent(new CustomEvent(LOG_EVENT_NAME, { detail: entry }));
+  try {
+    if (typeof runtimeWindow?.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+      runtimeWindow.dispatchEvent(new CustomEvent(LOG_EVENT_NAME, { detail: entry }));
+    }
+  } catch {
+    // Diagnostics should never make application logging throw.
+  }
+}
+
+function serializeLogArgs(args) {
+  const serializedArgs = [];
+  const length = getArrayLength(args);
+  for (let index = 0; index < length; index += 1) {
+    appendArrayItem(serializedArgs, serializeArg(getArrayItem(args, index)));
+  }
+  return serializedArgs;
 }
 
 function shouldLog(levels) {
-  return Logger.enabled && Logger.namespaces.system && levels.includes(Logger.logLevel);
+  return Logger.enabled && Logger.namespaces.system && arrayIncludesValue(levels, Logger.logLevel);
 }
 
 function shouldLogElement(element, levels) {
   return (
     Logger.enabled &&
-    typeof HTMLElement !== 'undefined' &&
-    element instanceof HTMLElement &&
-    element.hasAttribute('debug') &&
-    levels.includes(Logger.logLevel)
+    isElementLike(element) &&
+    hasDebugAttribute(element) &&
+    arrayIncludesValue(levels, Logger.logLevel)
   );
 }
 
 function shouldLogElementError(element) {
   return (
     Logger.enabled &&
-    typeof HTMLElement !== 'undefined' &&
-    element instanceof HTMLElement &&
-    element.hasAttribute('debug')
+    isElementLike(element) &&
+    hasDebugAttribute(element)
   );
+}
+
+function callConsole(level, prefix, message, args) {
+  const writer = console?.[level] || console?.log;
+  if (typeof writer !== 'function') return;
+  try {
+    writer.call(console, prefix, message, ...args);
+  } catch {
+    // Logging must not throw back into application code.
+  }
 }
 
 function writeConsole(level, prefix, message, args) {
   recordLog(level, prefix, message, args);
 
   if (level === LogLevel.DEBUG) {
-    console.debug(prefix, message, ...args);
+    callConsole('debug', prefix, message, args);
     return;
   }
 
   if (level === LogLevel.INFO) {
-    console.info(prefix, message, ...args);
+    callConsole('info', prefix, message, args);
     return;
   }
 
   if (level === LogLevel.WARN) {
-    console.warn(prefix, message, ...args);
+    callConsole('warn', prefix, message, args);
     return;
   }
 
-  console.error(prefix, message, ...args);
+  callConsole('error', prefix, message, args);
 }
 
 export const Logger = {
@@ -205,21 +590,21 @@ export const Logger = {
     eventName: LOG_EVENT_NAME,
     globalName: DIAGNOSTICS_GLOBAL,
     get entries() {
-      return getDiagnosticsStore()?.entries || [];
+      return createDiagnosticsSnapshot();
     },
     snapshot() {
-      return [...(getDiagnosticsStore()?.entries || [])];
+      return createDiagnosticsSnapshot();
     },
     last(level = null) {
-      const entries = getDiagnosticsStore()?.entries || [];
-      if (!level) return entries.at(-1) || null;
-      for (let index = entries.length - 1; index >= 0; index -= 1) {
-        if (entries[index].level === level) return entries[index];
-      }
-      return null;
+      const entry = findLastDiagnosticEntry(level);
+      return entry ? cloneDiagnosticEntry(entry) : null;
     },
     clear() {
-      getDiagnosticsStore()?.clear();
+      try {
+        getDiagnosticsStore()?.clear();
+      } catch {
+        // Diagnostics are best-effort and must not throw.
+      }
     }
   },
 
@@ -272,24 +657,47 @@ export const Logger = {
 
 let runtimeErrorBoundaryInstalled = false;
 
+function getRuntimeEventField(event, fieldName) {
+  try {
+    return event?.[fieldName];
+  } catch (error) {
+    Logger.system.warn(`[Runtime] Failed to read runtime event field "${fieldName}".`, error);
+    return undefined;
+  }
+}
+
 function getRuntimeErrorDetails(event) {
   return {
-    message: event.message,
-    source: event.filename,
-    line: event.lineno,
-    column: event.colno,
-    error: event.error,
+    message: getRuntimeEventField(event, 'message'),
+    source: getRuntimeEventField(event, 'filename'),
+    line: getRuntimeEventField(event, 'lineno'),
+    column: getRuntimeEventField(event, 'colno'),
+    error: getRuntimeEventField(event, 'error'),
   };
 }
 
 export function installRuntimeErrorBoundary() {
-  if (runtimeErrorBoundaryInstalled || typeof window === 'undefined') return;
+  const runtimeWindow = typeof window === 'undefined' ? globalThis.window : window;
+  if (runtimeErrorBoundaryInstalled || !runtimeWindow) return;
 
-  runtimeErrorBoundaryInstalled = true;
-  window.addEventListener('error', (event) => {
-    Logger.system.error('[Runtime] Unhandled browser error:', getRuntimeErrorDetails(event));
-  });
-  window.addEventListener('unhandledrejection', (event) => {
-    Logger.system.error('[Runtime] Unhandled promise rejection:', event.reason);
-  });
+  let addEventListener;
+  try {
+    addEventListener = runtimeWindow.addEventListener;
+  } catch (error) {
+    Logger.system.warn('[Runtime] Failed to inspect runtime error boundary support.', error);
+    return;
+  }
+  if (typeof addEventListener !== 'function') return;
+
+  try {
+    addEventListener.call(runtimeWindow, 'error', (event) => {
+      Logger.system.error('[Runtime] Unhandled browser error:', getRuntimeErrorDetails(event));
+    });
+    addEventListener.call(runtimeWindow, 'unhandledrejection', (event) => {
+      Logger.system.error('[Runtime] Unhandled promise rejection:', getRuntimeEventField(event, 'reason'));
+    });
+    runtimeErrorBoundaryInstalled = true;
+  } catch (error) {
+    Logger.system.warn('[Runtime] Failed to install runtime error boundary.', error);
+  }
 }

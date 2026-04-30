@@ -36,6 +36,7 @@ before(async () => {
 });
 
 beforeEach(async () => {
+  process.env.HTMLEX_TODO_DATA_FILE = dataPath;
   await rm(lockPath, { force: true });
   await writeFile(dataPath, JSON.stringify(fixtureTodos, null, 2));
 });
@@ -102,6 +103,17 @@ test('todo route handlers render widget and list fragments from persisted data',
   assert.match(listResponse.body, /todo-2/);
 });
 
+test('todo persistence path trims environment overrides before loading data', async () => {
+  const previousDataFile = process.env.HTMLEX_TODO_DATA_FILE;
+  process.env.HTMLEX_TODO_DATA_FILE = ` ${dataPath} `;
+
+  try {
+    assert.deepEqual(await loadTodos(), fixtureTodos);
+  } finally {
+    process.env.HTMLEX_TODO_DATA_FILE = previousDataFile;
+  }
+});
+
 test('createTodo validates input and persists normalized todos', async () => {
   const rejectedResponse = createResponse();
   await createTodo(createRequest({ body: { todo: '   ' } }), rejectedResponse);
@@ -116,6 +128,96 @@ test('createTodo validates input and persists normalized todos', async () => {
   const todos = await loadTodos();
   assert.equal(todos.length, 3);
   assert.equal(todos.at(-1).text, 'Gamma');
+});
+
+test('todo route handlers fail closed for hostile request fields', async () => {
+  const hostileCreateRequest = {
+    requestId: 'hostile-create',
+    get body() {
+      throw new Error('body denied');
+    },
+  };
+  const createResponseForHostileRequest = createResponse();
+
+  await createTodo(hostileCreateRequest, createResponseForHostileRequest);
+
+  assert.equal(createResponseForHostileRequest.statusCode, 400);
+  assert.equal(createResponseForHostileRequest.body, 'Missing todo text');
+
+  const hostileParamsRequest = {
+    requestId: 'hostile-params',
+    get params() {
+      throw new Error('params denied');
+    },
+    body: { todo: 'Should not update' },
+  };
+  const itemResponse = createResponse();
+  const updateResponse = createResponse();
+  const deleteResponse = createResponse();
+
+  await getTodoItem(hostileParamsRequest, itemResponse);
+  await updateTodo(hostileParamsRequest, updateResponse);
+  await deleteTodo(hostileParamsRequest, deleteResponse);
+
+  assert.equal(itemResponse.statusCode, 404);
+  assert.equal(updateResponse.statusCode, 404);
+  assert.equal(deleteResponse.statusCode, 404);
+  assert.deepEqual(await loadTodos(), fixtureTodos);
+});
+
+test('todo text error responses fail closed for hostile response objects', async () => {
+  const hostileStateResponse = {};
+  Object.defineProperties(hostileStateResponse, {
+    headersSent: {
+      get() {
+        throw new Error('headers denied');
+      },
+    },
+    req: {
+      get() {
+        throw new Error('request denied');
+      },
+    },
+  });
+
+  const throwingMethodsResponse = {
+    headersSent: false,
+    status() {
+      throw new Error('status denied');
+    },
+    type() {
+      throw new Error('type denied');
+    },
+    send() {
+      throw new Error('send denied');
+    },
+  };
+
+  await assert.doesNotReject(() => createTodo(createRequest({ body: { todo: '   ' } }), hostileStateResponse));
+  await assert.doesNotReject(() => updateTodo(createRequest({
+    params: { id: '1' },
+    body: { todo: '   ' },
+  }), throwingMethodsResponse));
+  await assert.doesNotReject(() => getTodoItem(createRequest({ params: { id: 'missing' } }), throwingMethodsResponse));
+
+  assert.deepEqual(await loadTodos(), fixtureTodos);
+});
+
+test('createTodo allocates ids when Date.now throws', async () => {
+  const originalDateNow = Date.now;
+  Date.now = () => {
+    throw new Error('time denied');
+  };
+
+  try {
+    const createdResponse = createResponse();
+    await createTodo(createRequest({ body: { todo: ' Clock fallback ' } }), createdResponse);
+
+    assert.equal(createdResponse.statusCode, 200);
+    assert.equal((await loadTodos()).some(todo => todo.text === 'Clock fallback'), true);
+  } finally {
+    Date.now = originalDateNow;
+  }
 });
 
 test('createTodo serializes concurrent writes without losing items or duplicating ids', async () => {
@@ -141,6 +243,22 @@ test('createTodo serializes concurrent writes without losing items or duplicatin
   }
 });
 
+test('createTodo allocates safe ids when persisted data already has a very large id', async () => {
+  await writeFile(dataPath, JSON.stringify([
+    { id: Number.MAX_SAFE_INTEGER, text: 'Largest safe id' },
+  ], null, 2));
+
+  const createdResponse = createResponse();
+  await createTodo(createRequest({ body: { todo: ' Safe fallback id ' } }), createdResponse);
+
+  const todos = await loadTodos();
+  const createdTodo = todos.find(todo => todo.text === 'Safe fallback id');
+
+  assert.equal(createdResponse.statusCode, 200);
+  assert.equal(Number.isSafeInteger(createdTodo.id), true);
+  assert.notEqual(createdTodo.id, Number.MAX_SAFE_INTEGER);
+});
+
 test('createTodo waits for a cross-process persistence lock before writing', async () => {
   await writeFile(lockPath, 'held-by-unit-test');
   const createdResponse = createResponse();
@@ -159,6 +277,49 @@ test('createTodo waits for a cross-process persistence lock before writing', asy
   assert.equal(createdResponse.statusCode, 200);
   assert.equal(completed, true);
   assert.equal((await loadTodos()).some(todo => todo.text === 'Locked write'), true);
+});
+
+test('createTodo rejects partially numeric lock timeout configuration', async () => {
+  const originalTimeoutMs = process.env.HTMLEX_TODO_LOCK_TIMEOUT_MS;
+  const originalRetryMs = process.env.HTMLEX_TODO_LOCK_RETRY_MS;
+  process.env.HTMLEX_TODO_LOCK_TIMEOUT_MS = '25abc';
+  process.env.HTMLEX_TODO_LOCK_RETRY_MS = '1';
+
+  const createdResponse = createResponse();
+  let completed = false;
+  let createPromise;
+
+  try {
+    await writeFile(lockPath, 'held-by-unit-test');
+    createPromise = createTodo(createRequest({ body: { todo: ' Strict timeout parse ' } }), createdResponse)
+      .finally(() => {
+        completed = true;
+      });
+
+    await delay(35);
+    assert.equal(completed, false);
+
+    await rm(lockPath, { force: true });
+    await createPromise;
+
+    assert.equal(createdResponse.statusCode, 200);
+    assert.equal((await loadTodos()).some(todo => todo.text === 'Strict timeout parse'), true);
+  } finally {
+    await rm(lockPath, { force: true });
+    if (createPromise) await createPromise.catch(() => {});
+
+    if (originalTimeoutMs === undefined) {
+      delete process.env.HTMLEX_TODO_LOCK_TIMEOUT_MS;
+    } else {
+      process.env.HTMLEX_TODO_LOCK_TIMEOUT_MS = originalTimeoutMs;
+    }
+
+    if (originalRetryMs === undefined) {
+      delete process.env.HTMLEX_TODO_LOCK_RETRY_MS;
+    } else {
+      process.env.HTMLEX_TODO_LOCK_RETRY_MS = originalRetryMs;
+    }
+  }
 });
 
 test('createTodo removes stale dead-owner lock files before writing', async () => {
@@ -212,6 +373,29 @@ test('item and edit handlers return found fragments and 404 for missing ids', as
 
   assert.equal(missingResponse.statusCode, 404);
   assert.equal(missingResponse.body, 'Todo not found');
+});
+
+test('todo item mutations reject malformed ids instead of accepting partial numbers', async () => {
+  const itemResponse = createResponse();
+  await getTodoItem(createRequest({ params: { id: '1abc' } }), itemResponse);
+
+  const editResponse = createResponse();
+  await getEditTodoForm(createRequest({ params: { id: '2.5' } }), editResponse);
+
+  const updateResponse = createResponse();
+  await updateTodo(createRequest({
+    params: { id: '1abc' },
+    body: { todo: 'Should not update' },
+  }), updateResponse);
+
+  const deleteResponse = createResponse();
+  await deleteTodo(createRequest({ params: { id: '01' } }), deleteResponse);
+
+  assert.equal(itemResponse.statusCode, 404);
+  assert.equal(editResponse.statusCode, 404);
+  assert.equal(updateResponse.statusCode, 404);
+  assert.equal(deleteResponse.statusCode, 404);
+  assert.deepEqual(await loadTodos(), fixtureTodos);
 });
 
 test('updateTodo validates, persists, and renders the updated item', async () => {
@@ -286,4 +470,40 @@ test('todo widget and list handlers reject non-array persistence data', async ()
 
   assert.equal(listResponse.statusCode, 500);
   assert.equal(listResponse.body, 'Internal server error: Invalid todo data');
+});
+
+test('todo handlers reject persisted arrays with malformed items', async () => {
+  await writeFile(dataPath, JSON.stringify([
+    { id: 1, text: 'Valid' },
+    { id: '2abc', text: 'Invalid id' },
+  ], null, 2));
+
+  await assert.rejects(() => loadTodos(), /invalid id/);
+  assert.deepEqual(await loadTodos({ failClosed: true }), []);
+
+  const widgetResponse = createResponse();
+  await getToDoWidget(createRequest(), widgetResponse);
+
+  const createResponseForInvalidData = createResponse();
+  await createTodo(createRequest({ body: { todo: 'Should not save' } }), createResponseForInvalidData);
+
+  assert.equal(widgetResponse.statusCode, 500);
+  assert.equal(widgetResponse.body, 'Internal server error');
+  assert.equal(createResponseForInvalidData.statusCode, 500);
+  assert.equal(createResponseForInvalidData.body, 'Internal server error');
+});
+
+test('todo handlers reject duplicate ids and blank persisted todo text', async () => {
+  await writeFile(dataPath, JSON.stringify([
+    { id: 1, text: 'Valid' },
+    { id: 1, text: 'Duplicate' },
+  ], null, 2));
+
+  await assert.rejects(() => loadTodos(), /duplicates id 1/);
+
+  await writeFile(dataPath, JSON.stringify([
+    { id: 1, text: '   ' },
+  ], null, 2));
+
+  await assert.rejects(() => loadTodos(), /blank text/);
 });
