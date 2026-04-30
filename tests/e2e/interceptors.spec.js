@@ -3,7 +3,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 async function mountHTMLeX(page, html) {
   await page.evaluate(async (fixtureHtml) => {
+    window.scrollTo(0, 0);
     document.body.innerHTML = `<main id="fixture">${fixtureHtml}</main>`;
+    window.scrollTo(0, 0);
     const { initHTMLeX } = await import('/src/htmlex.js');
     initHTMLeX();
   }, html);
@@ -199,10 +201,10 @@ test('runs lifecycle hooks, loading state, error target, retries, and timeout ha
     <button id="lifecycleBtn"
       GET="/test/lifecycle"
       target="#lifecycleOut(innerHTML)"
-      onbefore="window.__hooks.push('before')"
-      onbeforeSwap="window.__hooks.push('beforeSwap')"
-      onafterSwap="window.__hooks.push('afterSwap')"
-      onafter="window.__hooks.push('after')">Lifecycle</button>
+      onbefore="test:before"
+      onbeforeSwap="test:before-swap"
+      onafterSwap="test:after-swap"
+      onafter="test:after">Lifecycle</button>
     <div id="lifecycleOut"></div>
 
     <button id="loadingBtn" GET="/test/loading" target="#loadingOut(innerHTML)" loading="#loadingState(innerHTML)">Loading</button>
@@ -219,7 +221,13 @@ test('runs lifecycle hooks, loading state, error target, retries, and timeout ha
     <div id="timeoutOut"></div>
   `);
 
-  await page.evaluate(() => { window.__hooks = []; });
+  await page.evaluate(() => {
+    window.__hooks = [];
+    window.HTMLeX.hooks.register('test:before', () => window.__hooks.push('before'));
+    window.HTMLeX.hooks.register('test:before-swap', () => window.__hooks.push('beforeSwap'));
+    window.HTMLeX.hooks.register('test:after-swap', () => window.__hooks.push('afterSwap'));
+    window.HTMLeX.hooks.register('test:after', () => window.__hooks.push('after'));
+  });
 
   await page.locator('#lifecycleBtn').click();
   await expect(page.locator('#lifecycleOut')).toHaveText('Lifecycle complete');
@@ -238,6 +246,66 @@ test('runs lifecycle hooks, loading state, error target, retries, and timeout ha
 
   await page.locator('#timeoutBtn').click();
   await expect(page.locator('#timeoutOut')).toContainText('Request timed out');
+});
+
+test('refuses script-like lifecycle hooks and routes oversized responses to onerror', async ({ page }) => {
+  await page.route('**/test/oversized', route => route.fulfill({
+    contentType: 'text/html',
+    body: '0123456789'
+  }));
+  await page.route('**/test/unsafe-hook', route => route.fulfill({
+    contentType: 'text/html',
+    body: 'Unsafe hook response'
+  }));
+
+  await mountHTMLeX(page, `
+    <button id="unsafeHookBtn"
+      GET="/test/unsafe-hook"
+      target="#unsafeHookOut(innerHTML)"
+      onbefore="window.__unsafeLifecycleRan = true">Unsafe Hook</button>
+    <div id="unsafeHookOut"></div>
+
+    <button id="oversizedBtn"
+      GET="/test/oversized"
+      target="#oversizedOut(innerHTML)"
+      onerror="#oversizedError(innerHTML)"
+      maxresponsechars="8">Oversized</button>
+    <div id="oversizedOut"></div>
+    <div id="oversizedError"></div>
+  `);
+
+  await page.locator('#unsafeHookBtn').click();
+  await expect(page.locator('#unsafeHookOut')).toHaveText('Unsafe hook response');
+  await expect.poll(() => page.evaluate(() => window.__unsafeLifecycleRan)).toBe(undefined);
+
+  await page.locator('#oversizedBtn').click();
+  await expect(page.locator('#oversizedOut')).toHaveText('');
+  await expect(page.locator('#oversizedError')).toContainText('8 character safety limit');
+});
+
+test('escapes onerror messages in the browser before swapping them into the DOM', async ({ page }) => {
+  await mountHTMLeX(page, `
+    <button id="unsafeErrorMessageBtn"
+      GET="/test/unsafe-error-message"
+      onerror="#unsafeErrorMessageOut(innerHTML)">Unsafe Error</button>
+    <div id="unsafeErrorMessageOut"></div>
+  `);
+
+  await page.evaluate(() => {
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (input, options) => {
+      if (String(input).includes('/test/unsafe-error-message')) {
+        throw new Error('bad <img src=x onerror=alert(1)> & "quoted"');
+      }
+      return originalFetch(input, options);
+    };
+  });
+
+  await page.locator('#unsafeErrorMessageBtn').click();
+
+  await expect(page.locator('#unsafeErrorMessageOut')).toContainText('bad <img src=x onerror=alert(1)> & "quoted"');
+  await expect(page.locator('#unsafeErrorMessageOut img')).toHaveCount(0);
+  await expect(page.locator('#unsafeErrorMessageOut')).toContainText('Error:');
 });
 
 test('supports auto, lazy auto, cache, debounce, throttle, and polling controls', async ({ page }) => {
@@ -260,6 +328,27 @@ test('supports auto, lazy auto, cache, debounce, throttle, and polling controls'
       });
     });
   }
+  await page.evaluate(() => {
+    window.__lazyObservers = [];
+    window.IntersectionObserver = class TestIntersectionObserver {
+      constructor(callback) {
+        this.callback = callback;
+        window.__lazyObservers.push(this);
+      }
+
+      observe(element) {
+        this.element = element;
+      }
+
+      disconnect() {
+        this.disconnected = true;
+      }
+
+      trigger() {
+        this.callback([{ isIntersecting: true, target: this.element }], this);
+      }
+    };
+  });
 
   await mountHTMLeX(page, `
     <div id="autoAction" GET="/test/auto" auto="true" target="#autoOut(innerHTML)">Auto</div>
@@ -315,7 +404,7 @@ test('supports auto, lazy auto, cache, debounce, throttle, and polling controls'
   expect(counts.poll).toBe(2);
 
   expect(counts.lazy).toBe(0);
-  await page.locator('#lazyAction').scrollIntoViewIfNeeded();
+  await page.evaluate(() => window.__lazyObservers[0].trigger());
   await expect(page.locator('#lazyOut')).toHaveText('lazy:1');
 });
 

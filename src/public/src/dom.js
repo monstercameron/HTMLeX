@@ -10,10 +10,11 @@
 
 import { Logger } from './logger.js';
 const TARGET_STRATEGIES = 'innerHTML|outerHTML|append|prepend|before|after|remove';
-const HTMLEX_ATTR_NAMES = [
+export const HTMLEX_ATTRIBUTE_NAMES = [
   'get', 'post', 'put', 'delete', 'patch',
   'auto', 'poll', 'socket', 'subscribe', 'publish',
   'trigger', 'debounce', 'throttle', 'retry', 'timeout',
+  'retrydelay', 'retry-delay', 'retrybackoff', 'retry-backoff', 'retrymaxdelay', 'retry-max-delay',
   'cache', 'timer', 'sequential', 'repeat', 'source', 'target',
   'loading', 'onerror', 'extras', 'push', 'pull', 'path',
   'history', 'onbefore', 'onbeforeswap', 'onafterswap', 'onafter'
@@ -30,13 +31,157 @@ const STRATEGY_BY_LOWERCASE = {
 };
 
 function hasHTMLeXBehavior(node) {
-  return node.nodeType === Node.ELEMENT_NODE && HTMLEX_ATTR_NAMES.some(attributeName => node.hasAttribute(attributeName));
+  return node.nodeType === Node.ELEMENT_NODE && HTMLEX_ATTRIBUTE_NAMES.some(attributeName => node.hasAttribute(attributeName));
 }
 
 function getHTMLeXBehaviorSignature(element) {
-  return HTMLEX_ATTR_NAMES
+  return HTMLEX_ATTRIBUTE_NAMES
     .map(attributeName => `${attributeName}=${element.getAttribute(attributeName) ?? ''}`)
     .join('|');
+}
+
+function isElementNode(node) {
+  return node?.nodeType === Node.ELEMENT_NODE;
+}
+
+function getNodeKey(node) {
+  if (!isElementNode(node)) return '';
+
+  for (const attributeName of ['id', 'data-key', 'key', 'data-htmlex-key']) {
+    const value = node.getAttribute(attributeName);
+    if (value) return `${attributeName}:${value}`;
+  }
+
+  return '';
+}
+
+function getActiveElement() {
+  try {
+    return document?.activeElement || null;
+  } catch {
+    return null;
+  }
+}
+
+function captureControlState(element) {
+  const tagName = element.tagName;
+  const isActive = getActiveElement() === element;
+
+  if (tagName === 'INPUT' || tagName === 'TEXTAREA') {
+    const state = {
+      tagName,
+      isActive,
+      value: element.value,
+      checked: element.checked,
+    };
+    if (isActive && typeof element.selectionStart === 'number' && typeof element.selectionEnd === 'number') {
+      state.selectionStart = element.selectionStart;
+      state.selectionEnd = element.selectionEnd;
+      state.selectionDirection = element.selectionDirection;
+    }
+    return state;
+  }
+
+  if (tagName === 'SELECT') {
+    return {
+      tagName,
+      isActive,
+      selectedValues: [...(element.options || [])]
+        .filter(option => option.selected)
+        .map(option => option.value),
+    };
+  }
+
+  if (tagName === 'VIDEO' || tagName === 'AUDIO') {
+    return {
+      tagName,
+      currentTime: element.currentTime,
+      muted: element.muted,
+      paused: element.paused,
+      playbackRate: element.playbackRate,
+      volume: element.volume,
+    };
+  }
+
+  return null;
+}
+
+function restoreControlState(element, state) {
+  if (!state || element.tagName !== state.tagName) return;
+
+  if (state.tagName === 'INPUT' || state.tagName === 'TEXTAREA') {
+    if ('value' in element) element.value = state.value;
+    if ('checked' in element && state.checked !== undefined) element.checked = state.checked;
+    if (
+      state.isActive &&
+      typeof element.setSelectionRange === 'function' &&
+      typeof state.selectionStart === 'number' &&
+      typeof state.selectionEnd === 'number'
+    ) {
+      try {
+        element.setSelectionRange(state.selectionStart, state.selectionEnd, state.selectionDirection);
+      } catch {
+        // Some input types do not support selection ranges.
+      }
+    }
+  }
+
+  if (state.tagName === 'SELECT') {
+    const selectedValues = new Set(state.selectedValues || []);
+    for (const option of element.options || []) {
+      option.selected = selectedValues.has(option.value);
+    }
+  }
+
+  if (state.tagName === 'VIDEO' || state.tagName === 'AUDIO') {
+    for (const [key, value] of Object.entries({
+      currentTime: state.currentTime,
+      muted: state.muted,
+      playbackRate: state.playbackRate,
+      volume: state.volume,
+    })) {
+      try {
+        if (value !== undefined) element[key] = value;
+      } catch {
+        // Media properties can reject invalid values depending on ready state.
+      }
+    }
+    if (!state.paused && typeof element.play === 'function') {
+      element.play().catch?.(() => {});
+    }
+  }
+
+  if (state.isActive && typeof element.focus === 'function') {
+    try {
+      element.focus({ preventScroll: true });
+    } catch {
+      element.focus();
+    }
+  }
+}
+
+function findKeyedChild(parent, key, fromIndex) {
+  if (!key) return null;
+  const children = [...parent.childNodes];
+  for (let index = fromIndex; index < children.length; index += 1) {
+    if (getNodeKey(children[index]) === key) return children[index];
+  }
+  return null;
+}
+
+function moveChildBefore(parent, child, referenceNode) {
+  if (child === referenceNode) return;
+  if (typeof parent.insertBefore === 'function') {
+    parent.insertBefore(child, referenceNode || null);
+    return;
+  }
+
+  const children = parent.childNodes;
+  const currentIndex = children.indexOf(child);
+  if (currentIndex < 0) return;
+  children.splice(currentIndex, 1);
+  const nextIndex = referenceNode ? children.indexOf(referenceNode) : children.length;
+  children.splice(nextIndex < 0 ? children.length : nextIndex, 0, child);
 }
 
 export function hasHTMLeXMarkup(content) {
@@ -135,6 +280,7 @@ export function diffAndUpdate(existingNode, newNode) {
     return;
   }
   if (existingNode.nodeType === Node.ELEMENT_NODE) {
+    const liveState = captureControlState(existingNode);
     Logger.system.debug("[DOM] Diffing attributes for element:", existingNode);
     const existingAttrs = existingNode.attributes;
     const newAttrs = newNode.attributes;
@@ -156,6 +302,7 @@ export function diffAndUpdate(existingNode, newNode) {
       }
     }
     diffChildren(existingNode, newNode);
+    restoreControlState(existingNode, liveState);
   }
 }
 
@@ -171,21 +318,29 @@ export function diffChildren(existingParent, newParent) {
     "with new element:",
     newParent
   );
-  const existingChildren = [...existingParent.childNodes];
   const newChildren = [...newParent.childNodes];
-  const max = Math.max(existingChildren.length, newChildren.length);
-  for (let i = 0; i < max; i++) {
-    const existingChild = existingChildren[i];
+  for (let i = 0; i < newChildren.length; i++) {
     const newChild = newChildren[i];
+    const newKey = getNodeKey(newChild);
+    const keyedChild = findKeyedChild(existingParent, newKey, i);
+    if (keyedChild && keyedChild !== existingParent.childNodes[i]) {
+      Logger.system.debug("[DOM] Moving keyed child into position:", newKey);
+      moveChildBefore(existingParent, keyedChild, existingParent.childNodes[i] || null);
+    }
+
+    const existingChild = existingParent.childNodes[i];
     if (!existingChild && newChild) {
       Logger.system.debug("[DOM] Appending new child:", newChild);
       existingParent.appendChild(newChild.cloneNode(true));
-    } else if (existingChild && !newChild) {
-      Logger.system.debug("[DOM] Removing extra child:", existingChild);
-      existingChild.remove();
     } else if (existingChild && newChild) {
       diffAndUpdate(existingChild, newChild);
     }
+  }
+
+  while (existingParent.childNodes.length > newChildren.length) {
+    const extraChild = existingParent.childNodes[existingParent.childNodes.length - 1];
+    Logger.system.debug("[DOM] Removing extra child:", extraChild);
+    extraChild.remove();
   }
   Logger.system.debug("[DOM] Completed diffing children for element:", existingParent);
 }
@@ -218,16 +373,22 @@ export function performInnerHTMLUpdate(element, newHTML) {
  * Updates target elements with new content based on the update strategy.
  * @param {TargetInstruction} target - The target instruction.
  * @param {string} content - The HTML content to update.
- * @param {Element|null} [resolvedElement=null] - Explicit element used for `this(...)` targets.
+ * @param {Element|null} [resolvedElement=null] - Explicit element used for `this(...)` or forced resolved updates.
+ * @param {object} [options={}]
+ * @param {boolean} [options.forceResolvedElement=false] - Use the resolved element without querying the selector again.
  */
-export function updateTarget(target, content, resolvedElement = null) {
+export function updateTarget(target, content, resolvedElement = null, options = {}) {
   Logger.system.debug(
     "[DOM] Updating target with instruction:",
     target,
     "and content length:",
     content.length
   );
-  const elements = target.selector.trim().toLowerCase() === 'this' && resolvedElement
+  const useResolvedElement = resolvedElement && (
+    options.forceResolvedElement ||
+    target.selector.trim().toLowerCase() === 'this'
+  );
+  const elements = useResolvedElement
     ? [resolvedElement]
     : querySelectorAllSafe(target.selector);
   for (const targetElement of elements) {

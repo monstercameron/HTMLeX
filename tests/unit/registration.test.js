@@ -410,6 +410,7 @@ test('registerElement timer targets remove this element and cleanup stale timers
 
   assert.equal(timers[0].delayMs, 50);
   assert.equal(element.getAttribute('data-timer-set'), 'true');
+  assert.equal(element.listeners.size, 0);
 
   element.setAttribute('timer', '75');
   registerElement(element);
@@ -420,6 +421,36 @@ test('registerElement timer targets remove this element and cleanup stale timers
   timers[1].callback();
 
   assert.equal(element.removed, true);
+});
+
+test('registerElement clears pending timers when the timer attribute changes', () => {
+  FakeMutationObserver.instances = [];
+  globalThis.MutationObserver = FakeMutationObserver;
+  const timers = [];
+  globalThis.setTimeout = (callback, delayMs) => {
+    timers.push({ callback, delayMs, cleared: false });
+    return timers.length - 1;
+  };
+  globalThis.clearTimeout = (timerId) => {
+    timers[timerId].cleared = true;
+  };
+  const element = new FakeElement('div', {
+    timer: '50',
+    target: 'this(remove)',
+  });
+
+  registerElement(element);
+  const observer = FakeMutationObserver.instances.at(-1);
+  assert.equal(element.listeners.size, 0);
+
+  element.removeAttribute('timer');
+  observer.callback([{ type: 'attributes', target: element, attributeName: 'timer' }]);
+  timers[0].callback();
+
+  assert.equal(observer.options.attributeFilter[0], 'timer');
+  assert.equal(timers[0].cleared, true);
+  assert.equal(element.hasAttribute('data-timer-set'), false);
+  assert.equal(element.removed, false);
 });
 
 test('registerElement wires method actions through fetch and target updates', async () => {
@@ -455,6 +486,93 @@ test('registerElement wires method actions through fetch and target updates', as
     position: 'beforeend',
     content: 'Registered action response',
   }]);
+});
+
+test('sequential actions start API calls one at a time', async () => {
+  const output = new FakeElement('section');
+  document.querySelector = selector => selector === '#seqOut' ? output : null;
+  document.querySelectorAll = selector => selector === '#seqOut' ? [output] : [];
+  const responseResolvers = [];
+  const fetchCalls = [];
+  globalThis.fetch = async (url) => {
+    const callNumber = fetchCalls.length + 1;
+    fetchCalls.push(url);
+    return new Promise(resolve => {
+      responseResolvers.push(() => resolve(new Response(`Sequential ${callNumber}`)));
+    });
+  };
+  const element = new FakeElement('button', {
+    get: '/sequential-unit',
+    sequential: '0',
+    target: '#seqOut(append)',
+  });
+
+  registerElement(element);
+  await element.listeners.get('click')({
+    type: 'click',
+    target: element,
+    currentTarget: element,
+  });
+  await element.listeners.get('click')({
+    type: 'click',
+    target: element,
+    currentTarget: element,
+  });
+  await delay(0);
+
+  assert.deepEqual(fetchCalls, ['/sequential-unit']);
+  assert.deepEqual(output.inserted, []);
+
+  responseResolvers[0]();
+  await delay(5);
+
+  assert.deepEqual(fetchCalls, ['/sequential-unit', '/sequential-unit']);
+  assert.deepEqual(output.inserted, [{
+    position: 'beforeend',
+    content: 'Sequential 1',
+  }]);
+
+  responseResolvers[1]();
+  await delay(5);
+
+  assert.deepEqual(output.inserted, [
+    {
+      position: 'beforeend',
+      content: 'Sequential 1',
+    },
+    {
+      position: 'beforeend',
+      content: 'Sequential 2',
+    },
+  ]);
+});
+
+test('sequential queue failures reset processing state for later recovery', async () => {
+  const output = new FakeElement('section');
+  output.insertAdjacentHTML = () => {
+    throw new Error('unit update failure');
+  };
+  document.querySelector = selector => selector === '#brokenOut' ? output : null;
+  document.querySelectorAll = selector => selector === '#brokenOut' ? [output] : [];
+  globalThis.fetch = async () => new Response('Broken sequential response');
+  const element = new FakeElement('button', {
+    get: '/broken-sequential',
+    sequential: '1',
+    target: '#brokenOut(append)',
+  });
+
+  registerElement(element);
+  await element.listeners.get('click')({
+    type: 'click',
+    target: element,
+    currentTarget: element,
+  });
+  await delay(20);
+
+  assert.equal(element._htmlexSequentialProcessing, false);
+  assert.equal(element._htmlexSequentialMode, false);
+  assert.equal(element._htmlexSequentialQueue?.length ?? 0, 0);
+  assert.equal(element._htmlexSequentialUpdates?.length ?? 0, 0);
 });
 
 test('registerElement handles subscribe-triggered API actions and cleanup on removal', async () => {
@@ -640,4 +758,25 @@ test('initHTMLeX mutation observer registers child nodes and cleans removed attr
 
   assert.equal(added.getAttribute('data-htmlex-registered'), 'true');
   assert.equal(registered.hasAttribute('data-htmlex-registered'), false);
+});
+
+test('initHTMLeX processes every attribute mutation in one observer batch', () => {
+  FakeMutationObserver.instances = [];
+  globalThis.MutationObserver = FakeMutationObserver;
+  const first = new FakeElement('button', { get: '/first' });
+  const second = new FakeElement('button', { get: '/second' });
+  document.querySelectorAll = () => [];
+  document.addEventListener = () => {};
+  document.removeEventListener = () => {};
+
+  initHTMLeX();
+  const observer = FakeMutationObserver.instances.at(-1);
+
+  observer.callback([
+    { type: 'attributes', target: first },
+    { type: 'attributes', target: second },
+  ]);
+
+  assert.equal(first.getAttribute('data-htmlex-registered'), 'true');
+  assert.equal(second.getAttribute('data-htmlex-registered'), 'true');
 });

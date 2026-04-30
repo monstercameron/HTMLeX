@@ -2,7 +2,9 @@ import { expect, test } from '@playwright/test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-const dataPath = path.resolve(import.meta.dirname, '../../src/persistence/data.json');
+const dataFixturePath = path.resolve(import.meta.dirname, '../../src/persistence/data.json');
+const dataPath = path.resolve(import.meta.dirname, '../../tmp/playwright-todos.json');
+const lockPath = `${dataPath}.lock`;
 const demosPath = path.resolve(import.meta.dirname, '../../src/persistence/demos.json');
 const appPort = 5600;
 const responseFailures = new WeakMap();
@@ -27,12 +29,15 @@ const expectedCanvasText = {
 };
 
 test.beforeAll(async () => {
-  originalTodos = await fs.readFile(dataPath, 'utf8');
+  await fs.mkdir(path.dirname(dataPath), { recursive: true });
+  originalTodos = await fs.readFile(dataFixturePath, 'utf8');
+  await fs.writeFile(dataPath, originalTodos);
   demos = JSON.parse(await fs.readFile(demosPath, 'utf8'));
 });
 
 test.afterAll(async () => {
-  await fs.writeFile(dataPath, originalTodos);
+  await fs.rm(lockPath, { force: true });
+  await fs.rm(dataPath, { force: true });
 });
 
 test.beforeEach(async ({ page }) => {
@@ -69,6 +74,18 @@ test('shell loads Bootstrap 5 and no Tailwind runtime', async ({ page }) => {
   await expect(page.locator('link[href*="bootstrap@5.3.8"]')).toHaveCount(1);
   await expect(page.locator('script[src*="cdn.tailwindcss.com"]')).toHaveCount(0);
   await expect(page.locator('link[href="./styles.css"]')).toHaveCount(1);
+  await expect(page.locator('script[type="module"][src="./src/main.js"]')).toHaveCount(1);
+});
+
+test('shell responses include strict baseline security headers', async ({ page }) => {
+  const response = await page.goto('/');
+  const headers = response.headers();
+
+  expect(headers['x-powered-by']).toBeUndefined();
+  expect(headers['x-content-type-options']).toBe('nosniff');
+  expect(headers['x-frame-options']).toBe('DENY');
+  expect(headers['content-security-policy']).toContain("default-src 'self'");
+  expect(headers['content-security-policy']).toContain("script-src 'self' https://cdn.jsdelivr.net");
 });
 
 test('every demo card initializes a working canvas view', async ({ page }) => {
@@ -79,6 +96,15 @@ test('every demo card initializes a working canvas view', async ({ page }) => {
     await expect(page.locator('#demoCanvas .snippet-panel code')).toContainText('<');
     await expect(page.locator('#demoCanvas')).not.toContainText('Cannot GET');
     await expect(page.locator('#demoCanvas')).not.toContainText('undefined');
+  }
+});
+
+test('demo learn-more links resolve to detail pages', async ({ page }) => {
+  for (const demo of demos) {
+    await page.goto(demo.learnMoreHref);
+    await expect(page.locator('main')).toContainText(demo.title);
+    await expect(page.locator('main')).toContainText(demo.description);
+    await expect(page.locator('main').getByRole('link', { name: 'Back to demos' })).toHaveAttribute('href', '/');
   }
 });
 

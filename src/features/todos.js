@@ -6,8 +6,10 @@
  * @module features/todos
  */
 
-import { access, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import {
   renderTodoItem,
   renderTodoList,
@@ -18,7 +20,15 @@ import { render } from '../components/HTMLeX.js';
 import { sendFragmentResponse, sendServerError } from './responses.js';
 import { logFeatureError, logRequestError, logRequestWarning } from '../serverLogger.js';
 
-const TODOS_FILE = path.join(import.meta.dirname, '..', 'persistence/data.json');
+const TODO_SEED_FILE = path.join(import.meta.dirname, '..', 'persistence/data.json');
+const DEFAULT_TODOS_FILE = path.join(import.meta.dirname, '..', '..', 'tmp', 'todos.json');
+let persistenceQueue = null;
+
+function enqueuePersistence(operation) {
+  const nextOperation = persistenceQueue ? persistenceQueue.then(operation, operation) : operation();
+  persistenceQueue = nextOperation.catch(() => {});
+  return nextOperation;
+}
 
 /**
  * Ensures that the data file exists.
@@ -27,11 +37,152 @@ const TODOS_FILE = path.join(import.meta.dirname, '..', 'persistence/data.json')
  * @returns {Promise<void>}
  */
 async function ensureDataFile() {
+  const todosFile = getTodosFile();
   try {
-    await access(TODOS_FILE);
+    await access(todosFile);
   } catch {
-    await writeFile(TODOS_FILE, JSON.stringify([], null, 2));
+    try {
+      await mkdir(path.dirname(todosFile), { recursive: true });
+      await writeFile(todosFile, await getInitialTodosPayload(), { flag: 'wx' });
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+    }
   }
+}
+
+function getTodosFile() {
+  return path.resolve(process.env.HTMLEX_TODO_DATA_FILE || DEFAULT_TODOS_FILE);
+}
+
+function getTodoLockFile() {
+  return `${getTodosFile()}.lock`;
+}
+
+async function getInitialTodosPayload() {
+  try {
+    return await readFile(TODO_SEED_FILE, 'utf8');
+  } catch {
+    return JSON.stringify([], null, 2);
+  }
+}
+
+function getLockTimeoutMs() {
+  const timeoutMs = Number.parseInt(process.env.HTMLEX_TODO_LOCK_TIMEOUT_MS || '5000', 10);
+  return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 5000;
+}
+
+function getLockRetryMs() {
+  const retryMs = Number.parseInt(process.env.HTMLEX_TODO_LOCK_RETRY_MS || '10', 10);
+  return Number.isFinite(retryMs) && retryMs > 0 ? retryMs : 10;
+}
+
+function getLockStaleMs() {
+  const staleMs = Number.parseInt(process.env.HTMLEX_TODO_LOCK_STALE_MS || '30000', 10);
+  return Number.isFinite(staleMs) && staleMs > 0 ? staleMs : 30000;
+}
+
+function isProcessAlive(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === 'EPERM') return true;
+    if (error?.code === 'ESRCH') return false;
+    return true;
+  }
+}
+
+async function readTodoLockMetadata(lockFile) {
+  try {
+    return JSON.parse(await readFile(lockFile, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+async function isTodoLockStale(lockFile) {
+  const [metadata, lockStats] = await Promise.all([
+    readTodoLockMetadata(lockFile),
+    stat(lockFile).catch(() => null),
+  ]);
+  if (!lockStats) return false;
+
+  const createdAtMs = Date.parse(metadata?.createdAt || '');
+  const metadataAgeMs = Number.isFinite(createdAtMs) ? Date.now() - createdAtMs : 0;
+  const lockAgeMs = Date.now() - lockStats.mtimeMs;
+  const lockIsOld = Math.max(lockAgeMs, metadataAgeMs) >= getLockStaleMs();
+  const ownerAlive = isProcessAlive(Number.parseInt(metadata?.pid, 10));
+
+  return lockIsOld && !ownerAlive;
+}
+
+async function removeStaleTodoLockIfSafe(lockFile) {
+  if (!(await isTodoLockStale(lockFile))) return false;
+
+  await rm(lockFile, { force: true }).catch(() => {});
+  return true;
+}
+
+async function syncDirectory(directoryPath) {
+  let directoryHandle;
+  try {
+    directoryHandle = await open(directoryPath, 'r');
+    await directoryHandle.sync();
+  } catch {
+    // Directory sync is best-effort because some Windows filesystems reject it.
+  } finally {
+    await directoryHandle?.close().catch(() => {});
+  }
+}
+
+async function acquireTodoLock() {
+  const lockFile = getTodoLockFile();
+  const startedAt = Date.now();
+  const timeoutMs = getLockTimeoutMs();
+  const retryMs = getLockRetryMs();
+
+  while (true) {
+    try {
+      await mkdir(path.dirname(lockFile), { recursive: true });
+      const lockHandle = await open(lockFile, 'wx');
+      try {
+        await lockHandle.writeFile(JSON.stringify({
+          pid: process.pid,
+          createdAt: new Date().toISOString()
+        }));
+        await lockHandle.sync();
+      } catch (error) {
+        await lockHandle.close().catch(() => {});
+        await rm(lockFile, { force: true }).catch(() => {});
+        throw error;
+      }
+
+      return async () => {
+        await lockHandle.close().catch(() => {});
+        await rm(lockFile, { force: true }).catch(() => {});
+      };
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+      if (await removeStaleTodoLockIfSafe(lockFile)) continue;
+      if (Date.now() - startedAt >= timeoutMs) {
+        throw new Error(`Timed out acquiring todo persistence lock after ${timeoutMs}ms.`, { cause: error });
+      }
+      await delay(retryMs);
+    }
+  }
+}
+
+function withTodoLock(operation) {
+  return enqueuePersistence(async () => {
+    const releaseLock = await acquireTodoLock();
+    try {
+      return await operation();
+    } finally {
+      await releaseLock();
+    }
+  });
 }
 
 /**
@@ -39,14 +190,17 @@ async function ensureDataFile() {
  * @async
  * @returns {Promise<Array<Object>>} Array of todo objects.
  */
-export async function loadTodos() {
+export async function loadTodos({ failClosed = false } = {}) {
+  await persistenceQueue?.catch(() => {});
   await ensureDataFile();
+  const todosFile = getTodosFile();
   try {
-    const data = await readFile(TODOS_FILE, 'utf8');
+    const data = await readFile(todosFile, 'utf8');
     return JSON.parse(data);
   } catch (error) {
-    logFeatureError('todos', 'Failed to load todos from disk.', error, { file: TODOS_FILE });
-    return [];
+    logFeatureError('todos', 'Failed to load todos from disk.', error, { file: todosFile });
+    if (failClosed) return [];
+    throw error;
   }
 }
 
@@ -83,12 +237,56 @@ export async function getToDoWidget(req, res) {
  * @returns {Promise<void>}
  */
 export async function writeTodos(todos) {
+  return withTodoLock(() => writeTodosAtomic(todos));
+}
+
+async function writeTodosAtomic(todos) {
+  const todosFile = getTodosFile();
+  const tempFile = `${todosFile}.${process.pid}.${randomUUID()}.tmp`;
+  let tempHandle;
   try {
-    await writeFile(TODOS_FILE, JSON.stringify(todos, null, 2));
+    tempHandle = await open(tempFile, 'w');
+    await tempHandle.writeFile(JSON.stringify(todos, null, 2));
+    await tempHandle.sync();
+    await tempHandle.close();
+    tempHandle = null;
+    await rename(tempFile, todosFile);
+    await syncDirectory(path.dirname(todosFile));
   } catch (error) {
-    logFeatureError('todos', 'Failed to write todos to disk.', error, { file: TODOS_FILE });
+    await tempHandle?.close().catch(() => {});
+    await rm(tempFile, { force: true }).catch(() => {});
+    logFeatureError('todos', 'Failed to write todos to disk.', error, { file: todosFile });
     throw error;
   }
+}
+
+async function loadTodosForMutation() {
+  await ensureDataFile();
+  const data = await readFile(getTodosFile(), 'utf8');
+  const todos = JSON.parse(data);
+  if (!Array.isArray(todos)) {
+    throw new TypeError(`Expected todo data to be an array but received ${typeof todos}.`);
+  }
+
+  return todos;
+}
+
+function createTodoId(todos) {
+  const highestExistingId = todos.reduce((highestId, todo) => (
+    Number.isSafeInteger(todo.id) ? Math.max(highestId, todo.id) : highestId
+  ), 0);
+  return Math.max(Date.now(), highestExistingId + 1);
+}
+
+function mutateTodos(mutator) {
+  return withTodoLock(async () => {
+    const todos = await loadTodosForMutation();
+    const result = await mutator(todos);
+    if (result?.write !== false) {
+      await writeTodosAtomic(todos);
+    }
+    return { ...result, todos };
+  });
 }
 
 /**
@@ -102,7 +300,6 @@ export async function writeTodos(todos) {
  */
 export async function createTodo(req, res) {
   try {
-    const todos = await loadTodos();
     const submittedText = Array.isArray(req.body.todo) ? req.body.todo[0] : req.body.todo;
     const normalizedText = String(submittedText ?? '').trim();
     if (!normalizedText) {
@@ -112,9 +309,11 @@ export async function createTodo(req, res) {
       }
       return;
     }
-    const newTodo = { id: Date.now(), text: normalizedText };
-    todos.push(newTodo);
-    await writeTodos(todos);
+    const { todos } = await mutateTodos((todos) => {
+      const newTodo = { id: createTodoId(todos), text: normalizedText };
+      todos.push(newTodo);
+      return { newTodo };
+    });
     sendFragmentResponse(res, '#todoList(outerHTML)', render(renderTodoList(todos)));
   } catch (error) {
     logRequestError(req, 'Failed to create todo.', error);
@@ -203,14 +402,7 @@ export async function getEditTodoForm(req, res) {
  */
 export async function updateTodo(req, res) {
   try {
-    const todos = await loadTodos();
     const id = Number.parseInt(req.params.id, 10);
-    const index = todos.findIndex(todo => todo.id === id);
-    if (index === -1) {
-      logRequestWarning(req, 'Todo update target was not found.', { id, statusCode: 404 });
-      if (!res.headersSent) return res.status(404).send('Todo not found');
-      return;
-    }
     const submittedText = Array.isArray(req.body.todo) ? req.body.todo[0] : req.body.todo;
     const normalizedText = String(submittedText ?? '').trim();
     if (!normalizedText) {
@@ -218,9 +410,23 @@ export async function updateTodo(req, res) {
       if (!res.headersSent) return res.status(400).send('Missing updated todo text');
       return;
     }
-    todos[index].text = normalizedText;
-    await writeTodos(todos);
-    sendFragmentResponse(res, `#editForm-${id}(outerHTML)`, render(renderTodoItem(todos[index])));
+    const result = await mutateTodos((todos) => {
+      const index = todos.findIndex(todo => todo.id === id);
+      if (index === -1) {
+        return { found: false, write: false };
+      }
+
+      todos[index].text = normalizedText;
+      return { found: true, todo: todos[index] };
+    });
+
+    if (!result.found) {
+      logRequestWarning(req, 'Todo update target was not found.', { id, statusCode: 404 });
+      if (!res.headersSent) return res.status(404).send('Todo not found');
+      return;
+    }
+
+    sendFragmentResponse(res, `#editForm-${id}(outerHTML)`, render(renderTodoItem(result.todo)));
   } catch (error) {
     logRequestError(req, 'Failed to update todo.', error);
     sendServerError(res);
@@ -237,17 +443,24 @@ export async function updateTodo(req, res) {
  */
 export async function deleteTodo(req, res) {
   try {
-    const todos = await loadTodos();
     const id = Number.parseInt(req.params.id, 10);
-    const index = todos.findIndex(todo => todo.id === id);
-    if (index === -1) {
+    const result = await mutateTodos((todos) => {
+      const index = todos.findIndex(todo => todo.id === id);
+      if (index === -1) {
+        return { found: false, write: false };
+      }
+
+      todos.splice(index, 1);
+      return { found: true };
+    });
+
+    if (!result.found) {
       logRequestWarning(req, 'Todo delete target was not found.', { id, statusCode: 404 });
       if (!res.headersSent) return res.status(404).send('Todo not found');
       return;
     }
-    todos.splice(index, 1);
-    await writeTodos(todos);
-    sendFragmentResponse(res, '#todoList(outerHTML)', render(renderTodoList(todos)));
+
+    sendFragmentResponse(res, '#todoList(outerHTML)', render(renderTodoList(result.todos)));
   } catch (error) {
     logRequestError(req, 'Failed to delete todo.', error);
     sendServerError(res);

@@ -127,6 +127,18 @@ class FakeElementNode {
     return appended;
   }
 
+  insertBefore(child, referenceNode = null) {
+    const currentIndex = this.childNodes.indexOf(child);
+    if (currentIndex >= 0) {
+      this.childNodes.splice(currentIndex, 1);
+    }
+    const nextIndex = referenceNode ? this.childNodes.indexOf(referenceNode) : this.childNodes.length;
+    const insertedIndex = nextIndex >= 0 ? nextIndex : this.childNodes.length;
+    this.childNodes.splice(insertedIndex, 0, child);
+    child.parentElement = this;
+    return child;
+  }
+
   cloneNode(deep = false) {
     return new FakeElementNode(
       this.nodeName,
@@ -206,6 +218,53 @@ test('diffChildren removes extra nodes and appends missing clones', () => {
   assert.equal(existing.childNodes.length, 2);
   assert.equal(existing.childNodes[0].textContent, 'keep');
   assert.equal(existing.childNodes[1].outerHTML, '<strong>add</strong>');
+});
+
+test('diffChildren reorders keyed children without replacing live nodes', () => {
+  const first = new FakeElementNode('li', { id: 'first' }, [new FakeTextNode('First')]);
+  const second = new FakeElementNode('li', { id: 'second' }, [new FakeTextNode('Second')]);
+  const existing = new FakeElementNode('ul', {}, [first, second]);
+  const next = createFragment([
+    new FakeElementNode('li', { id: 'second' }, [new FakeTextNode('Second updated')]),
+    new FakeElementNode('li', { id: 'first' }, [new FakeTextNode('First updated')]),
+  ]);
+
+  diffChildren(existing, next);
+
+  assert.equal(existing.childNodes[0], second);
+  assert.equal(existing.childNodes[1], first);
+  assert.equal(second.innerHTML, 'Second updated');
+  assert.equal(first.innerHTML, 'First updated');
+});
+
+test('diffAndUpdate preserves focused input value and selection state', () => {
+  const input = new FakeElementNode('input', { id: 'title', value: 'server-old' }, []);
+  input.value = 'draft value';
+  input.checked = true;
+  input.selectionStart = 2;
+  input.selectionEnd = 7;
+  input.selectionDirection = 'forward';
+  input.setSelectionRange = (start, end, direction) => {
+    input.restoredSelection = { start, end, direction };
+  };
+  input.focus = (options) => {
+    input.focusOptions = options;
+  };
+  globalThis.document = {
+    activeElement: input,
+  };
+
+  diffAndUpdate(input, new FakeElementNode('input', { id: 'title', value: 'server-new' }, []));
+
+  assert.equal(input.getAttribute('value'), 'server-new');
+  assert.equal(input.value, 'draft value');
+  assert.equal(input.checked, true);
+  assert.deepEqual(input.restoredSelection, {
+    start: 2,
+    end: 7,
+    direction: 'forward',
+  });
+  assert.deepEqual(input.focusOptions, { preventScroll: true });
 });
 
 test('performInnerHTMLUpdate skips identical content and diffs changed content', () => {

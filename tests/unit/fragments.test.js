@@ -115,6 +115,56 @@ test('processFragmentBuffer lets caller targets override this fragments', () => 
   assert.equal(element.innerHTML, '<strong>Override</strong>');
 });
 
+test('processFragmentBuffer updates each resolved selector target exactly once', () => {
+  const first = new FakeElement();
+  const second = new FakeElement();
+  document.querySelectorAll = selector => selector === '.item' ? [first, second] : [];
+
+  processFragmentBuffer(
+    '<fragment target=".item(append)"><span>Resolved</span></fragment>',
+    new FakeElement()
+  );
+
+  assert.deepEqual(first.appended, [{ position: 'beforeend', content: '<span>Resolved</span>' }]);
+  assert.deepEqual(second.appended, [{ position: 'beforeend', content: '<span>Resolved</span>' }]);
+});
+
+test('processFragmentBuffer falls back missing explicit targets to the triggering element', () => {
+  const element = new FakeElement();
+  document.querySelectorAll = () => [];
+
+  processFragmentBuffer(
+    '<fragment target="#missing(append)"><span>Fallback</span></fragment>',
+    element
+  );
+
+  assert.deepEqual(element.appended, [{ position: 'beforeend', content: '<span>Fallback</span>' }]);
+});
+
+test('processFragmentBuffer applies streaming fragments immediately through resolved targets', () => {
+  const output = new FakeElement();
+  const triggeringElement = new FakeElement();
+  triggeringElement._htmlexStreaming = true;
+  const afterUpdateCalls = [];
+  const swapLifecycle = {
+    createUpdateCallback() {
+      return () => afterUpdateCalls.push('after');
+    },
+  };
+  document.querySelectorAll = selector => selector === '#streamOut' ? [output] : [];
+
+  processFragmentBuffer(
+    '<fragment target="#streamOut(append)"><span GET="/next">Stream</span></fragment>',
+    triggeringElement,
+    null,
+    swapLifecycle
+  );
+
+  assert.deepEqual(output.appended, [{ position: 'beforeend', content: '<span GET="/next">Stream</span>' }]);
+  assert.deepEqual(afterUpdateCalls, ['after']);
+  assert.equal(document.dispatchedEvents.at(-1).type, 'htmlex:dom-updated');
+});
+
 test('processFragmentBuffer queues sequential updates without mutating immediately', () => {
   const element = new FakeElement();
   element._htmlexSequentialMode = true;

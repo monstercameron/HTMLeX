@@ -1,361 +1,329 @@
-# HTMLeX – HTML eXtensible Declarative HATEOAS UI Specification  
-*Version 1.2.3 • Last Updated: 2025-02-17*
-
----
-
-## Table of Contents
-
-1. [Preamble](#preamble)  
-2. [Design Principles and Requirements](#design-principles-and-requirements)  
-3. [Attribute Definitions, Behavior, and Defaults](#attribute-definitions-behavior-and-defaults)  
-    - [API Calls & Data Collection](#api-calls--data-collection)  
-    - [DOM Updates](#dom-updates)  
-    - [URL State Updates](#url-state-updates)  
-    - [Publish/Subscribe Chaining](#publishsubscribe-chaining)  
-    - [Rate Limiting](#rate-limiting)  
-    - [Polling](#polling)  
-    - [WebSocket Integration & Generic Retry/Timeout](#websocket-integration--generic-retrytimeout)  
-    - [Auto‑Fire, Prefetch & Lazy Loading](#auto‑fire-prefetch--lazy-loading)  
-    - [Caching](#caching)  
-    - [Extras (Inline Parameters)](#extras-inline-parameters)  
-    - [Timers](#timers)  
-    - [Sequential Updates](#sequential-updates)  
-    - [Lifecycle Hooks (Optional Extension)](#lifecycle-hooks-optional-extension)  
-    - [Streaming & Progressive Rendering](#streaming--progressive-rendering)  
-4. [Security Considerations](#security-considerations)  
-5. [Contributing](#contributing)  
-6. [License](#license)
-
----
-
-## 1. Preamble
-
-_HATEOAS (Hypermedia as the Engine of Application State) is an architectural principle in which the server returns complete HTML responses—including hypermedia controls (links, forms, etc.)—that describe available state transitions. In this model, the UI is driven entirely by server‑rendered HTML, and there is no need for explicit client‑side JSON state. **HTMLeX** extends HTML with a rich set of declarative attributes to manage API calls, DOM updates, URL state, and inter‑component event communication via a publish/subscribe model._
-
-> **Notes:**  
-> - The framework uses modern JavaScript features (such as streaming, Web Workers, and dynamic function execution) to implement declarative interactions.  
-> - Server responses include complete HTML fragments and may be streamed progressively, reducing the need for client‑side state management.
-
----
-
-## 2. Design Principles and Requirements
-
-- **Server‑Rendered UI:**  
-  All UI updates and state transitions are delivered as complete HTML responses from the server.  
-  > **Notes:**  
-  > - Endpoints (e.g., in `features/streaming.js` and `features/todos.js`) use functions like `renderFragment()` to target specific DOM elements for update.  
-  > - This design minimizes client‑side complexity by letting the server drive state transitions.
-
-- **Declarative Markup:**  
-  Every interactive behavior is defined using HTML attributes rather than imperative JavaScript.  
-  > **Notes:**  
-  > - Developers use attributes such as `GET`, `POST`, `target`, and `extras` to define behavior without additional code.  
-  > - The implementation in `registration.js` shows how event listeners are dynamically attached based on these attributes.
-
-- **HATEOAS‑Driven:**  
-  Hypermedia controls in HTML responses guide the UI without explicit client‑side state management.
-
-- **URL State Management:**  
-  URL updates (query parameters and path changes) are synchronized with API calls.  
-  > **Notes:**  
-  > - The attribute **history** controls whether updates push new history entries (for user‑initiated actions) or replace the current entry (for non‑user‑initiated actions).  
-  > - The function `handleURLState(element)` ensures URL updates are applied after API responses.
-
-- **Publish/Subscribe Model:**  
-  A declarative publish/subscribe system allows events to be chained together via HTML attributes and HTTP headers.  
-  > **Notes:**  
-  > - The **publish** and **subscribe** attributes let elements communicate without direct references.  
-  > - The server can instruct the client to emit a signal using an HTTP **Emit** header, which is processed by checking for delay parameters and calling `emitSignal()`.
-
-- **Robustness and Error Handling:**  
-  Instead of separate error or loading attributes, streaming responses and structured error markers are used.  
-  > **Notes:**  
-  > - In `processResponse` (in `actions.js`), errors are indicated with a status attribute (e.g., `<fragment status="500">`).  
-  > - Fallback updates occur if no complete fragments are detected.
-
-- **Performance Optimizations:**  
-  A built‑in diffing (morphing) algorithm minimizes reflows and preserves live element state.  
-  > **Notes:**  
-> - The patched update mechanism (see `patchedUpdateTarget` in `registration.js`) handles both initial and subsequent fragments efficiently.
-> - For streaming responses, if multiple chunks are received the updates are applied immediately outside the sequential queue to avoid delays.
-
-- **Extensibility:**  
-  Lifecycle hooks and Web Component integration allow developers to extend or customize behavior.  
-  > **Notes:**  
-  > - Hooks such as **onbefore** and **onafter** are executed via dynamic function creation, with errors caught and logged to avoid interrupting the main flow.
-
----
-
-## 3. Attribute Definitions, Behavior, and Defaults
-
-### API Calls & Data Collection
-
-- **HTTP Verb Attributes (GET, POST, PUT, DELETE, etc.)**  
-  - **Purpose:** Specifies the API endpoint to call.  
-  - **Behavior:**  
-    - Gathers form inputs from the element's subtree.
-    - For GET requests, FormData is converted into URL query parameters.
-    - For non‑GET methods, FormData is sent as the request body.
-  - **Default:** Must be provided explicitly.
-  > **Notes:**  
-  > - Implemented in `handleAction` (actions.js), where FormData is constructed from the form or child inputs.
-  > - Additional inputs from elements specified by the **source** attribute are appended.
-
-- **source**  
-  - **Purpose:** Collects additional inputs from outside the element’s subtree.
-  - **Value:** Space‑separated list of CSS selectors.
-  - **Default:** Empty.
-  > **Notes:**  
-  > - The code iterates over selectors provided in **source** and appends matching input values to the FormData.
-  > - Useful when form inputs are distributed in different parts of the DOM.
-
-### DOM Updates
-
-- **target**  
-  - **Purpose:** Defines where and how to apply the returned HTML.
-  - **Value:** A space‑separated list of update instructions in the format:  
-    ```
-    CSS_SELECTOR(REPLACEMENT_STRATEGY)
-    ```
-    with strategies including:
-    - **innerHTML:** Replaces inner content (default).
-    - **outerHTML:** Replaces the entire element.
-    - **append:** Appends content.
-    - **prepend:** Prepends content.
-    - **before/after:** Inserts content adjacent to the element.
-    - **remove:** Removes the element.
-  > **Notes:**  
-  > - In `patchedUpdateTarget` (registration.js), if the target selector is `"this"` or empty, the first fragment replaces content and subsequent fragments are appended.
-  > - For elements with the **sequential** attribute, DOM updates are queued in a FIFO order.
-  > - Non‑sequential updates are scheduled immediately (using setTimeout with 0ms) and can cancel pending calls via AbortController.
-
-### URL State Updates
-
-- **push**, **pull**, **path**  
-  - **Purpose:** Manage query parameters and path updates.
-  - **Behavior:** Automatically updates the URL state based on API calls.
-  > **Notes:**  
-  > - The state updates are controlled by the **history** attribute.
-  > - Implemented by calling `handleURLState(element)` after API responses.
-
-- **history**  
-  - **Purpose:** Controls the effect of URL state changes on browser history.
-  - **Value:** Accepts `push`, `replace`, or `none`.
-  - **Default:** Context‑sensitive.
-  > **Notes:**  
-  > - User‑initiated actions (e.g., clicks) default to `push` (new history entry).
-  > - Non‑user‑initiated actions (e.g., auto‑fire or polling) default to `replace` to avoid cluttering the history.
-
-### Publish/Subscribe Chaining
-
-- **publish**  
-  - **Purpose:** Declares an event to be published after the API call.
-  - **Value:** A signal name (e.g., `dataUpdated`).
-  - **Default:** Empty.
-  > **Notes:**  
-  > - When an API call succeeds, the code emits the signal via `emitSignal()`.
-  > - Additional timing may be applied if the element has a **timer** attribute.
-
-- **subscribe**  
-  - **Purpose:** Specifies one or more events to listen for before triggering the API call.
-  - **Value:** Space‑separated list of signal names.
-  - **Default:** Empty.
-  > **Notes:**  
-  > - The registration code attaches listeners for each signal using `registerSignalListener()`.
-  > - Signals are processed in the order they appear (leftmost has highest priority).
-
-- **trigger**  
-  - **Purpose:** Overrides the default event that initiates an API call or event.
-  - **Value:** A DOM event name (e.g., `click`, `submit`).
-  - **Default:** `click` for buttons, `submit` for forms.
-  > **Notes:**  
-  > - The normalized event name is determined by stripping any “on” prefix.
-  > - Used in attaching the appropriate event listener in `registerElement`.
-
-- **Emit Header**  
-  - **Purpose:** Instructs HTMLeX to publish a specified signal via the HTTP header.
-  - **Example:**  
-    ```http
-    Emit: dataUpdated; delay=1000
-    ```
-  > **Notes:**  
-  > - Processed in `handleAction` where the header is parsed.
-  > - If a delay is specified, the signal is emitted after the delay; otherwise, it is emitted immediately.
-
-### Rate Limiting
-
-- **debounce**  
-  - **Purpose:** Delays the API call until no events occur for a specified period.
-  - **Value:** Time in milliseconds.
-  - **Default:** `0` (disabled).
-  > **Notes:**  
-  > - If set (e.g., `debounce="500"`), the event handler is wrapped to delay execution by 500ms.
-  > - Helps prevent rapid, repeated API calls.
-
-- **throttle**  
-  - **Purpose:** Enforces a minimum interval between successive API calls.
-  - **Value:** Time in milliseconds.
-  - **Default:** `0` (disabled).
-  > **Notes:**  
-  > - When applied, ensures that once an API call is made, further calls are ignored until the throttle interval expires.
-
-### Polling
-
-- **poll**  
-  - **Purpose:** Automatically triggers API calls at a fixed interval.
-  - **Value:** Time in milliseconds.
-  - **Default:** Disabled if omitted.
-  > **Notes:**  
-  > - Polling can be implemented using a Web Worker (as seen in `actions.js`) or using `setInterval` (in `registration.js`).
-  > - The **repeat** attribute can further restrict the number of polling iterations.
-
-- **repeat**  
-  - **Purpose:** Limits the number of polling iterations.
-  - **Value:** An integer (`0` indicates unlimited).
-  - **Default:** `0` (unlimited).
-  > **Notes:**  
-  > - When used with **poll**, the polling loop terminates after the specified count.
-  > - The Web Worker or interval code monitors the iteration count.
-
-### WebSocket Integration & Generic Retry/Timeout
-
-- **socket**  
-  - **Purpose:** Connects the element to a WebSocket endpoint for real‑time updates.
-  - **Value:** A WebSocket URL.
-  - **Default:** None.
-  > **Notes:**  
-  > - When present, the registration module calls `handleWebSocket()` to establish a connection.
-  > - Supports automatic reconnection attempts if retries are configured.
-
-- **retry**  
-  - **Purpose:** Specifies how many times to retry a failed API call or WebSocket connection.
-  - **Value:** Integer.
-  - **Default:** `0` (no retries).
-  > **Notes:**  
-  > - In `handleAction`, the API call is retried up to the specified count before handling errors.
-  > - Useful for transient network issues.
-
-- **timeout**  
-  - **Purpose:** Sets a maximum wait time (in milliseconds) for an API call or WebSocket connection.
-  - **Value:** Time in milliseconds.
-  - **Default:** `0` (disabled).
-  > **Notes:**  
-  > - Implemented via `fetchWithTimeout` which aborts the API call if the specified duration is exceeded.
-
-### Auto‑Fire, Prefetch & Lazy Loading
-
-- **auto**  
-  - **Purpose:** Automatically fires the API call when the element is inserted into the DOM.
-  - **Value Options:**  
-    - `auto` or `auto=true`: Fire immediately.
-    - `auto=prefetch`: Fire immediately, cache the response, but delay UI update.
-    - `auto=lazy`: Delay the API call until the element is near the viewport.
-  - **Default:** Not auto‑fired unless specified.
-  > **Notes:**  
-  > - For `auto=lazy`, an IntersectionObserver is used to detect when the element enters the viewport.
-  > - In `auto=prefetch`, the response is cached so that the UI update can be triggered later.
-  > - The implementation in `registration.js` handles the different modes using conditional logic.
-
-- **cache**  
-  - **Purpose:** Caches the API response locally to avoid duplicate calls.
-  - **Value:** TTL in milliseconds or a flag.
-  - **Default:** Not cached if omitted.
-  > **Notes:**  
-  > - The functions `getCache` and `setCache` are used in `handleAction` to store and retrieve responses.
-  > - For example, `cache="30000"` caches the response for 30 seconds.
-
-### Extras (Inline Parameters)
-
-- **extras**  
-  - **Purpose:** Injects additional key=value pairs into the API request payload.
-  - **Value:** Space‑separated list (e.g., `locale=en_US theme=dark`).
-  - **Default:** Empty.
-  > **Notes:**  
-  > - The code splits the string and appends each key-value pair to the FormData.
-  > - This mechanism allows developers to pass extra contextual parameters with every request.
-
-### Timers
-
-- **timer**  
-  - **Purpose:** Delays the publication of events, triggers an API call, or clears content after a specified time.
-  - **Value:** Time in milliseconds.
-  - **Default:** Not used unless specified.
-  > **Notes:**  
-  > - In `registration.js`, the timer can trigger a subsequent API call, emit a signal, or remove/clear the target element based on the configuration.
-  > - For instance, a `timer="5000"` attribute may remove an element or update its content after 5 seconds.
-
-### Sequential Updates
-
-- **sequential**  
-  - **Purpose:** Ensures that API responses and corresponding DOM updates are processed in a FIFO order.
-  - **Value:** Optional delay (in milliseconds) between processing updates (e.g., `sequential="150"`).
-  - **Default:** Disabled unless specified.
-  > **Notes:**  
-  > - **Two types of queues are employed:**  
-  >   - **Sequential (FIFO):** When an element has the **sequential** attribute, API calls are enqueued and processed one by one in the order they were initiated. The configured delay (if provided) controls the gap between updates.  
-  >   - **Non‑Sequential:** For elements without the **sequential** attribute, updates are processed immediately. Pending non‑sequential API calls are cancelled via AbortController and rescheduled (using a 0ms timeout).  
-  > - HTTP streaming responses are detected in `processResponse` (actions.js); if multiple chunks are received, the element is marked as streaming and updates are applied immediately outside the sequential queue.
-  > - This design prevents rapid, overlapping updates and maintains consistency in the UI.
-
-### Lifecycle Hooks (Optional Extension)
-
-- **onbefore**, **onafter**, **onbeforeSwap**, **onafterSwap**  
-  - **Purpose:** Provide custom code execution at different stages of the API call lifecycle.
-  - **Value:** JavaScript code to be executed.
-  > **Notes:**  
-  > - These hooks are dynamically executed using `new Function(...)` within try/catch blocks to ensure errors are logged but do not halt the processing.
-  > - For example, **onbefore** is executed just before initiating the API call, while **onafterSwap** is executed after the DOM has been updated.
-
-### Streaming & Progressive Rendering
-
-- **Streaming & Progressive Rendering**  
-  - **Purpose:** Processes a single HTTP response that delivers multiple chunks (fragments) to progressively update the UI.
-  - **Behavior:**  
-    1. The server sends an initial loading fragment immediately.
-    2. As chunks arrive, each complete `<fragment>` block is extracted and processed.
-    3. If multiple chunks are received, the element is flagged as streaming.
-    4. If no complete fragment is found in the remaining buffer, a fallback update is applied.
-  > **Notes:**  
-  > - Implemented in the `processResponse` function (actions.js), which uses a `ReadableStream` to read chunks.
-  > - Streaming responses bypass the sequential queue if more than one chunk is detected, ensuring immediate updates.
-  > - The fallback mechanism guarantees that any residual data (if fragments aren’t complete) is applied to the target element.
-  > - This approach minimizes latency, providing immediate user feedback while the server processes long-running tasks.
-
----
-
-## 4. Security Considerations
-
-- **CSRF Protection:**  
-  - Standard CSRF tokens or server‑side measures should be implemented.
-  > **Notes:**  
-  > - HTMLeX does not automatically inject CSRF tokens. Developers should add them manually if needed.
-
-- **Sanitization of Server Responses:**  
-  - Server responses must be sanitized to prevent XSS.
-  > **Notes:**  
-  > - Since HTMLeX performs partial DOM updates using a diffing algorithm, it assumes that incoming HTML is safe. Server‑side sanitization is critical.
-
-- **Cross‑Origin Request Handling:**  
-  - Appropriate CORS headers must be set on API endpoints.
-  > **Notes:**  
-  > - HTMLeX relies on standard browser policies for cross‑origin requests.
-
-- **Debugging and Excessive Logging:**  
-  - The **debug** attribute can enable verbose logging for development.
-  > **Notes:**  
-  > - Extensive logging should be avoided in production as it may expose sensitive details.
-
----
-
-## 5. Contributing
-
-Contributions, feedback, and improvements are welcome. Please refer to [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-> **Notes:**  
-> - When contributing, please consider enhancing lifecycle hooks, sequential update handling, and streaming support based on practical use cases observed in the implementation.
-
----
-
-## 6. License
-
-This project is licensed under the [MIT License](LICENSE).
+# HTMLeX
+
+Version 1.2.3 - Last updated: 2026-04-30
+
+HTMLeX is a server-driven UI playground and browser runtime for declarative, HATEOAS-style HTML interactions. The current project ships a runnable HTTPS demo app, an ESM browser runtime, server render helpers for fragments, Express app helpers, TypeScript declarations, and a strict quality gate for package and runtime safety.
+
+## Contents
+
+- [Current Status](#current-status)
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+- [Package Entry Points](#package-entry-points)
+- [Runtime Model](#runtime-model)
+- [Response Fragments](#response-fragments)
+- [Attribute Reference](#attribute-reference)
+- [Lifecycle Hooks](#lifecycle-hooks)
+- [Demo App](#demo-app)
+- [Quality Gate](#quality-gate)
+- [Security Notes](#security-notes)
+- [Project Layout](#project-layout)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Current Status
+
+- ESM-only npm package named `htmlex`.
+- Browser runtime entry point: `htmlex`.
+- Express app helper entry point: `htmlex/app`.
+- Server render helper entry point: `htmlex/render`.
+- Type declarations are published for all documented entry points.
+- Demo server runs on Express 5, HTTPS, and Socket.IO.
+- Local HTTPS certificates are generated into `tmp/cert` when needed.
+- CI runs the full quality gate on Node `20.19.0`, `22`, and `24`.
+- Published package contents are limited to `src/` and project documentation.
+
+## Requirements
+
+- Node `^20.19.0 || ^22.13.0 || >=24`.
+- npm with lockfile installs.
+- OpenSSL available on `PATH` for generated localhost HTTPS certificates, unless `TLS_KEY_PATH` and `TLS_CERT_PATH` are supplied.
+
+The repository includes `.node-version` and `.npmrc` with `engine-strict=true`, so unsupported Node versions fail fast during install.
+
+## Quick Start
+
+```bash
+npm ci
+npm start
+```
+
+Open `https://localhost:5500`. The browser may ask you to accept the generated localhost certificate on first run.
+
+The server reads `PORT`, `TLS_KEY_PATH`, `TLS_CERT_PATH`, `HTMLEX_CERT_DIR`, `HTMLEX_LOG_LEVEL`, and `HTMLEX_LOG_FORMAT`. Playwright uses port `5600` through `playwright.config.js`.
+
+For development with automatic restart:
+
+```bash
+npm run dev
+```
+
+## Package Entry Points
+
+HTMLeX is ESM-only. Use `import` or dynamic `import()` from CommonJS code.
+
+```js
+import {
+  createHTMLeXElementClass,
+  defineHTMLeXElement,
+  hooks,
+  initHTMLeX,
+  registerLifecycleHook
+} from 'htmlex';
+```
+
+```js
+import {
+  app,
+  createApp,
+  createHttpsServer,
+  installProcessHandlers,
+  startServer,
+  stopServer
+} from 'htmlex/app';
+```
+
+```js
+import {
+  div,
+  rawHtml,
+  render,
+  renderFragment,
+  tag
+} from 'htmlex/render';
+```
+
+The default browser entry installs the runtime error boundary and exposes lifecycle hooks on `window.HTMLeX.hooks` when a browser `window` exists.
+
+## Runtime Model
+
+HTMLeX scans the DOM for elements with declarative action attributes, registers event handlers, and keeps observing inserted or changed nodes. Server responses are HTML fragments or fallback HTML strings. The client applies those responses to declared targets without client-side JSON state.
+
+Minimal browser setup:
+
+```html
+<script type="module">
+  import { hooks, initHTMLeX } from '/src/htmlex.js';
+
+  hooks.register('todo:create:after', ({ element }) => {
+    element.reset?.();
+  });
+
+  document.addEventListener('DOMContentLoaded', () => {
+    initHTMLeX();
+  });
+</script>
+```
+
+Minimal action markup:
+
+```html
+<form
+  post="/todos/create"
+  target="#todo-list(append)"
+  loading="#todo-status(innerHTML)"
+  onerror="#todo-status(innerHTML)"
+  onafter="todo:create:after"
+>
+  <input name="text" required>
+  <button type="submit">Add</button>
+</form>
+
+<div id="todo-status"></div>
+<div id="todo-list"></div>
+```
+
+On submit, HTMLeX gathers form data, sends the `POST`, processes the HTML response, updates `#todo-list`, and runs named lifecycle hooks if they are registered.
+
+## Response Fragments
+
+Server endpoints can return one or more `<fragment>` blocks. Each fragment declares where its inner HTML should be applied.
+
+```html
+<fragment target="#todo-list(append)">
+  <div class="todo-item" data-key="42">Ship the docs</div>
+</fragment>
+```
+
+Supported target strategies are:
+
+- `innerHTML`
+- `outerHTML`
+- `append`
+- `prepend`
+- `before`
+- `after`
+- `remove`
+
+Fragments can be streamed. Complete fragment blocks are applied as they arrive, and trailing non-fragment HTML falls back to the caller's `target` attribute.
+
+Server render helper example:
+
+```js
+import { div, render, renderFragment } from 'htmlex/render';
+
+const itemHtml = render(
+  div({ class: 'todo-item', 'data-key': todo.id }, todo.text)
+);
+
+res.type('html').send(renderFragment('#todo-list(append)', itemHtml));
+```
+
+Error-status fragments render their content but skip success-only side effects such as `publish`, `Emit` headers, URL updates, caching, and `onafter` hooks:
+
+```html
+<fragment target="#todo-status(innerHTML)" status="422">
+  <div class="error">Please enter a todo.</div>
+</fragment>
+```
+
+## Attribute Reference
+
+HTML attribute names are case-insensitive. Examples use lowercase because browsers normalize HTML markup that way.
+
+| Attribute | Purpose |
+| --- | --- |
+| `get`, `post`, `put`, `delete`, `patch` | Sends an HTTP request to the attribute value. `GET` serializes form data into the query string; other methods send `FormData`. |
+| `source` | Adds form controls from extra selector matches. Comma-separated selectors are preferred; whitespace-separated selectors are supported as a fallback. |
+| `extras` | Adds inline `key=value` pairs to the request data. Values may contain `=` after the first separator. |
+| `target` | Applies response HTML to one or more `selector(strategy)` targets. `this` targets the triggering element. |
+| `loading` | Applies a loading placeholder to the declared target while the current request is pending. |
+| `onerror` | Applies an escaped error message to the declared target after the final failed fetch attempt. |
+| `trigger` | Overrides the default event. Forms default to `submit`; other action elements default to `click`. A leading `on` prefix is ignored. |
+| `debounce` | Delays action execution until events stop for the given milliseconds. |
+| `throttle` | Allows at most one action in the given millisecond window. |
+| `auto` | Fires on registration. Use a millisecond delay, `prefetch`, `lazy`, or `false`. Lazy mode uses `IntersectionObserver` when available. |
+| `poll` | Repeats the action at an interval. Values below the runtime floor are clamped. |
+| `repeat` | Limits the number of poll iterations. `0` or omission means unlimited. |
+| `publish` | Emits a named client signal after a successful action, or on the trigger event for publish-only elements. |
+| `subscribe` | Runs the element's action when any listed client signal is emitted. |
+| `timer` | Runs a delayed action. With an HTTP method it calls the endpoint, with `publish` it emits the signal, otherwise it clears or removes the target. |
+| `sequential` | Queues requests and DOM updates FIFO. A numeric value adds a delay between queue flushes. `false` disables it. |
+| `retry` | Number of retry attempts after failed requests. |
+| `timeout` | Fetch timeout in milliseconds. `0` disables timeout. |
+| `retrydelay`, `retry-delay` | Base delay before retry attempts. |
+| `retrybackoff`, `retry-backoff` | Retry delay multiplier. Minimum valid value is `1`. |
+| `retrymaxdelay`, `retry-max-delay` | Maximum retry delay in milliseconds. |
+| `cache` | Caches successful response text for the given TTL in milliseconds. Non-positive or empty values cache without expiry until evicted. |
+| `push` | Adds or replaces URL query parameters from `key=value` pairs. |
+| `pull` | Removes URL query parameters by key. |
+| `path` | Replaces the URL path. |
+| `history` | Controls URL mutation: `push`, `replace`, or `none`. Defaults to `replace`. |
+| `socket` | Opens a Socket.IO connection and applies incoming payloads to `target`. The socket closes when the element leaves the DOM. |
+| `onbefore` | Runs named lifecycle hooks before the request starts. |
+| `onbeforeswap` | Runs named lifecycle hooks before response HTML is applied. |
+| `onafterswap` | Runs named lifecycle hooks after scheduled DOM swaps complete. |
+| `onafter` | Runs named lifecycle hooks after a successful action and successful swaps. |
+| `max-response-chars`, `maxresponsechars`, `max-response-buffer`, `maxresponsebuffer` | Overrides the default 1 MiB response text safety limit for an action. |
+
+The client also processes the response header `Emit`. The first header segment is the signal name, and `delay=<ms>` can delay emission:
+
+```http
+Emit: todos:changed; delay=250
+```
+
+## Lifecycle Hooks
+
+Lifecycle attributes contain hook names, not JavaScript. Script-like values are ignored and logged. Register callbacks through the public hook API:
+
+```js
+import { hooks } from 'htmlex';
+
+const unregister = hooks.register('todo:create:before', ({ element, event }) => {
+  event?.preventDefault?.();
+  element.classList.add('is-submitting');
+});
+
+hooks.unregister('todo:create:before');
+unregister();
+```
+
+Hook scopes are available with `hooks.scope('name')` and through the `hookscope` or `data-htmlex-hook-scope` attributes. Scoped elements fall back to the global scope when a scoped hook is not registered.
+
+Lifecycle events are also dispatched as DOM events:
+
+- `htmlex:hook`
+- `htmlex:onbefore`
+- `htmlex:onbeforeswap`
+- `htmlex:onafterswap`
+- `htmlex:onafter`
+
+## Demo App
+
+The included demo app is both a playground and an integration target for tests. It includes:
+
+- Demo catalog and generated demo detail pages.
+- Todo CRUD with atomic local persistence.
+- Click counter, multi-fragment updates, loading/error states, and signal chaining.
+- Infinite scroll and streamed fragments.
+- Polling, sequential queues, retry behavior, and delayed timers.
+- Socket.IO chat and live update namespaces.
+- Browser diagnostics and runtime error logging.
+
+The app applies baseline security headers, request IDs, route error boundaries, multipart limits, structured server logging, and graceful shutdown handling.
+
+## Quality Gate
+
+Run the full project gate before publishing or merging:
+
+```bash
+npm run quality
+```
+
+That command runs:
+
+- Text hygiene checks for LF endings, final newline, no trailing whitespace, and no UTF-8 BOM.
+- Lockfile reproducibility with `npm ci --ignore-scripts --dry-run`.
+- Dependency tree and reviewed license-policy checks.
+- Syntax, ES module, modern JavaScript, and safety checks.
+- Package metadata, package file allowlist, `npm pack --dry-run`, `publint`, and Are The Types Wrong checks.
+- ESLint.
+- Production dependency audit at moderate-or-higher severity.
+- Unit tests with per-file coverage thresholds.
+- Playwright browser tests against the HTTPS demo app.
+
+Useful focused commands:
+
+```bash
+npm run lint
+npm run test:unit
+npm run test:e2e
+npm run check:pack
+npm run check:types
+```
+
+Current implementation coverage is tracked in [COVERAGE.md](COVERAGE.md), and release notes are tracked in [CHANGELOG.md](CHANGELOG.md).
+
+## Security Notes
+
+- HTMLeX expects server-owned HTML. Escape user data before rendering it into fragments.
+- `htmlex/render` escapes text and attributes by default. Use `rawHtml()` only for trusted, server-owned markup.
+- Lifecycle hooks are named callbacks. Attribute values are never evaluated as JavaScript.
+- Error messages rendered through `onerror` are escaped.
+- Browser diagnostics keep a bounded in-memory log at `window.__HTMLEX_DIAGNOSTICS__` and emit `htmlex:log` events.
+- The demo app is same-origin and does not include a full application auth or CSRF model. Add those controls in real deployments.
+- The package intentionally blocks CommonJS `require` resolution because the runtime is ESM-only.
+- Generated media, local certs, coverage output, Playwright reports, package tarballs, and other build artifacts should stay out of git.
+
+## Project Layout
+
+```text
+src/app.js                     Express app factory and HTTPS runtime helpers
+src/server.js                  CLI server entry point
+src/components/HTMLeX.js       Server-side render and fragment helpers
+src/components/Components.js   Demo UI rendering helpers
+src/features/                  Demo route handlers and Socket.IO namespaces
+src/persistence/               Demo seed data and catalog metadata
+src/public/src/                Browser runtime modules
+tests/unit/                    Node test runner unit tests
+tests/e2e/                     Playwright browser tests
+scripts/                       Quality, package, syntax, safety, and policy checks
+```
+
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening changes. Keep edits scoped, run the focused checks relevant to your change, and run `npm run quality` for release or package-facing work.
+
+## License
+
+HTMLeX is released under the [ISC License](LICENSE).

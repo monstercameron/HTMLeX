@@ -7,6 +7,8 @@ const CHECK_DIRS = ['.'];
 const IGNORED_DIRS = new Set([
   '.git',
   '.playwright',
+  'coverage',
+  'media',
   'node_modules',
   'playwright-report',
   'test-results',

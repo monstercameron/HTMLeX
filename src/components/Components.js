@@ -172,8 +172,7 @@ export function DemoHighlights(highlights) {
 }
 
 export function DemoActions(
-  { launchButtonText, learnMoreText, learnMoreHref, initDemoHref },
-  _gradients = {}
+  { launchButtonText, learnMoreText, learnMoreHref, initDemoHref }
 ) {
   return div(
     { class: 'd-flex align-items-center justify-content-between gap-3 pt-1' },
@@ -213,8 +212,7 @@ export function DemoItem(demo) {
           learnMoreText: demo.learnMoreText,
           learnMoreHref: demo.learnMoreHref,
           initDemoHref: demo.initDemoHref
-        },
-        demo.gradients
+        }
       )
     )
   );
@@ -331,7 +329,8 @@ export function FullHTML({ headerProps, demos, canvasProps, footerProps }) {
         src: 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js',
         integrity: 'sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI',
         crossorigin: 'anonymous'
-      })
+      }),
+      script({ type: 'module', src: './src/main.js' })
     )
   );
 }
@@ -448,10 +447,10 @@ export function TodoWidget(todos) {
           extras: 'locale=en_US',
           publish: 'todoCreated',
           sequential: '150',
-          onbefore: "window.__htmlexLifecycle='beforeTodoCreate'",
-          onafter: "window.__htmlexLifecycle='afterTodoCreate'",
-          onbeforeSwap: "window.__htmlexLifecycle='beforeTodoSwap'",
-          onafterSwap: "window.__htmlexLifecycle='afterTodoSwap'",
+          onbefore: 'todo:create:before',
+          onafter: 'todo:create:after',
+          onbeforeSwap: 'todo:create:before-swap',
+          onafterSwap: 'todo:create:after-swap',
           class: 'mb-4'
         },
         div(
@@ -585,8 +584,8 @@ export function ChatInterfaceDemo() {
         POST: '/chat/send',
         target: '#chatMessages(innerHTML)',
         extras: 'username=DemoUser',
-        onbefore: "window.__htmlexLifecycle='beforeChatSend'",
-        onafter: "window.__htmlexLifecycle='afterChatSend'",
+        onbefore: 'chat:send:before',
+        onafter: 'chat:send:after',
         class: 'd-flex flex-column flex-sm-row gap-2'
       },
       input({

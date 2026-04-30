@@ -7,6 +7,27 @@ import { logFeatureError, logFeatureWarning } from './serverLogger.js';
 
 const execFileAsync = promisify(execFile);
 
+function getOpenSSLInvocation() {
+  const command = process.env.HTMLEX_OPENSSL_BIN || 'openssl';
+  const rawPrefixArgs = process.env.HTMLEX_OPENSSL_ARGV;
+  if (!rawPrefixArgs) {
+    return { command, prefixArgs: [] };
+  }
+
+  let prefixArgs;
+  try {
+    prefixArgs = JSON.parse(rawPrefixArgs);
+  } catch (error) {
+    throw new Error('HTMLEX_OPENSSL_ARGV must be a JSON array of strings.', { cause: error });
+  }
+
+  if (!Array.isArray(prefixArgs) || prefixArgs.some(arg => typeof arg !== 'string')) {
+    throw new TypeError('HTMLEX_OPENSSL_ARGV must be a JSON array of strings.');
+  }
+
+  return { command, prefixArgs };
+}
+
 async function fileExists(filePath) {
   try {
     await access(filePath, constants.R_OK);
@@ -19,6 +40,7 @@ async function fileExists(filePath) {
 async function generateLocalhostCertificate(keyPath, certPath) {
   await mkdir(path.dirname(keyPath), { recursive: true });
   const configPath = path.join(path.dirname(keyPath), 'openssl.cnf');
+  const { command, prefixArgs } = getOpenSSLInvocation();
   await writeFile(
     configPath,
     [
@@ -32,8 +54,9 @@ async function generateLocalhostCertificate(keyPath, certPath) {
     ].join('\n')
   );
   await execFileAsync(
-    'openssl',
+    command,
     [
+      ...prefixArgs,
       'req',
       '-x509',
       '-newkey',
@@ -93,7 +116,8 @@ export async function getHttpsOptions(projectRoot) {
       logFeatureError('certificates', 'Failed to generate local HTTPS certificate.', error, { certDir });
       throw new Error(
         `Unable to generate a local HTTPS certificate with openssl. ` +
-        `Install openssl or set TLS_KEY_PATH and TLS_CERT_PATH. Cause: ${error.message}`
+        `Install openssl or set TLS_KEY_PATH and TLS_CERT_PATH. Cause: ${error.message}`,
+        { cause: error }
       );
     }
   }

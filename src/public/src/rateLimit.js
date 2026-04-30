@@ -39,7 +39,7 @@ export function debounce(callback, wait) {
   let timeoutId = null;
   let resolvePending = null;
   Logger.system.debug("[DEBOUNCE] Creating debounced function with wait period:", wait, "ms");
-  
+
   const debounced = function(...args) {
     const context = this;
     Logger.system.debug("[DEBOUNCE] Debounced function invoked with arguments:", args, "and context:", context);

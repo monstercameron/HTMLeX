@@ -3,7 +3,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 async function mountHTMLeX(page, html) {
   await page.evaluate(async (fixtureHtml) => {
+    window.scrollTo(0, 0);
     document.body.innerHTML = `<main id="fixture">${fixtureHtml}</main>`;
+    window.scrollTo(0, 0);
     const { initHTMLeX } = await import('/src/htmlex.js');
     initHTMLeX();
   }, html);
@@ -101,6 +103,31 @@ test('handles descendant target selectors and multiple target instructions', asy
 
   await expect(page.locator('#card .status .updated')).toHaveText('Nested target updated');
   await expect(page.locator('#activityLog .updated')).toHaveText('Nested target updated');
+});
+
+test('fragment selector targets update each match once and fallback to the trigger when missing', async ({ page }) => {
+  await page.route('**/edge/fragment-multi-match', route => route.fulfill({
+    contentType: 'text/html',
+    body: '<fragment target=".fragment-target(append)"><span class="hit">Hit</span></fragment>'
+  }));
+  await page.route('**/edge/fragment-missing-target', route => route.fulfill({
+    contentType: 'text/html',
+    body: '<fragment target="#missing-target(append)"><span class="fallback-hit">Fallback</span></fragment>'
+  }));
+
+  await mountHTMLeX(page, `
+    <div class="fragment-target" id="firstFragmentTarget"></div>
+    <div class="fragment-target" id="secondFragmentTarget"></div>
+    <button id="multiFragmentTargetBtn" GET="/edge/fragment-multi-match">Update many</button>
+    <button id="missingFragmentTargetBtn" GET="/edge/fragment-missing-target">Update self</button>
+  `);
+
+  await page.locator('#multiFragmentTargetBtn').click();
+  await page.locator('#missingFragmentTargetBtn').click();
+
+  await expect(page.locator('#firstFragmentTarget .hit')).toHaveCount(1);
+  await expect(page.locator('#secondFragmentTarget .hit')).toHaveCount(1);
+  await expect(page.locator('#missingFragmentTargetBtn .fallback-hit')).toHaveCount(1);
 });
 
 test('replaces context-sensitive table rows with outerHTML targets', async ({ page }) => {
@@ -403,11 +430,15 @@ test('stops polling after the polling element is removed', async ({ page }) => {
   `);
 
   await expect(page.locator('#pollCleanupOut')).toHaveText(/poll:\d+/);
-  const callsAfterFirstPoll = pollCalls;
-  await page.locator('#pollCleanup').evaluate(element => element.remove());
+  await page.locator('#pollCleanup').evaluate(element => {
+    window.__pollCleanupElement = element;
+    element.remove();
+  });
+  await expect.poll(() => page.evaluate(() => window.__pollCleanupElement?._htmlexPollIntervalId ?? null)).toBe(null);
+  const callsAfterCleanup = pollCalls;
   await page.waitForTimeout(220);
 
-  expect(pollCalls).toBe(callsAfterFirstPoll);
+  expect(pollCalls).toBe(callsAfterCleanup);
 });
 
 test('replays cached fragment responses without another network request', async ({ page }) => {
@@ -978,6 +1009,45 @@ test('existing nodes register when HTMLeX method attributes are added later', as
   expect(lateCalls).toBe(1);
 });
 
+test('batched attribute mutations register every affected node', async ({ page }) => {
+  let firstCalls = 0;
+  let secondCalls = 0;
+
+  await page.route('**/edge/batch-attribute-first', route => {
+    firstCalls += 1;
+    return route.fulfill({ contentType: 'text/html', body: `first:${firstCalls}` });
+  });
+  await page.route('**/edge/batch-attribute-second', route => {
+    secondCalls += 1;
+    return route.fulfill({ contentType: 'text/html', body: `second:${secondCalls}` });
+  });
+
+  await mountHTMLeX(page, `
+    <button id="batchAttributeFirst" type="button">First</button>
+    <button id="batchAttributeSecond" type="button">Second</button>
+    <div id="batchAttributeFirstOut"></div>
+    <div id="batchAttributeSecondOut"></div>
+  `);
+
+  await page.evaluate(() => {
+    document.querySelector('#batchAttributeFirst').setAttribute('target', '#batchAttributeFirstOut(innerHTML)');
+    document.querySelector('#batchAttributeFirst').setAttribute('GET', '/edge/batch-attribute-first');
+    document.querySelector('#batchAttributeSecond').setAttribute('target', '#batchAttributeSecondOut(innerHTML)');
+    document.querySelector('#batchAttributeSecond').setAttribute('GET', '/edge/batch-attribute-second');
+  });
+
+  await expect(page.locator('#batchAttributeFirst')).toHaveAttribute('data-htmlex-registered', 'true');
+  await expect(page.locator('#batchAttributeSecond')).toHaveAttribute('data-htmlex-registered', 'true');
+
+  await page.locator('#batchAttributeFirst').click();
+  await page.locator('#batchAttributeSecond').click();
+
+  await expect(page.locator('#batchAttributeFirstOut')).toHaveText('first:1');
+  await expect(page.locator('#batchAttributeSecondOut')).toHaveText('second:1');
+  expect(firstCalls).toBe(1);
+  expect(secondCalls).toBe(1);
+});
+
 test('registered nodes re-register when method and trigger attributes change in place', async ({ page }) => {
   let oldCalls = 0;
   let newCalls = 0;
@@ -1474,11 +1544,16 @@ test('onafterSwap runs after the target DOM has been updated', async ({ page }) 
       id="afterSwapTimingBtn"
       GET="/edge/after-swap-dom"
       target="#afterSwapTimingOut(innerHTML)"
-      onafterSwap="document.querySelector('#afterSwapTimingProbe').textContent = document.querySelector('#afterSwapTimingOut').textContent"
+      onafterSwap="probe:after-swap"
     >Swap</button>
     <div id="afterSwapTimingOut"></div>
     <div id="afterSwapTimingProbe"></div>
   `);
+  await page.evaluate(() => {
+    window.HTMLeX.hooks.register('probe:after-swap', () => {
+      document.querySelector('#afterSwapTimingProbe').textContent = document.querySelector('#afterSwapTimingOut').textContent;
+    });
+  });
 
   await page.locator('#afterSwapTimingBtn').click();
 
@@ -1497,14 +1572,28 @@ test('lifecycle hooks receive the triggering event snapshot', async ({ page }) =
       id="hookEventBtn"
       GET="/edge/hook-event"
       target="#hookEventOut(innerHTML)"
-      onbefore="window.__hookEvents.push('before:' + event.type + ':' + event.currentTarget.id + ':' + event.target.id)"
-      onbeforeSwap="window.__hookEvents.push('beforeSwap:' + event.type + ':' + event.currentTarget.id)"
-      onafterSwap="window.__hookEvents.push('afterSwap:' + event.type + ':' + event.currentTarget.id)"
-      onafter="window.__hookEvents.push('after:' + event.type + ':' + event.currentTarget.id)"
+      onbefore="event:before"
+      onbeforeSwap="event:before-swap"
+      onafterSwap="event:after-swap"
+      onafter="event:after"
     ><span id="hookEventChild">Run</span></button>
     <div id="hookEventOut"></div>
   `);
-  await page.evaluate(() => { window.__hookEvents = []; });
+  await page.evaluate(() => {
+    window.__hookEvents = [];
+    window.HTMLeX.hooks.register('event:before', ({ event }) => {
+      window.__hookEvents.push(`before:${event.type}:${event.currentTarget.id}:${event.target.id}`);
+    });
+    window.HTMLeX.hooks.register('event:before-swap', ({ event }) => {
+      window.__hookEvents.push(`beforeSwap:${event.type}:${event.currentTarget.id}`);
+    });
+    window.HTMLeX.hooks.register('event:after-swap', ({ event }) => {
+      window.__hookEvents.push(`afterSwap:${event.type}:${event.currentTarget.id}`);
+    });
+    window.HTMLeX.hooks.register('event:after', ({ event }) => {
+      window.__hookEvents.push(`after:${event.type}:${event.currentTarget.id}`);
+    });
+  });
 
   await page.locator('#hookEventChild').click();
 
@@ -1530,13 +1619,22 @@ test('onafterSwap runs for fragment swaps after all fragments update', async ({ 
     <button
       id="fragmentAfterSwapBtn"
       GET="/edge/fragment-after-swap-dom"
-      onafterSwap="window.__fragmentAfterSwapHooks.push('afterSwap'); document.querySelector('#fragmentAfterSwapProbe').textContent = document.querySelector('#fragmentAfterSwapOut').textContent"
-      onafter="window.__fragmentAfterSwapHooks.push('after')"
+      onafterSwap="fragments:after-swap"
+      onafter="fragments:after"
     >Swap fragments</button>
     <div id="fragmentAfterSwapOut"></div>
     <div id="fragmentAfterSwapProbe"></div>
   `);
-  await page.evaluate(() => { window.__fragmentAfterSwapHooks = []; });
+  await page.evaluate(() => {
+    window.__fragmentAfterSwapHooks = [];
+    window.HTMLeX.hooks.register('fragments:after-swap', () => {
+      window.__fragmentAfterSwapHooks.push('afterSwap');
+      document.querySelector('#fragmentAfterSwapProbe').textContent = document.querySelector('#fragmentAfterSwapOut').textContent;
+    });
+    window.HTMLeX.hooks.register('fragments:after', () => {
+      window.__fragmentAfterSwapHooks.push('after');
+    });
+  });
 
   await page.locator('#fragmentAfterSwapBtn').click();
 
@@ -1660,7 +1758,7 @@ test('fragment inserted API timers are canceled when timer attributes are remove
 
   await page.route('**/edge/fragment-cancelable-timer-source', route => route.fulfill({
     contentType: 'text/html',
-    body: '<fragment target="#fragmentCancelableTimerHost(innerHTML)"><span id="fragmentCancelableTimer" GET="/edge/fragment-cancelable-timer" timer="120" target="#fragmentCancelableTimerOut(innerHTML)">Timer action</span></fragment>'
+    body: '<fragment target="#fragmentCancelableTimerHost(innerHTML)"><span id="fragmentCancelableTimer" GET="/edge/fragment-cancelable-timer" timer="1000" target="#fragmentCancelableTimerOut(innerHTML)">Timer action</span></fragment>'
   }));
   await page.route('**/edge/fragment-cancelable-timer', route => {
     fragmentTimerCalls += 1;
@@ -1677,10 +1775,13 @@ test('fragment inserted API timers are canceled when timer attributes are remove
   `);
 
   await page.locator('#fragmentCancelableTimerBtn').click();
-  await expect(page.locator('#fragmentCancelableTimer')).toHaveAttribute('data-htmlex-registered', 'true');
-
-  await page.locator('#fragmentCancelableTimer').evaluate(element => element.removeAttribute('timer'));
-  await page.waitForTimeout(180);
+  await page.waitForFunction(() => {
+    const element = document.querySelector('#fragmentCancelableTimer');
+    if (!element || element.getAttribute('data-timer-set') !== 'true') return false;
+    element.removeAttribute('timer');
+    return true;
+  });
+  await page.waitForTimeout(1100);
 
   expect(fragmentTimerCalls).toBe(0);
   await expect(page.locator('#fragmentCancelableTimerOut')).toHaveText('');

@@ -42,8 +42,9 @@ export function setupCounterNamespace(socketServer) {
  * Sets up the '/chat' namespace and broadcasts new chat messages.
  * @param {import('socket.io').Server} socketServer - The Socket.IO server instance.
  * @param {Function} getChatHistory - Returns the current chat history.
+ * @param {Function} recordChatMessage - Persists and normalizes a new chat message.
  */
-export function setupChatNamespace(socketServer, getChatHistory) {
+export function setupChatNamespace(socketServer, getChatHistory, recordChatMessage = null) {
   const chatNamespace = socketServer.of('/chat');
 
   chatNamespace.on('connection', (socket) => {
@@ -56,11 +57,12 @@ export function setupChatNamespace(socketServer, getChatHistory) {
         return;
       }
 
-      chatNamespace.emit('chatMessage', {
-        id: Date.now(),
-        username: normalizeUsername(message),
-        text
-      });
+      const chatMessage = typeof recordChatMessage === 'function'
+        ? recordChatMessage({ username: normalizeUsername(message), text })
+        : { id: Date.now(), username: normalizeUsername(message), text };
+      if (!chatMessage) return;
+
+      chatNamespace.emit('chatMessage', chatMessage);
     });
     socket.on('error', (error) => {
       logFeatureError('socket.chat', 'Chat namespace socket error.', error, { socketId: socket.id });
@@ -92,9 +94,10 @@ export function setupUpdatesNamespace(socketServer) {
  * Sets up all Socket.IO namespaces.
  * @param {import('socket.io').Server} socketServer - The Socket.IO server instance.
  * @param {Function} getChatHistory - Returns the current chat history.
+ * @param {Function} recordChatMessage - Persists and normalizes a new chat message.
  */
-export function setupSocketNamespaces(socketServer, getChatHistory) {
+export function setupSocketNamespaces(socketServer, getChatHistory, recordChatMessage = null) {
   setupCounterNamespace(socketServer);
-  setupChatNamespace(socketServer, getChatHistory);
+  setupChatNamespace(socketServer, getChatHistory, recordChatMessage);
   setupUpdatesNamespace(socketServer);
 }

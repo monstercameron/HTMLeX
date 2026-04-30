@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test, { afterEach, beforeEach } from 'node:test';
 import { handleAction, processResponse } from '../../src/public/src/actions.js';
+import { clearLifecycleHooksForTests, registerLifecycleHook } from '../../src/public/src/hooks.js';
 import { Logger } from '../../src/public/src/logger.js';
 
 let originalDocument;
@@ -28,6 +29,7 @@ beforeEach(() => {
   originalHistory = globalThis.history;
   originalLoggerEnabled = Logger.enabled;
   Logger.enabled = false;
+  clearLifecycleHooksForTests();
   globalThis.requestAnimationFrame = (callback) => {
     callback();
     return 1;
@@ -108,6 +110,8 @@ afterEach(() => {
 
   delete globalThis.__actionHooks;
   delete globalThis.__actionSignals;
+  delete globalThis.__unsafeHookRan;
+  clearLifecycleHooksForTests();
   Logger.enabled = originalLoggerEnabled;
 });
 
@@ -165,10 +169,31 @@ class FakeElement {
 
 function installDocument(targets = {}) {
   globalThis.document = {
+    dispatchedEvents: [],
     body: {
       contains(element) {
         return element.connected !== false;
       },
+    },
+    createElement(tagName) {
+      assert.equal(tagName, 'template');
+      return {
+        content: {},
+        set innerHTML(html) {
+          const attributes = Object.fromEntries(
+            [...html.matchAll(/\s([A-Za-z][\w:-]*)="([^"]*)"/g)]
+              .map(([, name, value]) => [name, value])
+          );
+          this.content.firstElementChild = {
+            getAttribute(name) {
+              return attributes[name] ?? null;
+            },
+          };
+        },
+      };
+    },
+    dispatchEvent(event) {
+      this.dispatchedEvents.push(event);
     },
     querySelector(selector) {
       return targets[selector] || null;
@@ -186,10 +211,13 @@ test('processResponse falls back to the caller target for non-fragment response 
   const element = new FakeElement({
     attributes: {
       target: '#out(append)',
-      onafterSwap: "globalThis.__actionHooks.push('afterSwap:' + event.type)",
+      onafterSwap: 'record:after-swap',
     },
   });
   globalThis.__actionHooks = [];
+  registerLifecycleHook('record:after-swap', ({ event }) => {
+    globalThis.__actionHooks.push(`afterSwap:${event.type}`);
+  });
   installDocument({ '#out': output });
 
   const responseText = await processResponse(
@@ -216,6 +244,54 @@ test('processResponse handles empty response bodies without leaving streaming fl
   assert.equal(await processResponse({ body: null }, element), '');
   assert.equal(element._htmlexStreamingActive, false);
   assert.equal(element._htmlexStreaming, false);
+});
+
+test('processResponse rejects responses that exceed the configured buffer limit', async () => {
+  const output = new FakeElement();
+  const element = new FakeElement({
+    attributes: {
+      target: '#out(append)',
+      maxresponsechars: '8',
+    },
+  });
+  installDocument({ '#out': output });
+
+  await assert.rejects(
+    () => processResponse(new Response('0123456789'), element),
+    {
+      name: 'ResponseBufferLimitError',
+      message: /8 character safety limit/
+    }
+  );
+  assert.deepEqual(output.inserted, []);
+  assert.equal(element._htmlexStreamingActive, false);
+  assert.equal(element._htmlexStreaming, false);
+});
+
+test('processResponse releases retained text for uncached fragment-only responses', async () => {
+  installDocument();
+  const element = new FakeElement();
+  const fragmentResponse = '<fragment target="this(innerHTML)"><span>Fragment only</span></fragment>';
+
+  const responseText = await processResponse(new Response(fragmentResponse), element);
+
+  assert.equal(responseText, '');
+  assert.equal(element.innerHTML, '<span>Fragment only</span>');
+});
+
+test('processResponse retains text for cacheable fragment responses', async () => {
+  installDocument();
+  const element = new FakeElement({
+    attributes: {
+      cache: '1000',
+    },
+  });
+  const fragmentResponse = '<fragment target="this(innerHTML)"><span>Cached fragment</span></fragment>';
+
+  const responseText = await processResponse(new Response(fragmentResponse), element);
+
+  assert.equal(responseText, fragmentResponse);
+  assert.equal(element.innerHTML, '<span>Cached fragment</span>');
 });
 
 test('handleAction assembles GET params, loading state, hooks, URL state, and cache hits', async () => {
@@ -264,11 +340,23 @@ test('handleAction assembles GET params, loading state, hooks, URL state, and ca
       pull: 'remove',
       path: '/new-path',
       history: 'replace',
-      onbefore: "globalThis.__actionHooks.push('before:' + event.type)",
-      onbeforeSwap: "globalThis.__actionHooks.push('beforeSwap:' + event.type)",
-      onafterSwap: "globalThis.__actionHooks.push('afterSwap:' + event.type)",
-      onafter: "globalThis.__actionHooks.push('after:' + event.type)",
+      onbefore: 'record:before',
+      onbeforeSwap: 'record:before-swap',
+      onafterSwap: 'record:after-swap',
+      onafter: 'record:after',
     },
+  });
+  registerLifecycleHook('record:before', ({ event }) => {
+    globalThis.__actionHooks.push(`before:${event.type}`);
+  });
+  registerLifecycleHook('record:before-swap', ({ event }) => {
+    globalThis.__actionHooks.push(`beforeSwap:${event.type}`);
+  });
+  registerLifecycleHook('record:after-swap', ({ event }) => {
+    globalThis.__actionHooks.push(`afterSwap:${event.type}`);
+  });
+  registerLifecycleHook('record:after', ({ event }) => {
+    globalThis.__actionHooks.push(`after:${event.type}`);
   });
 
   await handleAction(element, 'GET', endpoint, { htmlexEvent: { type: 'unit' } });
@@ -296,6 +384,22 @@ test('handleAction assembles GET params, loading state, hooks, URL state, and ca
   assert.equal(element._htmlexRequestPending, false);
 });
 
+test('handleAction ignores script-like lifecycle values instead of executing them', async () => {
+  installDocument();
+  globalThis.fetch = async () => new Response('');
+
+  const element = new FakeElement({
+    attributes: {
+      onbefore: 'globalThis.__unsafeHookRan = true',
+    },
+  });
+
+  await handleAction(element, 'GET', '/unsafe-hook');
+
+  assert.equal(globalThis.__unsafeHookRan, undefined);
+  assert.equal(element._htmlexRequestPending, false);
+});
+
 test('handleAction retries failures and writes the configured error target', async () => {
   const errorTarget = new FakeElement();
   installDocument({ '#error': errorTarget });
@@ -320,6 +424,129 @@ test('handleAction retries failures and writes the configured error target', asy
   assert.equal(fetchCount, 2);
   assert.equal(errorTarget.inserted.length, 1);
   assert.match(errorTarget.inserted[0].content, /Error: HTTP 503 Unavailable/);
+  assert.equal(element._htmlexRequestPending, false);
+});
+
+test('handleAction applies configurable retry delay and backoff before later attempts', async () => {
+  const timers = [];
+  globalThis.setTimeout = (callback, delayMs) => {
+    timers.push({ callback, delayMs });
+    return timers.length - 1;
+  };
+  const output = new FakeElement();
+  installDocument({ '#out': output });
+  let fetchCount = 0;
+  globalThis.fetch = async () => {
+    fetchCount += 1;
+    if (fetchCount < 3) {
+      return new Response('Down', {
+        status: 503,
+        statusText: 'Unavailable',
+      });
+    }
+    return new Response('Recovered');
+  };
+  const element = new FakeElement({
+    attributes: {
+      retry: '2',
+      retrydelay: '10',
+      retrybackoff: '2',
+      retrymaxdelay: '15',
+      target: '#out(append)',
+    },
+  });
+
+  const actionPromise = handleAction(element, 'GET', `/unit-retry-backoff-${Date.now()}`);
+  await new Promise(resolve => originalSetTimeout(resolve, 0));
+
+  assert.equal(fetchCount, 1);
+  assert.deepEqual(timers.map(timer => timer.delayMs), [10]);
+
+  timers[0].callback();
+  await new Promise(resolve => originalSetTimeout(resolve, 0));
+  await new Promise(resolve => originalSetTimeout(resolve, 0));
+
+  assert.equal(fetchCount, 2);
+  assert.deepEqual(timers.map(timer => timer.delayMs), [10, 15]);
+
+  timers[1].callback();
+  await actionPromise;
+
+  assert.equal(fetchCount, 3);
+  assert.deepEqual(output.inserted, [{
+    position: 'beforeend',
+    content: 'Recovered',
+  }]);
+});
+
+test('handleAction treats error-status fragments as failed swaps without success side effects', async () => {
+  const output = new FakeElement();
+  const historyCalls = [];
+  globalThis.__actionHooks = [];
+  globalThis.__actionSignals = [];
+  globalThis.history = {
+    replaceState(_state, _title, url) {
+      historyCalls.push(url);
+    },
+  };
+  installDocument({ '#out': output });
+  globalThis.fetch = async () => new Response(
+    '<fragment target="#out(append)" status="500"><span>Fragment failed</span></fragment>'
+  );
+  const { registerSignalListener } = await import('../../src/public/src/signals.js');
+  const cleanupSignal = registerSignalListener('fragment:success', () => {
+    globalThis.__actionSignals.push('success');
+  });
+  registerLifecycleHook('record:after-fragment-error', () => {
+    globalThis.__actionHooks.push('after');
+  });
+
+  try {
+    const element = new FakeElement({
+      attributes: {
+        target: '#out(append)',
+        publish: 'fragment:success',
+        push: 'status=success',
+        onafter: 'record:after-fragment-error',
+      },
+    });
+
+    await handleAction(element, 'GET', `/unit-fragment-status-${Date.now()}`);
+
+    assert.deepEqual(output.inserted, [{
+      position: 'beforeend',
+      content: '<span>Fragment failed</span>',
+    }]);
+    assert.deepEqual(globalThis.__actionSignals, []);
+    assert.deepEqual(historyCalls, []);
+    assert.deepEqual(globalThis.__actionHooks, []);
+    assert.equal(element._htmlexRequestPending, false);
+  } finally {
+    cleanupSignal();
+  }
+});
+
+test('handleAction escapes error messages before rendering onerror content', async () => {
+  const errorTarget = new FakeElement();
+  installDocument({ '#error': errorTarget });
+  globalThis.fetch = async () => {
+    throw new Error('bad <img src=x onerror=alert(1)> & "quoted"');
+  };
+
+  const element = new FakeElement({
+    attributes: {
+      onerror: '#error(append)',
+    },
+  });
+
+  await handleAction(element, 'GET', `/unit-unsafe-error-${Date.now()}`);
+
+  assert.equal(errorTarget.inserted.length, 1);
+  assert.match(
+    errorTarget.inserted[0].content,
+    /bad &lt;img src=x onerror=alert\(1\)&gt; &amp; &quot;quoted&quot;/
+  );
+  assert.doesNotMatch(errorTarget.inserted[0].content, /<img/i);
   assert.equal(element._htmlexRequestPending, false);
 });
 

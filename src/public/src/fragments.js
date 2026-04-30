@@ -33,14 +33,14 @@ export function processFragmentBuffer(buffer, triggeringElement = null, sequenti
   Logger.system.debug("[FRAG] Processing fragment buffer. Buffer length:", buffer.length);
   const fragmentRegex = /<fragment\b[^>]*>[\s\S]*?<\/fragment>/gi;
   let match;
-  
+
   while ((match = fragmentRegex.exec(buffer)) !== null) {
     if (triggeringElement) {
       triggeringElement._htmlexFragmentsProcessed = true;
     }
     const fragmentHtml = match[0];
     Logger.system.debug("[FRAG] Found fragment HTML:", fragmentHtml);
-    
+
     const template = document.createElement('template');
     template.innerHTML = fragmentHtml;
     const fragmentElement = template.content.firstElementChild;
@@ -48,24 +48,33 @@ export function processFragmentBuffer(buffer, triggeringElement = null, sequenti
       Logger.system.debug("[FRAG] No valid fragment element found in parsed HTML.");
       continue;
     }
-    
+
+    const statusCode = Number.parseInt(fragmentElement.getAttribute('status') || '', 10);
+    if (triggeringElement && Number.isFinite(statusCode) && statusCode >= 400) {
+      const currentStatus = Number.parseInt(triggeringElement._htmlexFragmentErrorStatus || '', 10);
+      triggeringElement._htmlexFragmentErrorStatus = Number.isFinite(currentStatus)
+        ? Math.max(currentStatus, statusCode)
+        : statusCode;
+      Logger.system.warn(`[FRAG] Fragment reported error status ${statusCode}.`);
+    }
+
     let fragmentTargetAttribute = fragmentElement.getAttribute('target');
     if (!fragmentTargetAttribute) {
       Logger.system.warn("[FRAG] Fragment found without target attribute. Defaulting to 'this(innerHTML)'.");
       fragmentTargetAttribute = "this(innerHTML)";
     }
     Logger.system.debug("[FRAG] Fragment target attribute:", fragmentTargetAttribute);
-    
+
     // Extract raw inner content so context-sensitive markup such as <tr> survives
     // until the target element can parse it in the right DOM context.
     const content = fragmentHtml
       .replace(/^<fragment\b[^>]*>/i, '')
       .replace(/<\/fragment>\s*$/i, '');
     Logger.system.debug("[FRAG] Extracted fragment content:", content);
-    
+
     const fragmentTargets = parseTargets(fragmentTargetAttribute);
     Logger.system.debug("[FRAG] Parsed fragment targets:", fragmentTargets);
-    
+
     for (let target of fragmentTargets) {
       if (target.selector.trim().toLowerCase() === "this") {
         Logger.system.debug("[FRAG] Fragment target selector is 'this'. Checking triggering element for an overriding target.");
@@ -82,8 +91,8 @@ export function processFragmentBuffer(buffer, triggeringElement = null, sequenti
           Logger.system.debug("[FRAG] No overriding target on triggering element. Using triggering element as target.");
         }
       }
-      
-      let targetElements = [];
+
+      let targetElements;
       if (target.selector.trim().toLowerCase() === "this") {
         targetElements = triggeringElement ? [triggeringElement] : [];
       } else {
@@ -93,23 +102,23 @@ export function processFragmentBuffer(buffer, triggeringElement = null, sequenti
           targetElements = triggeringElement ? [triggeringElement] : [];
         }
       }
-      
+
       if (!targetElements || targetElements.length === 0) {
         Logger.system.warn("[FRAG] No elements resolved for fragment target:", target.selector);
         continue;
       }
-      
+
       for (const targetElement of targetElements) {
         const afterUpdate = swapLifecycle?.createUpdateCallback();
         if (triggeringElement && triggeringElement._htmlexStreaming) {
           Logger.system.debug("[FRAG] Streaming active: updating fragment immediately.");
-          patchedUpdateTarget(target, content, targetElement);
+          patchedUpdateTarget(target, content, targetElement, { forceResolvedElement: true });
         } else if (triggeringElement && triggeringElement._htmlexSequentialMode) {
           Logger.system.debug("[FRAG] Queuing fragment update because triggering element is sequential.");
           if (sequentialEntry) {
             sequentialEntry.updates ||= [];
             sequentialEntry.updates.push(() => {
-              patchedUpdateTarget(target, content, targetElement, { queueSequential: false });
+              patchedUpdateTarget(target, content, targetElement, { forceResolvedElement: true, queueSequential: false });
               if (afterUpdate) afterUpdate();
             });
           } else {
@@ -118,12 +127,12 @@ export function processFragmentBuffer(buffer, triggeringElement = null, sequenti
               triggeringElement._htmlexSequentialUpdatesCursor = 0;
             }
             triggeringElement._htmlexSequentialUpdates.push(() => {
-              patchedUpdateTarget(target, content, targetElement, { queueSequential: false });
+              patchedUpdateTarget(target, content, targetElement, { forceResolvedElement: true, queueSequential: false });
               if (afterUpdate) afterUpdate();
             });
           }
         } else {
-          patchedUpdateTarget(target, content, targetElement);
+          patchedUpdateTarget(target, content, targetElement, { forceResolvedElement: true });
         }
         if (!(triggeringElement && triggeringElement._htmlexSequentialMode)) {
           if (afterUpdate) afterUpdate();
@@ -131,7 +140,7 @@ export function processFragmentBuffer(buffer, triggeringElement = null, sequenti
       }
     }
   }
-  
+
   const newBuffer = buffer.replace(fragmentRegex, '');
   Logger.system.debug("[FRAG] Buffer after removing processed fragments. New buffer length:", newBuffer.length);
   return newBuffer;

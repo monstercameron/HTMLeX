@@ -13,6 +13,42 @@ This update hardens that surface and packages it for repeatable testing:
 - Added unit coverage for rendering, components, cache behavior, route registration, rate limiting, and streaming routes.
 - Updated dependencies, test scripts, Playwright configuration, and package lock data.
 
+Review hardening pass:
+
+- Corrected `sequential` behavior so queued API calls start one at a time, not concurrently with only delayed DOM swaps.
+- Treated error-status fragments as failed swaps that can render content while skipping success-only side effects such as `publish`, `Emit`, URL updates, and caching.
+- Removed lifecycle hook clearing from the public browser entry point and kept hook reset behind the test-only helper path.
+- Routed direct Socket.IO chat messages through the same normalized history path used by HTTP chat submissions.
+- Aligned package metadata with the documented release version and browser runtime entry point.
+- Tightened README language around DOM diffing so it describes the current practical behavior instead of overclaiming advanced state preservation.
+
+Second review hardening pass:
+
+- Added keyed DOM reconciliation and live-state preservation for focused controls and media elements during compatible diffs.
+- Added configurable retry pacing with `retrydelay`, `retrybackoff`, and `retrymaxdelay` plus dashed aliases.
+- Added a formal custom-element adapter through `defineHTMLeXElement()` and `createHTMLeXElementClass()`.
+- Added TypeScript declarations for browser runtime APIs, app helpers, and render helpers.
+- Expanded package exports to expose the browser runtime, app helpers, and render helpers without using the side-effectful server entry as the package main.
+
+Release-quality pass:
+
+- Upgraded the server dependency line to Express 5 and made route-introspection tests tolerant of Express 4 and 5 internals.
+- Added an explicit package `files` allowlist so published tarballs contain the runtime source and docs without tests, CI config, or large demo media.
+- Removed unreferenced large demo recordings from the repository and ignored local media artifacts.
+- Added explicit ESM `import` conditions to all package export entries and blocked CommonJS `require` resolution from falling through to ESM files.
+- Added `typesVersions` mappings for the documented `htmlex/app` and `htmlex/render` subpaths.
+- Added missing `LICENSE` and `CONTRIBUTING.md` files, aligned README licensing with `package.json`, and included both docs in the package allowlist.
+- Added a dependency-free package metadata check to the quality gate so export targets, TypeScript subpath mappings, required docs, license alignment, keywords, author metadata, and stray package tarballs are validated automatically.
+- Tightened the package metadata check to keep production dependency auditing at moderate-or-higher severity.
+- Tightened the package metadata check to verify exported runtime and declaration targets, `typesVersions` targets, and package allowlist entries exist on disk.
+- Tightened the package metadata check to reject oversized tracked files before binary artifacts bloat the source repository again.
+- Added `npm run check:pack` to the quality gate so `npm pack --dry-run` size and contents are enforced in CI.
+- Added `publint` and Are The Types Wrong checks to the quality gate so package metadata and TypeScript entrypoint resolution are validated automatically.
+- Expanded the safety gate to scan root JavaScript configuration files in addition to scripts, source, and tests.
+- Replaced scratch todo seed data with useful demo items and made the package/project check reject placeholder-like todo seeds.
+- Removed stale Tailwind-era gradient metadata from the demo catalog and component wiring.
+- Added real demo detail pages for catalog Learn More links, plus unit and browser coverage that those links resolve.
+
 Follow-up quality pass:
 
 - Modernized remaining runtime loops and queues, tightened naming, and extracted clearer helpers around target resolution, timer handling, sockets, logging, and fragment responses.
@@ -39,6 +75,8 @@ Diagnostics serialization hardening:
 - Made browser diagnostics entries safe and bounded for circular payloads, `BigInt`, DOM elements, events, deep objects, and oversized arrays/objects.
 - Added `Logger.diagnostics.snapshot()` and `Logger.diagnostics.last(level)` helpers for easier DevTools and test inspection.
 - Hardened timer callbacks so stale timers skip work when their `timer` attribute has changed or been removed before the callback runs.
+- Added active timeout cleanup when a registered timer's `timer` attribute changes or is removed.
+- Stopped timer-only elements from attaching inert click handlers or logging themselves as publish actions.
 
 ESNext modernization pass:
 
@@ -94,3 +132,18 @@ Runtime branch unit coverage follow-up:
 - Expanded unit coverage from 96 to 102 tests across non-GET action serialization, multi-select and file controls, source fallback selectors, `Emit` and `publish` signal timers, browser logger payload serialization, polling cleanup, auto/prefetch/lazy registration, and mutation-observer cleanup.
 - Improved unit coverage for the highest-risk browser runtime modules, including `actions.js`, `logger.js`, and `registration.js`.
 - Re-ran the complete quality suite: syntax check, modern JavaScript gate, 102 unit tests, and 86 Playwright e2e tests.
+
+Test determinism follow-up:
+
+- Made unit test files run serially so shared environment variables and temporary persistence fixtures cannot contend across test processes.
+
+Repository hygiene follow-up:
+
+- Added a text hygiene check for LF endings, final newlines, trailing whitespace, and UTF-8 BOM rejection.
+- Added a lockfile reproducibility check using `npm ci --ignore-scripts --dry-run`.
+- Added a dependency tree check for missing or invalid non-optional dependency resolutions.
+- Added a dependency license policy check with explicit MIT overrides for packages whose lockfile metadata omits known license data.
+- Aligned the Node engine range, `.node-version`, `.npmrc`, and CI matrix with the Node versions required by the repository toolchain.
+- Expanded the CI matrix to cover Node 24 in addition to the minimum supported Node 20 and Node 22.
+- Aligned JavaScript scanners and ESLint ignores with generated coverage and media artifact directories.
+- Hardened the GitHub Actions quality workflow with read-only repository permissions and an explicit timeout.

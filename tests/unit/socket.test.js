@@ -83,6 +83,50 @@ test('setupChatNamespace sends history and broadcasts normalized messages', () =
   assert.equal(namespace.emitted.length, 1);
 });
 
+test('setupChatNamespace persists direct socket messages into later connection history', () => {
+  const server = new FakeSocketServer();
+  const history = [];
+  setupChatNamespace(
+    server,
+    () => history,
+    (message) => {
+      const chatMessage = {
+        id: history.length + 1,
+        username: message.username,
+        text: message.text
+      };
+      history.push(chatMessage);
+      return chatMessage;
+    }
+  );
+  const namespace = server.of('/chat');
+  const firstSocket = new FakeSocket();
+  const secondSocket = new FakeSocket();
+
+  namespace.handlers.get('connection')(firstSocket);
+  firstSocket.handlers.get('chatMessage')({ username: ' Ada ', text: ' Hello ' });
+  namespace.handlers.get('connection')(secondSocket);
+
+  assert.deepEqual(namespace.emitted, [{
+    eventName: 'chatMessage',
+    payload: {
+      id: 1,
+      username: 'Ada',
+      text: 'Hello'
+    }
+  }]);
+  assert.deepEqual(secondSocket.emitted, [{
+    eventName: 'chatHistory',
+    payload: {
+      history: [{
+        id: 1,
+        username: 'Ada',
+        text: 'Hello'
+      }]
+    }
+  }]);
+});
+
 test('setupSocketNamespaces registers all expected namespaces', () => {
   const server = new FakeSocketServer();
 

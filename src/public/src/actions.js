@@ -11,6 +11,30 @@ import { fetchWithTimeout } from './fetchHelper.js';
 import { handleURLState } from './urlState.js';
 import { processFragmentBuffer } from './fragments.js';
 import { emitSignal } from './signals.js';
+import { runLifecycleHook } from './hooks.js';
+
+export const DEFAULT_RESPONSE_BUFFER_LIMIT_CHARS = 1024 * 1024;
+
+class ResponseBufferLimitError extends Error {
+  constructor(limitChars) {
+    super(`HTMLeX response exceeded the ${limitChars} character safety limit.`);
+    this.name = 'ResponseBufferLimitError';
+    this.limitChars = limitChars;
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function getErrorMessage(error) {
+  return error instanceof Error ? error.message : String(error ?? 'Unknown error');
+}
 
 function scheduleTargetUpdate(element, target, content, sequentialEntry = null, resolvedElement = null, afterUpdate = null, requestId = null) {
   const updateFn = () => {
@@ -149,18 +173,40 @@ function resetResponseState(element) {
   element._htmlexFragmentsProcessed = false;
   element._htmlexFallbackUpdated = false;
   element._htmlexDefaultUpdated = false;
+  element._htmlexFragmentErrorStatus = null;
   element._htmlexStreamingActive = false;
   element._htmlexStreaming = false;
 }
 
 function runHook(element, hookName, event = null) {
-  if (!element.hasAttribute(hookName)) return;
-  try {
-    Logger.system.debug(`Executing ${hookName} hook.`);
-    new Function('event', element.getAttribute(hookName))(event);
-  } catch (error) {
-    Logger.system.error(`Error in ${hookName} hook:`, error);
+  runLifecycleHook(element, hookName, event);
+}
+
+function getResponseBufferLimit(element) {
+  const rawLimit = element?.getAttribute?.('maxresponsechars') ??
+    element?.getAttribute?.('max-response-chars') ??
+    element?.getAttribute?.('maxresponsebuffer') ??
+    element?.getAttribute?.('max-response-buffer');
+  const limit = Number.parseInt(rawLimit || '', 10);
+  return Number.isFinite(limit) && limit > 0 ? limit : DEFAULT_RESPONSE_BUFFER_LIMIT_CHARS;
+}
+
+function appendChunkWithLimit(chunks, currentLength, chunk, limitChars) {
+  const nextLength = currentLength + chunk.length;
+  if (nextLength > limitChars) {
+    throw new ResponseBufferLimitError(limitChars);
   }
+
+  chunks.push(chunk);
+  return nextLength;
+}
+
+function appendBufferWithLimit(buffer, chunk, limitChars) {
+  if (buffer.length + chunk.length > limitChars) {
+    throw new ResponseBufferLimitError(limitChars);
+  }
+
+  return buffer + chunk;
 }
 
 function createSwapLifecycle(element, afterSwapComplete = null, event = null) {
@@ -288,6 +334,76 @@ function runSuccessSideEffects(element, response = null) {
   emitPublishSignal(element);
 }
 
+function getFragmentErrorStatus(element) {
+  const status = Number.parseInt(element?._htmlexFragmentErrorStatus ?? '', 10);
+  return Number.isFinite(status) && status >= 400 ? status : null;
+}
+
+function getNumericAttribute(element, attributeNames, defaultValue, validator = value => Number.isFinite(value)) {
+  for (const attributeName of attributeNames) {
+    if (!element.hasAttribute(attributeName)) continue;
+    const value = Number.parseFloat(element.getAttribute(attributeName));
+    return validator(value) ? value : defaultValue;
+  }
+
+  return defaultValue;
+}
+
+function createAbortError(reason) {
+  if (reason instanceof Error) return reason;
+  const error = new Error('Retry delay aborted');
+  error.name = 'AbortError';
+  return error;
+}
+
+function waitForRetryDelay(delayMs, signal = null) {
+  if (delayMs <= 0) return;
+
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError(signal.reason));
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      removeAbortListener();
+      resolve();
+    }, delayMs);
+    const abortListener = () => {
+      clearTimeout(timeoutId);
+      removeAbortListener();
+      reject(createAbortError(signal.reason));
+    };
+    const removeAbortListener = () => {
+      signal?.removeEventListener?.('abort', abortListener);
+    };
+    signal?.addEventListener?.('abort', abortListener, { once: true });
+  });
+}
+
+function getRetryDelayForAttempt(element, failedAttemptIndex) {
+  const baseDelayMs = getNumericAttribute(
+    element,
+    ['retrydelay', 'retry-delay'],
+    0,
+    value => Number.isFinite(value) && value >= 0
+  );
+  const backoff = getNumericAttribute(
+    element,
+    ['retrybackoff', 'retry-backoff'],
+    1,
+    value => Number.isFinite(value) && value >= 1
+  );
+  const maxDelayMs = getNumericAttribute(
+    element,
+    ['retrymaxdelay', 'retry-max-delay'],
+    Number.POSITIVE_INFINITY,
+    value => Number.isFinite(value) && value >= 0
+  );
+  const scaledDelay = baseDelayMs * (backoff ** failedAttemptIndex);
+  return Math.min(scaledDelay, maxDelayMs);
+}
+
 /**
  * Processes a streaming API response.
  * Reads chunks as they arrive from an open connection, accumulating a buffer.
@@ -320,8 +436,18 @@ export async function processResponse(response, triggeringElement, sequentialEnt
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let fragmentBuffer = '';
-  let responseText = '';
+  const responseTextChunks = [];
+  let responseTextLength = 0;
+  let retainResponseText = true;
+  const shouldCacheResponse = triggeringElement.hasAttribute('cache');
+  const responseBufferLimit = getResponseBufferLimit(triggeringElement);
   const swapLifecycle = createSwapLifecycle(triggeringElement, afterSwapComplete, event);
+  const releaseResponseTextIfFragmentOnly = () => {
+    if (shouldCacheResponse || !triggeringElement._htmlexFragmentsProcessed) return;
+    responseTextChunks.length = 0;
+    responseTextLength = 0;
+    retainResponseText = false;
+  };
 
   try {
     while (true) {
@@ -335,15 +461,31 @@ export async function processResponse(response, triggeringElement, sequentialEnt
       triggeringElement._htmlexStreaming = chunkCount > 1;
 
       const chunk = decoder.decode(value, { stream: true });
-      responseText += chunk;
-      fragmentBuffer = processFragmentBuffer(fragmentBuffer + chunk, triggeringElement, sequentialEntry, swapLifecycle);
+      if (retainResponseText) {
+        responseTextLength = appendChunkWithLimit(responseTextChunks, responseTextLength, chunk, responseBufferLimit);
+      }
+      fragmentBuffer = processFragmentBuffer(
+        appendBufferWithLimit(fragmentBuffer, chunk, responseBufferLimit),
+        triggeringElement,
+        sequentialEntry,
+        swapLifecycle
+      );
+      releaseResponseTextIfFragmentOnly();
       Logger.system.debug(`Processed chunk #${chunkCount}. Remaining buffer length:`, fragmentBuffer.length);
     }
 
     const finalChunk = decoder.decode();
     if (finalChunk) {
-      responseText += finalChunk;
-      fragmentBuffer = processFragmentBuffer(fragmentBuffer + finalChunk, triggeringElement, sequentialEntry, swapLifecycle);
+      if (retainResponseText) {
+        responseTextLength = appendChunkWithLimit(responseTextChunks, responseTextLength, finalChunk, responseBufferLimit);
+      }
+      fragmentBuffer = processFragmentBuffer(
+        appendBufferWithLimit(fragmentBuffer, finalChunk, responseBufferLimit),
+        triggeringElement,
+        sequentialEntry,
+        swapLifecycle
+      );
+      releaseResponseTextIfFragmentOnly();
     }
 
     if (!triggeringElement._htmlexFragmentsProcessed && fragmentBuffer.trim() !== '' && triggeringElement.hasAttribute('target')) {
@@ -365,7 +507,14 @@ export async function processResponse(response, triggeringElement, sequentialEnt
 
     swapLifecycle?.finishScheduling();
     Logger.system.debug("Completed processing response stream. Final leftover buffer:", fragmentBuffer);
-    return responseText;
+    return retainResponseText ? responseTextChunks.join('') : '';
+  } catch (error) {
+    try {
+      await reader.cancel(error);
+    } catch (cancelError) {
+      Logger.system.debug('Unable to cancel response reader after processing error:', cancelError);
+    }
+    throw error;
   } finally {
     triggeringElement._htmlexStreamingActive = false;
     triggeringElement._htmlexStreaming = false;
@@ -395,18 +544,19 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
   };
   let afterHookRan = false;
   const runAfterHook = () => {
+    if (getFragmentErrorStatus(element) !== null) return;
     if (afterHookRan) return;
     afterHookRan = true;
     runHook(element, 'onafter', htmlexEvent);
   };
-  
+
   // Early guard: if polling is disabled, abort further API calls.
   if (element._pollDisabled) {
     Logger.system.info("Polling has been disabled for this element; aborting API call.");
     completeCurrentRequest();
     return;
   }
-  
+
   // Lifecycle hook: onbefore (before API call starts)
   runHook(element, 'onbefore', htmlexEvent);
 
@@ -495,8 +645,9 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
       Logger.system.debug("Fetch and processing succeeded on attempt", attempt + 1);
       break;
     } catch (error) {
-      Logger.system.warn(`Attempt ${attempt + 1} failed: ${error.message}`);
-      if (error.name === 'AbortError' || fetchOptions.signal?.aborted) {
+      const errorMessage = getErrorMessage(error);
+      Logger.system.warn(`Attempt ${attempt + 1} failed: ${errorMessage}`);
+      if (error?.name === 'AbortError' || fetchOptions.signal?.aborted) {
         completeCurrentRequest();
         return;
       }
@@ -510,7 +661,7 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
             scheduleTargetUpdate(
               element,
               target,
-              `<div class="error">Error: ${error.message}</div>`,
+              `<div class="error">Error: ${escapeHtml(errorMessage)}</div>`,
               htmlexSequentialEntry,
               resolvedElement,
               null,
@@ -519,6 +670,20 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
           }
         }
         return;
+      }
+
+      try {
+        const retryDelayMs = getRetryDelayForAttempt(element, attempt);
+        if (retryDelayMs > 0) {
+          Logger.system.info(`Waiting ${retryDelayMs}ms before retry attempt ${attempt + 2}.`);
+          await waitForRetryDelay(retryDelayMs, fetchOptions.signal);
+        }
+      } catch (delayError) {
+        if (delayError?.name === 'AbortError' || fetchOptions.signal?.aborted) {
+          completeCurrentRequest();
+          return;
+        }
+        throw delayError;
       }
     }
   }
@@ -539,6 +704,12 @@ export async function handleAction(element, method, endpoint, extraOptions = {})
       scheduleTargetUpdate(element, target, responseText, htmlexSequentialEntry, resolvedElement, afterSwap, requestId);
     }
     swapLifecycle?.finishScheduling();
+  }
+
+  const fragmentErrorStatus = getFragmentErrorStatus(element);
+  if (fragmentErrorStatus !== null) {
+    Logger.system.warn(`Response fragment indicated error status ${fragmentErrorStatus}; skipping success side effects.`);
+    return;
   }
 
   runSuccessSideEffects(element, response);

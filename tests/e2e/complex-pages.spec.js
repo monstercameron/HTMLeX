@@ -3,7 +3,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 async function mountHTMLeX(page, html) {
   await page.evaluate(async (fixtureHtml) => {
+    window.scrollTo(0, 0);
     document.body.innerHTML = `<main id="fixture">${fixtureHtml}</main>`;
+    window.scrollTo(0, 0);
     const { initHTMLeX } = await import('/src/htmlex.js');
     initHTMLeX();
   }, html);
@@ -56,10 +58,10 @@ test('commerce search page combines source, extras, fragments, lifecycle hooks, 
         pull="old"
         path="/workspace/products"
         history="push"
-        onbefore="window.__complexHooks.push('before')"
-        onbeforeSwap="window.__complexHooks.push('beforeSwap')"
-        onafterSwap="window.__complexHooks.push('afterSwap')"
-        onafter="window.__complexHooks.push('after')">
+        onbefore="complex:before"
+        onbeforeSwap="complex:before-swap"
+        onafterSwap="complex:after-swap"
+        onafter="complex:after">
         <input id="productQuery" name="q" value="laptop">
         <button type="submit">Search</button>
       </form>
@@ -69,7 +71,13 @@ test('commerce search page combines source, extras, fragments, lifecycle hooks, 
       <div id="auditPanel" subscribe="products-loaded" GET="/scenario/audit" target="#auditPanel(innerHTML)"></div>
     </section>
   `);
-  await page.evaluate(() => { window.__complexHooks = []; });
+  await page.evaluate(() => {
+    window.__complexHooks = [];
+    window.HTMLeX.hooks.register('complex:before', () => window.__complexHooks.push('before'));
+    window.HTMLeX.hooks.register('complex:before-swap', () => window.__complexHooks.push('beforeSwap'));
+    window.HTMLeX.hooks.register('complex:after-swap', () => window.__complexHooks.push('afterSwap'));
+    window.HTMLeX.hooks.register('complex:after', () => window.__complexHooks.push('after'));
+  });
 
   await page.locator('#productSearch button').click();
 
@@ -181,6 +189,27 @@ test('live dashboard combines auto, prefetch, cache, poll, custom triggers, debo
       });
     });
   }
+  await page.evaluate(() => {
+    window.__lazyObservers = [];
+    window.IntersectionObserver = class TestIntersectionObserver {
+      constructor(callback) {
+        this.callback = callback;
+        window.__lazyObservers.push(this);
+      }
+
+      observe(element) {
+        this.element = element;
+      }
+
+      disconnect() {
+        this.disconnected = true;
+      }
+
+      trigger() {
+        this.callback([{ isIntersecting: true, target: this.element }], this);
+      }
+    };
+  });
 
   await mountHTMLeX(page, `
     <section id="dashboardPage">
@@ -239,6 +268,6 @@ test('live dashboard combines auto, prefetch, cache, poll, custom triggers, debo
   await expect(page.locator('#socketFeed')).toContainText(/Live update at/);
 
   expect(counts.lazy).toBe(0);
-  await page.locator('#lazyWidget').scrollIntoViewIfNeeded();
+  await page.evaluate(() => window.__lazyObservers[0].trigger());
   await expect(page.locator('#lazyOut')).toHaveText('lazy:1');
 });

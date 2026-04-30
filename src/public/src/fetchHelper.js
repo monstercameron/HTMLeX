@@ -59,7 +59,7 @@ export async function fetchWithTimeout(url, options = {}, timeoutMs = 0) {
   } catch (error) {
     Logger.system.error("[FETCH] Error fetching URL:", url, error);
     if (didTimeout) {
-      throw new Error("Request timed out");
+      throw new Error("Request timed out", { cause: error });
     }
     throw error;
   } finally {

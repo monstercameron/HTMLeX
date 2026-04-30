@@ -20,6 +20,20 @@ function normalizeText(value, maxLength) {
   return String(value ?? '').trim().slice(0, maxLength);
 }
 
+export function recordChatMessage(messageInput = {}) {
+  const message = normalizeText(messageInput.message ?? messageInput.text, MAX_MESSAGE_LENGTH);
+  if (!message) return null;
+
+  const chatMessage = {
+    id: Date.now(),
+    username: normalizeText(messageInput.username, MAX_USERNAME_LENGTH) || 'Anonymous',
+    text: message
+  };
+  chatMessages.push(chatMessage);
+  chatMessages = chatMessages.slice(-MAX_CHAT_MESSAGES);
+  return chatMessage;
+}
+
 /**
  * Handles sending a chat message.
  * Validates the input, stores the message, and broadcasts it using Socket.IO.
@@ -31,21 +45,14 @@ function normalizeText(value, maxLength) {
  */
 export async function sendChatMessage(req, res, chatNamespace) {
   try {
-    const message = normalizeText(req.body.message, MAX_MESSAGE_LENGTH);
-    if (!message) {
+    const chatMessage = recordChatMessage(req.body);
+    if (!chatMessage) {
       logRequestWarning(req, 'Rejected chat message without text.', { statusCode: 400 });
       if (!res.headersSent) {
         res.status(400).send('Missing chat message');
       }
       return;
     }
-    const chatMessage = {
-      id: Date.now(),
-      username: normalizeText(req.body.username, MAX_USERNAME_LENGTH) || 'Anonymous',
-      text: message
-    };
-    chatMessages.push(chatMessage);
-    chatMessages = chatMessages.slice(-MAX_CHAT_MESSAGES);
     chatNamespace.emit('chatMessage', chatMessage);
     res.status(204).end();
   } catch (error) {

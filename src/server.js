@@ -1,7 +1,9 @@
-import { startServer } from './app.js';
+import { installProcessHandlers, startServer } from './app.js';
 import { serverLogger } from './serverLogger.js';
 
 const port = process.env.PORT || 5500;
+
+installProcessHandlers();
 
 try {
   await startServer(port);

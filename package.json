@@ -1,39 +1,99 @@
 {
   "name": "htmlex",
-  "version": "1.0.0",
+  "version": "1.2.3",
   "type": "module",
   "description": "Server-driven UI playground and HTMLeX demo app",
-  "main": "src/server.js",
+  "keywords": [
+    "htmlex",
+    "hateoas",
+    "html",
+    "server-driven-ui",
+    "web-components"
+  ],
+  "main": "src/public/src/htmlex.js",
+  "types": "src/public/src/htmlex.d.ts",
+  "files": [
+    "src/",
+    "README.md",
+    "CHANGELOG.md",
+    "COVERAGE.md",
+    "CONTRIBUTING.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/public/src/htmlex.d.ts",
+      "require": null,
+      "import": "./src/public/src/htmlex.js"
+    },
+    "./app": {
+      "types": "./src/app.d.ts",
+      "require": null,
+      "import": "./src/app.js"
+    },
+    "./render": {
+      "types": "./src/components/HTMLeX.d.ts",
+      "require": null,
+      "import": "./src/components/HTMLeX.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "app": [
+        "src/app.d.ts"
+      ],
+      "render": [
+        "src/components/HTMLeX.d.ts"
+      ]
+    }
+  },
   "engines": {
-    "node": ">=20.11"
+    "node": "^20.19.0 || ^22.13.0 || >=24"
   },
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon --ignore src/persistence/* src/server.js",
+    "lint": "eslint .",
+    "check:text": "node scripts/check-text.mjs",
+    "check:lockfile": "npm ci --ignore-scripts --dry-run",
+    "check:deps": "node scripts/check-deps.mjs",
+    "check:licenses": "node scripts/check-licenses.mjs",
     "check:syntax": "node scripts/check-syntax.mjs",
     "check:modern": "node scripts/check-modern.mjs",
-    "quality": "npm run check:syntax && npm run check:modern && npm test",
+    "check:safety": "node scripts/check-safety.mjs",
+    "check:package": "node scripts/check-package.mjs",
+    "check:pack": "node scripts/check-pack.mjs",
+    "check:publint": "publint",
+    "check:types": "attw --pack . --profile esm-only",
+    "check:audit": "npm audit --omit=dev --audit-level=moderate",
+    "quality": "npm run check:text && npm run check:lockfile && npm run check:deps && npm run check:licenses && npm run check:syntax && npm run check:modern && npm run check:safety && npm run check:package && npm run check:pack && npm run check:publint && npm run check:types && npm run lint && npm run check:audit && npm run test:unit:coverage && npm run test:e2e",
     "test": "npm run test:unit && npm run test:e2e",
-    "test:unit": "node --test tests/unit/*.test.js",
+    "test:unit": "node --test --test-concurrency=1 tests/unit/*.test.js",
+    "test:unit:coverage": "c8 --check-coverage --per-file --lines 76 --branches 59 --functions 80 --include src/**/*.js --exclude src/server.js --reporter=text node --test --test-concurrency=1 tests/unit/*.test.js",
     "test:e2e": "playwright test"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/monstercameron/HTMLeX.git"
   },
-  "author": "",
+  "author": "HTMLeX contributors",
   "license": "ISC",
   "bugs": {
     "url": "https://github.com/monstercameron/HTMLeX/issues"
   },
   "homepage": "https://github.com/monstercameron/HTMLeX#readme",
   "dependencies": {
-    "express": "^4.21.2",
+    "express": "^5.2.1",
     "multer": "^2.0.2",
     "socket.io": "^4.8.1"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.2",
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.52.0",
-    "nodemon": "^3.1.10"
+    "c8": "^11.0.0",
+    "eslint": "^10.2.1",
+    "nodemon": "^3.1.10",
+    "publint": "^0.3.18"
   }
 }

@@ -18,7 +18,8 @@ export default defineConfig({
     ignoreHTTPSErrors: true,
     env: {
       PORT: '5600',
-      HTMLEX_TEST_FAST: '1'
+      HTMLEX_TEST_FAST: '1',
+      HTMLEX_TODO_DATA_FILE: 'tmp/playwright-todos.json'
     },
     reuseExistingServer: false,
     timeout: 20000

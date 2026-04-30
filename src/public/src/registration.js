@@ -71,7 +71,7 @@ function notifyDOMUpdated(content, root) {
  */
 export function patchedUpdateTarget(target, content, resolvedElement, options = {}) {
   Logger.system.debug("[HTMLeX] patchedUpdateTarget called with target:", target, "content length:", content.length);
-  const { queueSequential = true } = options;
+  const { forceResolvedElement = false, queueSequential = true } = options;
   const selector = target.selector.trim().toLowerCase();
 
   if (queueSequential && resolvedElement._htmlexSequentialMode) {
@@ -99,17 +99,15 @@ export function patchedUpdateTarget(target, content, resolvedElement, options = 
     return resolvedElement;
   }
   Logger.system.debug("[HTMLeX] patchedUpdateTarget: Delegating update to originalUpdateTarget for target", target.selector);
-  return originalUpdateTarget(target, content, resolvedElement);
+  return originalUpdateTarget(target, content, resolvedElement, { forceResolvedElement });
 }
 
 /**
  * processSequentialQueue
  *
  * Processes the FIFO queue of API calls for a sequential element.
- * After each API call completes, it flushes one queued DOM update and then waits for
- * the full sequential delay before processing the next update.
- * This ensures that if multiple API calls (and corresponding updates) are queued,
- * each update is inserted separately with the configured delay between them.
+ * Each API call is started only after the previous queued call has completed,
+ * then its queued DOM updates are flushed before the configured delay is applied.
  *
  * @param {Element} element - The element with the sequential queue.
  */
@@ -141,57 +139,81 @@ async function processSequentialQueue(element) {
     if (update.afterUpdate) update.afterUpdate();
   };
 
-  while (
-    getQueuedCount(element, '_htmlexSequentialQueue', '_htmlexSequentialQueueCursor') > 0 ||
-    getQueuedCount(element, '_htmlexSequentialUpdates', '_htmlexSequentialUpdatesCursor') > 0
-  ) {
-    Logger.system.debug(
-      "[HTMLeX] processSequentialQueue: API queue length =",
-      getQueuedCount(element, '_htmlexSequentialQueue', '_htmlexSequentialQueueCursor'),
-      "Update queue length =",
-      getQueuedCount(element, '_htmlexSequentialUpdates', '_htmlexSequentialUpdatesCursor')
-    );
+  try {
+    while (
+      getQueuedCount(element, '_htmlexSequentialQueue', '_htmlexSequentialQueueCursor') > 0 ||
+      getQueuedCount(element, '_htmlexSequentialUpdates', '_htmlexSequentialUpdatesCursor') > 0
+    ) {
+      Logger.system.debug(
+        "[HTMLeX] processSequentialQueue: API queue length =",
+        getQueuedCount(element, '_htmlexSequentialQueue', '_htmlexSequentialQueueCursor'),
+        "Update queue length =",
+        getQueuedCount(element, '_htmlexSequentialUpdates', '_htmlexSequentialUpdatesCursor')
+      );
 
-    // If there is an API call queued, process it.
-    if (getQueuedCount(element, '_htmlexSequentialQueue', '_htmlexSequentialQueueCursor') > 0) {
-      const sequentialEntry = dequeueQueuedItem(element, '_htmlexSequentialQueue', '_htmlexSequentialQueueCursor');
-      if (!sequentialEntry) continue;
+      // If there is an API call queued, process it.
+      if (getQueuedCount(element, '_htmlexSequentialQueue', '_htmlexSequentialQueueCursor') > 0) {
+        const sequentialEntry = dequeueQueuedItem(element, '_htmlexSequentialQueue', '_htmlexSequentialQueueCursor');
+        if (!sequentialEntry) continue;
 
-      const { promise, method, endpoint, updates = [], registrationToken, abortController } = sequentialEntry;
-      Logger.system.debug("[HTMLeX] processSequentialQueue: Awaiting API call promise for endpoint:", endpoint);
-      await promise;
-      Logger.system.debug("[HTMLeX] processSequentialQueue: API call promise resolved for endpoint:", endpoint);
-      if (
-        abortController?.signal.aborted ||
-        !document.body.contains(element) ||
-        (registrationToken && element._htmlexRegistrationToken !== registrationToken)
-      ) {
-        Logger.system.debug("[HTMLeX] processSequentialQueue: Skipping stale sequential updates for endpoint:", endpoint);
+        const { method, endpoint, updates = [], registrationToken, abortController, htmlexEvent } = sequentialEntry;
+        if (
+          abortController?.signal.aborted ||
+          !document.body.contains(element) ||
+          (registrationToken && element._htmlexRegistrationToken !== registrationToken)
+        ) {
+          Logger.system.debug("[HTMLeX] processSequentialQueue: Skipping stale sequential call for endpoint:", endpoint);
+          updates.length = 0;
+          continue;
+        }
+        Logger.system.debug("[HTMLeX] processSequentialQueue: Starting API call for endpoint:", endpoint);
+        try {
+          element._htmlexSequentialAbortControllers ||= new Set();
+          element._htmlexSequentialAbortControllers.add(abortController);
+          await handleAction(
+            element,
+            method,
+            endpoint,
+            { signal: abortController.signal, htmlexSequentialEntry: sequentialEntry, htmlexEvent }
+          );
+          Logger.system.debug("[HTMLeX] processSequentialQueue: API call resolved for endpoint:", endpoint);
+        } finally {
+          element._htmlexSequentialAbortControllers?.delete(abortController);
+        }
+        if (
+          abortController?.signal.aborted ||
+          !document.body.contains(element) ||
+          (registrationToken && element._htmlexRegistrationToken !== registrationToken)
+        ) {
+          Logger.system.debug("[HTMLeX] processSequentialQueue: Skipping stale sequential updates for endpoint:", endpoint);
+          updates.length = 0;
+          continue;
+        }
+        for (const update of updates) {
+          applyQueuedUpdate(update);
+        }
         updates.length = 0;
-        continue;
       }
-      for (const update of updates) {
-        applyQueuedUpdate(update);
-      }
-      updates.length = 0;
-    }
 
-    // If there is at least one queued update, flush one update.
-    if (getQueuedCount(element, '_htmlexSequentialUpdates', '_htmlexSequentialUpdatesCursor') > 0) {
-      const update = dequeueQueuedItem(element, '_htmlexSequentialUpdates', '_htmlexSequentialUpdatesCursor');
-      if (update) {
-        applyQueuedUpdate(update);
+      // If there is at least one queued update, flush one update.
+      if (getQueuedCount(element, '_htmlexSequentialUpdates', '_htmlexSequentialUpdatesCursor') > 0) {
+        const update = dequeueQueuedItem(element, '_htmlexSequentialUpdates', '_htmlexSequentialUpdatesCursor');
+        if (update) {
+          applyQueuedUpdate(update);
+        }
       }
+      Logger.system.debug("[HTMLeX] processSequentialQueue: Waiting for sequential delay of", delay, "ms before next flush.");
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
-    Logger.system.debug("[HTMLeX] processSequentialQueue: Waiting for sequential delay of", delay, "ms before next flush.");
-    await new Promise(resolve => setTimeout(resolve, delay));
+  } catch (error) {
+    Logger.system.error("[HTMLeX] Sequential queue processing failed; resetting queue state.", error);
+  } finally {
+    resetElementQueue(element, '_htmlexSequentialQueue', '_htmlexSequentialQueueCursor');
+    resetElementQueue(element, '_htmlexSequentialUpdates', '_htmlexSequentialUpdatesCursor');
+    element._htmlexSequentialProcessing = false;
+    element._htmlexSequentialMode = false;
+    Logger.system.debug("[HTMLeX] processSequentialQueue: Sequential processing complete.");
   }
-
-  resetElementQueue(element, '_htmlexSequentialQueue', '_htmlexSequentialQueueCursor');
-  resetElementQueue(element, '_htmlexSequentialUpdates', '_htmlexSequentialUpdatesCursor');
-  element._htmlexSequentialProcessing = false;
-  element._htmlexSequentialMode = false;
-  Logger.system.debug("[HTMLeX] processSequentialQueue: Sequential processing complete.");
 }
 
 /**
@@ -265,6 +287,10 @@ function cleanupElementRegistration(element) {
     delete element._htmlexRegistrationToken;
   }
   element.removeAttribute('data-htmlex-registered');
+}
+
+export function unregisterElement(element) {
+  cleanupElementRegistration(element);
 }
 
 /**
@@ -397,8 +423,13 @@ function registerTimer(element, registrationToken, cleanupFns) {
   Logger.system.info(`[HTMLeX INFO] Timer set for element with delay ${timerDelayMs}ms.`);
   const timerAttributeValue = element.getAttribute('timer');
   element.setAttribute('data-timer-set', 'true');
+  let timerActive = true;
+  let timerAttributeObserver = null;
 
   const timerId = setTimeout(() => {
+    timerActive = false;
+    timerAttributeObserver?.disconnect();
+    timerAttributeObserver = null;
     if (element._htmlexRegistrationToken !== registrationToken || !document.body.contains(element)) return;
     if (element.getAttribute('timer') !== timerAttributeValue) {
       Logger.system.debug("[TIMER] Skipping stale timer because its timer attribute changed or was removed:", element);
@@ -408,9 +439,27 @@ function registerTimer(element, registrationToken, cleanupFns) {
     runTimerAction(element);
   }, timerDelayMs);
 
-  cleanupFns.push(() => {
-    clearTimeout(timerId);
+  const clearRegisteredTimer = () => {
+    if (timerActive) {
+      timerActive = false;
+      clearTimeout(timerId);
+    }
+    timerAttributeObserver?.disconnect();
+    timerAttributeObserver = null;
     element.removeAttribute('data-timer-set');
+  };
+
+  if (typeof MutationObserver === 'function') {
+    timerAttributeObserver = new MutationObserver(() => {
+      if (element.getAttribute('timer') === timerAttributeValue) return;
+      Logger.system.debug("[TIMER] Clearing timer because its timer attribute changed or was removed:", element);
+      clearRegisteredTimer();
+    });
+    timerAttributeObserver.observe(element, { attributes: true, attributeFilter: ['timer'] });
+  }
+
+  cleanupFns.push(() => {
+    clearRegisteredTimer();
   });
 }
 
@@ -437,7 +486,7 @@ export function registerElement(element) {
       `Consider explicitly setting type="button" (or type="submit" if intended).`
     );
   }
-  
+
   const registrationSignature = getRegistrationSignature(element);
   const existingRecord = registrationRecords.get(element);
   if (registeredElements.has(element) && existingRecord?.signature === registrationSignature) {
@@ -487,16 +536,17 @@ export function registerElement(element) {
     element._htmlexSequentialMode = false;
     element._htmlexSequentialProcessing = false;
   });
-  
+
   const methodAttribute = getActionMethod(element);
-  
+  const hasActionHandler = Boolean(methodAttribute || element.hasAttribute('publish'));
+
   const rawTrigger = element.getAttribute('trigger');
-  const triggerEvent = rawTrigger 
-    ? normalizeEvent(rawTrigger) 
+  const triggerEvent = rawTrigger
+    ? normalizeEvent(rawTrigger)
     : getDefaultTriggerEvent(element);
   Logger.system.debug(`[HTMLeX] triggerEvent for element: ${triggerEvent}`);
   const actionSelector = '[get], [post], [put], [delete], [patch], [publish]';
-  
+
   const wrappedHandler = async (event) => {
     Logger.system.debug(`[HTMLeX] Event triggered: type="${event.type}", currentTarget=`, event.currentTarget, "target=", event.target);
 
@@ -520,42 +570,31 @@ export function registerElement(element) {
       Logger.system.debug("[HTMLeX] Ignoring event from nested HTMLeX action. triggerEvent:", triggerEvent);
       return;
     }
-    
+
     Logger.system.debug(`[HTMLeX] Event accepted: triggerEvent: ${triggerEvent} on element:`, element);
     const htmlexEvent = snapshotEvent(event);
-    
+
     if (methodAttribute) {
       if (triggerEvent === 'submit') event.preventDefault();
       if (isSequentialEnabled(element)) {
         const sequentialDelay = Number.parseInt(element.getAttribute('sequential'), 10) || 0;
         element._htmlexSequentialMode = true;
+        element._htmlexSequentialDelay = sequentialDelay;
         if (!element._htmlexSequentialQueue) {
           element._htmlexSequentialQueue = [];
           element._htmlexSequentialQueueCursor = 0;
           element._htmlexSequentialProcessing = false;
-          element._htmlexSequentialDelay = sequentialDelay;
           Logger.system.debug("[HTMLeX] Initialized sequential queue with delay:", sequentialDelay, "ms");
         }
         const abortController = new AbortController();
-        element._htmlexSequentialAbortControllers ||= new Set();
-        element._htmlexSequentialAbortControllers.add(abortController);
         const sequentialEntry = {
           method: methodAttribute.toUpperCase(),
           endpoint: element.getAttribute(methodAttribute),
           updates: [],
           registrationToken,
-          abortController
+          abortController,
+          htmlexEvent
         };
-        const promise = handleAction(
-          element,
-          sequentialEntry.method,
-          sequentialEntry.endpoint,
-          { signal: abortController.signal, htmlexSequentialEntry: sequentialEntry, htmlexEvent }
-        ).finally(() => {
-          element._htmlexSequentialAbortControllers?.delete(abortController);
-        });
-        sequentialEntry.promise = promise;
-        Logger.system.debug("[HTMLeX] Sequential API call fired for endpoint:", element.getAttribute(methodAttribute));
         element._htmlexSequentialQueue.push(sequentialEntry);
         Logger.system.debug("[HTMLeX] Enqueued sequential API call. Queue length now:", element._htmlexSequentialQueue.length);
         if (!element._htmlexSequentialProcessing) {
@@ -596,43 +635,45 @@ export function registerElement(element) {
     }
   };
 
-  // Apply debounce/throttle if defined.
   let handler = wrappedHandler;
-  const rateLimitCleanups = [];
-  const debounceMs = Number.parseInt(element.getAttribute('debounce') || '0', 10);
-  if (debounceMs > 0) {
-    const debouncedHandler = debounce(handler, debounceMs);
-    rateLimitCleanups.push(() => debouncedHandler.cancel?.());
-    handler = debouncedHandler;
-    Logger.system.debug(`[HTMLeX] Applied debounce of ${debounceMs}ms`);
-  }
-  const throttleMs = Number.parseInt(element.getAttribute('throttle') || '0', 10);
-  if (throttleMs > 0) {
-    const throttledHandler = throttle(handler, throttleMs);
-    rateLimitCleanups.push(() => throttledHandler.cancel?.());
-    handler = throttledHandler;
-    Logger.system.debug(`[HTMLeX] Applied throttle of ${throttleMs}ms`);
-  }
-  if (rateLimitCleanups.length) {
-    cleanupFns.push(() => {
-      for (const cleanup of rateLimitCleanups) {
-        cleanup();
-      }
-    });
-  }
-  
-  const eventListener = (event) => {
-    if (triggerEvent === 'submit' && typeof event.preventDefault === 'function') {
-      event.preventDefault();
+  if (hasActionHandler) {
+    // Apply debounce/throttle if defined.
+    const rateLimitCleanups = [];
+    const debounceMs = Number.parseInt(element.getAttribute('debounce') || '0', 10);
+    if (debounceMs > 0) {
+      const debouncedHandler = debounce(handler, debounceMs);
+      rateLimitCleanups.push(() => debouncedHandler.cancel?.());
+      handler = debouncedHandler;
+      Logger.system.debug(`[HTMLeX] Applied debounce of ${debounceMs}ms`);
     }
-    return handler(event);
-  };
-  element.addEventListener(triggerEvent, eventListener);
-  cleanupFns.push(() => element.removeEventListener(triggerEvent, eventListener));
-  Logger.system.info(`[HTMLeX INFO] Registered ${methodAttribute ? methodAttribute.toUpperCase() : 'publish'} action on element with event "${triggerEvent}" for endpoint "${methodAttribute ? element.getAttribute(methodAttribute) : ''}".`);
+    const throttleMs = Number.parseInt(element.getAttribute('throttle') || '0', 10);
+    if (throttleMs > 0) {
+      const throttledHandler = throttle(handler, throttleMs);
+      rateLimitCleanups.push(() => throttledHandler.cancel?.());
+      handler = throttledHandler;
+      Logger.system.debug(`[HTMLeX] Applied throttle of ${throttleMs}ms`);
+    }
+    if (rateLimitCleanups.length) {
+      cleanupFns.push(() => {
+        for (const cleanup of rateLimitCleanups) {
+          cleanup();
+        }
+      });
+    }
+
+    const eventListener = (event) => {
+      if (triggerEvent === 'submit' && typeof event.preventDefault === 'function') {
+        event.preventDefault();
+      }
+      return handler(event);
+    };
+    element.addEventListener(triggerEvent, eventListener);
+    cleanupFns.push(() => element.removeEventListener(triggerEvent, eventListener));
+    Logger.system.info(`[HTMLeX INFO] Registered ${methodAttribute ? methodAttribute.toUpperCase() : 'publish'} action on element with event "${triggerEvent}" for endpoint "${methodAttribute ? element.getAttribute(methodAttribute) : ''}".`);
+  }
 
   // Revised polling code to respect the "repeat" attribute.
-  if (element.hasAttribute('poll')) {
+  if (hasActionHandler && element.hasAttribute('poll')) {
     const rawPollInterval = Number.parseInt(element.getAttribute('poll'), 10);
     const pollInterval = Number.isFinite(rawPollInterval) && rawPollInterval > 0
       ? Math.max(rawPollInterval, 100)
@@ -679,7 +720,7 @@ export function registerElement(element) {
   }
 
   // Auto-firing based on the "auto" attribute.
-  if (element.hasAttribute('auto')) {
+  if (hasActionHandler && element.hasAttribute('auto')) {
     const autoValue = String(element.getAttribute('auto') ?? '').trim();
     const autoMode = autoValue.toLowerCase();
     if (autoMode === 'false') {
@@ -846,7 +887,7 @@ export function initHTMLeX() {
       registerElement(el);
     }
   };
-  
+
   // Register existing HTMLeX elements.
   const elements = document.querySelectorAll(selectorString);
   for (const el of elements) {
@@ -858,7 +899,7 @@ export function initHTMLeX() {
     registerTree(event.detail?.root || document.body);
   };
   document.addEventListener('htmlex:dom-updated', window.__htmlexDomUpdatedHandler);
-  
+
   // Observe for new elements added to the DOM.
   const observer = new MutationObserver(mutationsList => {
     for (const mutation of mutationsList) {
@@ -870,10 +911,10 @@ export function initHTMLeX() {
         ) {
           Logger.system.debug("[HTMLeX] HTMLeX attributes removed. Cleaning up registration:", mutation.target);
           cleanupElementRegistration(mutation.target);
-          return;
+          continue;
         }
         registerTree(mutation.target);
-        return;
+        continue;
       }
       if (mutation.type === 'childList' && mutation.addedNodes.length) {
         for (const node of mutation.addedNodes) {
@@ -882,7 +923,7 @@ export function initHTMLeX() {
       }
     }
   });
-  
+
   observer.observe(document.body, {
     childList: true,
     subtree: true,
