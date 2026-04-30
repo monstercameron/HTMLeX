@@ -16,6 +16,7 @@ const REQUIRED_FILES = [
 ];
 const REQUIRED_REPOSITORY_FILES = [
   '.github/workflows/quality.yml',
+  '.github/workflows/release.yml',
   '.node-version',
   '.npmrc',
   ...REQUIRED_FILES
@@ -242,6 +243,16 @@ function checkPackageMetadata(failures, packageJson) {
   );
   requireField(
     failures,
+    packageJson.scripts?.['check:release-version'] === 'node scripts/check-release-version.mjs',
+    'Release version check must be exposed as npm run check:release-version.'
+  );
+  requireField(
+    failures,
+    packageJson.scripts?.quality?.includes('npm run check:release-version'),
+    'Quality gate must include the release version check.'
+  );
+  requireField(
+    failures,
     packageJson.scripts?.['check:deps'] === 'node scripts/check-deps.mjs',
     'Dependency tree check must be exposed as npm run check:deps.'
   );
@@ -367,12 +378,43 @@ function checkWorkflowText(failures, documents) {
       `Quality workflow must test Node ${nodeVersion}.`
     );
   }
+  requireField(
+    failures,
+    documents.qualityWorkflow.includes('actions/upload-artifact@v4'),
+    'Quality workflow must upload the built package artifact.'
+  );
+  requireField(
+    failures,
+    documents.releaseWorkflow.includes('permissions:\n  contents: write'),
+    'Release workflow must be allowed to create GitHub releases.'
+  );
+  requireField(
+    failures,
+    documents.releaseWorkflow.includes("tags:\n      - 'v*.*.*'"),
+    'Release workflow must run for version tags.'
+  );
+  requireField(
+    failures,
+    documents.releaseWorkflow.includes('node scripts/check-release-version.mjs "$RELEASE_TAG"'),
+    'Release workflow must validate the tag against package metadata.'
+  );
+  requireField(
+    failures,
+    documents.releaseWorkflow.includes('npm run quality'),
+    'Release workflow must run the full quality gate before publishing a release.'
+  );
+  requireField(
+    failures,
+    documents.releaseWorkflow.includes('gh release create'),
+    'Release workflow must create GitHub releases.'
+  );
 }
 
 const failures = [];
 const packageJson = await readJson('package.json');
 const documents = {
   qualityWorkflow: await readFile(path.join(ROOT, '.github/workflows/quality.yml'), 'utf8'),
+  releaseWorkflow: await readFile(path.join(ROOT, '.github/workflows/release.yml'), 'utf8'),
   nodeVersion: await readFile(path.join(ROOT, '.node-version'), 'utf8'),
   npmrc: await readFile(path.join(ROOT, '.npmrc'), 'utf8'),
   license: await readFile(path.join(ROOT, 'LICENSE'), 'utf8'),

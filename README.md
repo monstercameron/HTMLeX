@@ -16,6 +16,7 @@ HTMLeX is a server-driven UI playground and browser runtime for declarative, HAT
 - [Lifecycle Hooks](#lifecycle-hooks)
 - [Demo App](#demo-app)
 - [Quality Gate](#quality-gate)
+- [Versioned Releases](#versioned-releases)
 - [Security Notes](#security-notes)
 - [Project Layout](#project-layout)
 - [Contributing](#contributing)
@@ -31,6 +32,8 @@ HTMLeX is a server-driven UI playground and browser runtime for declarative, HAT
 - Demo server runs on Express 5, HTTPS, and Socket.IO.
 - Local HTTPS certificates are generated into `tmp/cert` when needed.
 - CI runs the full quality gate on Node `20.19.0`, `22`, and `24`.
+- CI uploads a packed npm artifact after the build and test gate passes on Node `20.19.0`.
+- GitHub Releases are created from version tags only after the full quality gate passes.
 - Published package contents are limited to `src/` and project documentation.
 
 ## Requirements
@@ -281,6 +284,7 @@ That command runs:
 - Production dependency audit at moderate-or-higher severity.
 - Unit tests with per-file coverage thresholds.
 - Playwright browser tests against the HTTPS demo app.
+- Release-version checks that keep `package.json`, `package-lock.json`, README version text, and version tags aligned.
 
 Useful focused commands:
 
@@ -293,6 +297,34 @@ npm run check:types
 ```
 
 Current implementation coverage is tracked in [COVERAGE.md](COVERAGE.md), and release notes are tracked in [CHANGELOG.md](CHANGELOG.md).
+
+## Versioned Releases
+
+Releases are driven by Git tags that match the package version. The release workflow refuses to publish unless the tag is exactly `v${package.json.version}` and the full quality gate passes, including unit coverage and Playwright e2e tests.
+
+Before tagging a release, update the version in `package.json`, `package-lock.json`, and the README version line, then run:
+
+```bash
+npm run quality
+npm run check:release-version -- v1.2.3
+```
+
+Create and push the matching tag:
+
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+The `Release` workflow then:
+
+- Checks out the tag and validates it against package metadata.
+- Runs `npm run quality`.
+- Builds the release tarball with `npm pack`.
+- Creates or updates the GitHub Release titled `HTMLeX <version>`.
+- Uploads the `.tgz` package artifact to the release.
+
+The same workflow can be re-run manually from GitHub Actions with an existing version tag.
 
 ## Security Notes
 
